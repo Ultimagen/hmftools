@@ -39,6 +39,8 @@ public class FilterConstants
     public final double ModifiedAf;
     public final double ModifiedAfHotspot;
 
+    public final String Exclude_filters;
+
     // filters which only apply when reference is present:
     // minNormalCoverage, minRelativeCoverage, maxNormalSupport, shortSRNormalSupport, discordantPairSupport
 
@@ -99,6 +101,7 @@ public class FilterConstants
     private static final String QUAL_PER_AD = "qual_per_ad";
     private static final String MODIFIED_AF = "modified_af";
     private static final String MODIFIED_AF_HOTSPOT = "modified_af_hotspot";
+    private static final String EXCLUDE_FILTERS = "exclude_filters";
 
     public static FilterConstants from(final ConfigBuilder configBuilder)
     {
@@ -121,6 +124,7 @@ public class FilterConstants
 
         double modifiedAf = getConfigDecimal(configBuilder, MODIFIED_AF, targetedMode ? TARGETED_DEFAULT_MODIFIED_AF : 0);
         double modifiedAfHotspot = getConfigDecimal(configBuilder, MODIFIED_AF_HOTSPOT, targetedMode ? TARGETED_DEFAULT_MODIFIED_AF_HOTSPOT : 0);
+        String exclude_filters = configBuilder.getValue(EXCLUDE_FILTERS,"");
 
         return new FilterConstants(
                 minTumorQual,
@@ -141,7 +145,8 @@ public class FilterConstants
                 filterSgls,
                 qualPerAD,
                 modifiedAf,
-                modifiedAfHotspot);
+                modifiedAfHotspot,
+                exclude_filters);
     }
 
     public FilterConstants(
@@ -149,7 +154,7 @@ public class FilterConstants
             double minNormalCoverage, double minTumorAfBreakend, double minTumorAfBreakpoint, double maxShortStrandBias,
             int minQualBreakend, int minQualBreakpoint, int minQualRescueLine, int maxHomLengthShortInv,
             int minLength, int ponDistance, final List<ChrBaseRegion> polyGcRegions, final ChrBaseRegion lowQualRegion, boolean filterSGLs,
-            final int qualPerAD, final double modifiedAf, final double modifiedAfHotspot)
+            final int qualPerAD, final double modifiedAf, final double modifiedAfHotspot, final String exclude_filters)
     {
         MinTumorQual = minTumorQual;
         HardMaxNormalAbsoluteSupport = hardMaxNormalAbsoluteSupport;
@@ -171,6 +176,7 @@ public class FilterConstants
         QualPerAD = qualPerAD;
         ModifiedAf = modifiedAf;
         ModifiedAfHotspot = modifiedAfHotspot;
+        Exclude_filters = exclude_filters;
     }
 
     public boolean matchesPolyGRegion(final String chromosome, int position)
@@ -223,6 +229,8 @@ public class FilterConstants
         configBuilder.addInteger(PON_DISTANCE, "PON permitted margin", DEFAULT_PON_DISTANCE);
 
         configBuilder.addFlag(FILTER_SGLS, "Filter SGLs from VCF, intended for tumor-only mode, default=true in target panel");
+
+        configBuilder.addConfigItem(EXCLUDE_FILTERS, "Filter names to exclude from output vcf");
     }
 
     private static void addTargetedDecimal(
