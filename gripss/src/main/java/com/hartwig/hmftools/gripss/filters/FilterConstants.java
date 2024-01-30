@@ -230,7 +230,7 @@ public class FilterConstants
 
         configBuilder.addFlag(FILTER_SGLS, "Filter SGLs from VCF, intended for tumor-only mode, default=true in target panel");
 
-        configBuilder.addConfigItem(EXCLUDE_FILTERS, "Filter names to exclude from output vcf");
+        configBuilder.addConfigItem(EXCLUDE_FILTERS, "Filter names to exclude from output vcf, separated by ;");
     }
 
     private static void addTargetedDecimal(
