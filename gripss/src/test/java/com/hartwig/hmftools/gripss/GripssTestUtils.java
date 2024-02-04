@@ -375,7 +375,8 @@ public class GripssTestUtils
                 DEFAULT_PON_DISTANCE,
                 POLY_G_REGIONS_V37,
                 PMS2_V37,
-                false);
+                false,
+                "");
     }
 
     public static Map<String,Object> buildLinkAttributes(final String beid, final String beidl)

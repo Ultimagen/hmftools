@@ -4,6 +4,7 @@ import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.REF_
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.V37;
 import static com.hartwig.hmftools.common.sv.ExcludedRegions.getPolyGRegions;
 
+import java.util.Arrays;
 import java.util.List;
 
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
@@ -32,6 +33,7 @@ public class FilterConstants
     public final List<ChrBaseRegion> PolyGcRegions;
     public final ChrBaseRegion LowQualRegion;
     public final boolean FilterSGLs;
+    public final String Exclude_filters;
 
     // filters which only apply when reference is present:
     // minNormalCoverage, minRelativeCoverage, maxNormalSupport, shortSRNormalSupport, discordantPairSupport
@@ -77,6 +79,7 @@ public class FilterConstants
     public static final String MIN_LENGTH_CFG = "min_length";
     public static final String PON_DISTANCE = "pon_distance";
     private static final String FILTER_SGLS = "filter_sgls";
+    private static final String EXCLUDE_FILTERS = "exclude_filters";
 
     public static FilterConstants from(final CommandLine cmd)
     {
@@ -103,14 +106,15 @@ public class FilterConstants
                 Integer.parseInt(cmd.getOptionValue(MIN_LENGTH_CFG, String.valueOf(DEFAULT_MIN_LENGTH))),
                 Integer.parseInt(cmd.getOptionValue(PON_DISTANCE, String.valueOf(DEFAULT_PON_DISTANCE))),
                 getPolyGRegions(refGenVersion), refGenVersion == V37 ? PMS2_V37 : PMS2_V38,
-                cmd.hasOption(FILTER_SGLS));
+                cmd.hasOption(FILTER_SGLS),
+                cmd.getOptionValue(EXCLUDE_FILTERS, ""));
     }
 
     public FilterConstants(
             int minTumorQual, int hardMaxNormalAbsoluteSupport, double hardMaxNormalRelativeSupport, double softMaxNormalRelativeSupport,
             double minNormalCoverage, double minTumorAfBreakend, double minTumorAfBreakpoint, double maxShortStrandBias,
             int minQualBreakend, int minQualBreakpoint, int minQualRescueLine, int maxHomLengthShortInv,
-            int minLength, int ponDistance, final List<ChrBaseRegion> polyGcRegions, final ChrBaseRegion lowQualRegion, boolean filterSGLs)
+            int minLength, int ponDistance, final List<ChrBaseRegion> polyGcRegions, final ChrBaseRegion lowQualRegion, boolean filterSGLs, String exclude_filters)
     {
         MinTumorQual = minTumorQual;
         HardMaxNormalAbsoluteSupport = hardMaxNormalAbsoluteSupport;
@@ -129,6 +133,7 @@ public class FilterConstants
         PolyGcRegions = polyGcRegions;
         LowQualRegion = lowQualRegion;
         FilterSGLs = filterSGLs;
+        Exclude_filters = exclude_filters;
     }
 
     public boolean matchesPolyGRegion(final String chromosome, int position)
@@ -152,6 +157,7 @@ public class FilterConstants
         options.addOption(MIN_LENGTH_CFG, true, "Min length");
         options.addOption(PON_DISTANCE, true, "PON permitted margin");
         options.addOption(FILTER_SGLS, false, "Filter SGLs from VCF, intended for tumor-only mode");
+        options.addOption(EXCLUDE_FILTERS, true,"Filter names to exclude from output vcf, separated by ; options: " + Arrays.toString(Arrays.stream(FilterType.values()).filter(x -> x != FilterType.PASS).toArray()));
     }
 
 }
