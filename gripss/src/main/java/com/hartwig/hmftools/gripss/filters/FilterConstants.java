@@ -10,6 +10,7 @@ import static com.hartwig.hmftools.common.utils.config.ConfigBuilder.getConfigIn
 import static com.hartwig.hmftools.common.utils.config.ConfigItemType.DECIMAL;
 import static com.hartwig.hmftools.common.utils.config.ConfigItemType.INTEGER;
 
+import java.util.Arrays;
 import java.util.List;
 
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
@@ -38,6 +39,8 @@ public class FilterConstants
     public final int QualPerAD;
     public final double ModifiedAf;
     public final double ModifiedAfHotspot;
+    public final String Exclude_filters;
+
 
     // filters which only apply when reference is present:
     // minNormalCoverage, minRelativeCoverage, maxNormalSupport, shortSRNormalSupport, discordantPairSupport
@@ -99,6 +102,7 @@ public class FilterConstants
     private static final String QUAL_PER_AD = "qual_per_ad";
     private static final String MODIFIED_AF = "modified_af";
     private static final String MODIFIED_AF_HOTSPOT = "modified_af_hotspot";
+    private static final String EXCLUDE_FILTERS = "exclude_filters";
 
     public static FilterConstants from(final ConfigBuilder configBuilder)
     {
@@ -141,7 +145,8 @@ public class FilterConstants
                 filterSgls,
                 qualPerAD,
                 modifiedAf,
-                modifiedAfHotspot);
+                modifiedAfHotspot,
+                cmd.getOptionValue(EXCLUDE_FILTERS, ""));
     }
 
     public FilterConstants(
@@ -149,7 +154,7 @@ public class FilterConstants
             double minNormalCoverage, double minTumorAfBreakend, double minTumorAfBreakpoint, double maxShortStrandBias,
             int minQualBreakend, int minQualBreakpoint, int minQualRescueLine, int maxHomLengthShortInv,
             int minLength, int ponDistance, final List<ChrBaseRegion> polyGcRegions, final ChrBaseRegion lowQualRegion, boolean filterSGLs,
-            final int qualPerAD, final double modifiedAf, final double modifiedAfHotspot)
+            final int qualPerAD, final double modifiedAf, final double modifiedAfHotspot, String exclude_filters)
     {
         MinTumorQual = minTumorQual;
         HardMaxNormalAbsoluteSupport = hardMaxNormalAbsoluteSupport;
@@ -171,6 +176,7 @@ public class FilterConstants
         QualPerAD = qualPerAD;
         ModifiedAf = modifiedAf;
         ModifiedAfHotspot = modifiedAfHotspot;
+        Exclude_filters = exclude_filters;
     }
 
     public boolean matchesPolyGRegion(final String chromosome, int position)
@@ -239,6 +245,7 @@ public class FilterConstants
         configBuilder.addConfigItem(
                 INTEGER, name, false,
                 format("%s, default=%d targeted default=%d", desc, defaultValue, targetedDefaultValue), String.valueOf(defaultValue));
+        options.addOption(EXCLUDE_FILTERS, true,"Filter names to exclude from output vcf, separated by ; options: " + Arrays.toString(Arrays.stream(FilterType.values()).filter(x -> x != FilterType.PASS).toArray()));
     }
 
 }

@@ -376,7 +376,8 @@ public class GripssTestUtils
                 false,
                 30,
                 0.03,
-                0.005);
+                0.005,
+                "");
     }
 
     public static Map<String,Object> buildLinkAttributes(final String beid, final String beidl)
