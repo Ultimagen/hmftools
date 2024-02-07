@@ -1,6 +1,5 @@
 package com.hartwig.hmftools.gripss.filters;
 
-import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.REF_GENOME_VERSION;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.V37;
 import static com.hartwig.hmftools.common.sv.ExcludedRegions.getPolyGRegions;
 
@@ -12,7 +11,6 @@ import com.hartwig.hmftools.common.utils.sv.ChrBaseRegion;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Options;
-import org.apache.commons.compress.utils.Lists;
 
 public class FilterConstants
 {
@@ -33,7 +31,7 @@ public class FilterConstants
     public final List<ChrBaseRegion> PolyGcRegions;
     public final ChrBaseRegion LowQualRegion;
     public final boolean FilterSGLs;
-    public final String Exclude_filters;
+    public final String ExcludeFilters;
 
     // filters which only apply when reference is present:
     // minNormalCoverage, minRelativeCoverage, maxNormalSupport, shortSRNormalSupport, discordantPairSupport
@@ -133,7 +131,7 @@ public class FilterConstants
         PolyGcRegions = polyGcRegions;
         LowQualRegion = lowQualRegion;
         FilterSGLs = filterSGLs;
-        Exclude_filters = exclude_filters;
+        ExcludeFilters = exclude_filters;
     }
 
     public boolean matchesPolyGRegion(final String chromosome, int position)
