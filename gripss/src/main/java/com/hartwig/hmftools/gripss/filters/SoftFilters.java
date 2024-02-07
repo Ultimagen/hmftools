@@ -100,17 +100,17 @@ public class SoftFilters
             Breakend breakend = sv.breakends()[se];
 
             String [] exclude_filteres_parts;
-            if (mFilterConstants.Exclude_filters.isEmpty()) {
+            if (mFilterConstants.ExcludeFilters.isEmpty()) {
                 exclude_filteres_parts = new String[0];
             } else {
-                exclude_filteres_parts = mFilterConstants.Exclude_filters.split(";");
+                exclude_filteres_parts = mFilterConstants.ExcludeFilters.split(";");
             }
             Set<String> filters_to_exclude = new HashSet<>(Arrays.asList(exclude_filteres_parts));
             // assert that all the filters are valid
             Set<String> all_filters = Arrays.stream(FilterType.values()).filter(x -> x != FilterType.PASS).map(Enum::name).collect(Collectors.toSet());
 
             if (!all_filters.containsAll(filters_to_exclude)) {
-                throw new AssertionError("Invalid filter name in exclude_filters: " + mFilterConstants.Exclude_filters + " . Valid filters are: " + all_filters);
+                throw new AssertionError("Invalid filter name in exclude_filters: " + mFilterConstants.ExcludeFilters + " . Valid filters are: " + all_filters);
             }
 
             if(!filters_to_exclude.contains(FilterType.vcfName(MIN_NORMAL_COVERAGE)) && normalCoverage(breakend))
