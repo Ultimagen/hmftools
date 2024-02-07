@@ -100,7 +100,7 @@ public class SoftFilters
 
             Breakend breakend = sv.breakends()[se];
 
-            String [] exclude_filteres_parts = mFilterConstants.Exclude_filters.split(";");
+            String [] exclude_filteres_parts = mFilterConstants.ExcludeFilters.split(";");
             Set filters_to_exclude = new HashSet();
             for (String part : exclude_filteres_parts) {
                 filters_to_exclude.add(part);

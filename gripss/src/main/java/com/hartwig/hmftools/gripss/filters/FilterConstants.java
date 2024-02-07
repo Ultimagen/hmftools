@@ -39,7 +39,7 @@ public class FilterConstants
     public final double ModifiedAf;
     public final double ModifiedAfHotspot;
 
-    public final String Exclude_filters;
+    public final String ExcludeFilters;
 
     // filters which only apply when reference is present:
     // minNormalCoverage, minRelativeCoverage, maxNormalSupport, shortSRNormalSupport, discordantPairSupport
@@ -176,7 +176,7 @@ public class FilterConstants
         QualPerAD = qualPerAD;
         ModifiedAf = modifiedAf;
         ModifiedAfHotspot = modifiedAfHotspot;
-        Exclude_filters = exclude_filters;
+        ExcludeFilters = exclude_filters;
     }
 
     public boolean matchesPolyGRegion(final String chromosome, int position)
