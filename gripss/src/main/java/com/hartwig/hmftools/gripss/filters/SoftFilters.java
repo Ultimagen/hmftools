@@ -113,53 +113,53 @@ public class SoftFilters
                 throw new AssertionError("Invalid filter name in exclude_filters: " + mFilterConstants.ExcludeFilters + " . Valid filters are: " + all_filters);
             }
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(MIN_NORMAL_COVERAGE)) && normalCoverage(breakend))
+            if(!filters_to_exclude.contains(MIN_NORMAL_COVERAGE.name()) && normalCoverage(breakend))
                 filters.add(MIN_NORMAL_COVERAGE);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(MAX_NORMAL_RELATIVE_SUPPORT)) && normalRelativeSupport(breakend))
+            if(!filters_to_exclude.contains(MAX_NORMAL_RELATIVE_SUPPORT.name()) && normalRelativeSupport(breakend))
                 filters.add(MAX_NORMAL_RELATIVE_SUPPORT);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(MIN_TUMOR_AF)) && normalRelativeSupport(breakend))
+            if(!filters_to_exclude.contains(MIN_TUMOR_AF.name()) && normalRelativeSupport(breakend))
                 filters.add(MIN_TUMOR_AF);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(MIN_QUAL)) && minQuality(sv, breakend))
+            if(!filters_to_exclude.contains(MIN_QUAL.name()) && minQuality(sv, breakend))
                 filters.add(MIN_QUAL);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(SHORT_SR_SUPPORT)) && shortSplitReadTumor(sv, breakend))
+            if(!filters_to_exclude.contains(SHORT_SR_SUPPORT.name()) && shortSplitReadTumor(sv, breakend))
                 filters.add(SHORT_SR_SUPPORT);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(SHORT_SR_NORMAL)) && shortSplitReadNormal(sv, breakend))
+            if(!filters_to_exclude.contains(SHORT_SR_NORMAL.name()) && shortSplitReadNormal(sv, breakend))
                 filters.add(SHORT_SR_NORMAL);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(DISCORDANT_PAIR_SUPPORT)) && discordantPairSupport(sv, breakend))
+            if(!filters_to_exclude.contains(DISCORDANT_PAIR_SUPPORT.name()) && discordantPairSupport(sv, breakend))
                 filters.add(DISCORDANT_PAIR_SUPPORT);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(SGL_STRAND_BIAS)) && singleStrandBias(breakend))
+            if(!filters_to_exclude.contains(SGL_STRAND_BIAS.name()) && singleStrandBias(breakend))
                 filters.add(SGL_STRAND_BIAS);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(SGL_INSERT_SEQ_MIN_LENGTH)) && singleInsertSequenceMinLength(breakend))
+            if(!filters_to_exclude.contains(SGL_INSERT_SEQ_MIN_LENGTH.name()) && singleInsertSequenceMinLength(breakend))
                 filters.add(SGL_INSERT_SEQ_MIN_LENGTH);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(SHORT_DEL_INS_ARTIFACT)) && shortDelInsertArtifact(sv, breakend))
+            if(!filters_to_exclude.contains(SHORT_DEL_INS_ARTIFACT.name()) && shortDelInsertArtifact(sv, breakend))
                 filters.add(SHORT_DEL_INS_ARTIFACT);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(SHORT_STRAND_BIAS)) && strandBias(sv, breakend))
+            if(!filters_to_exclude.contains(SHORT_STRAND_BIAS.name()) && strandBias(sv, breakend))
                 filters.add(SHORT_STRAND_BIAS);
 
             // the following filters are replicated in the end breakend if met in the start
-            if(!filters_to_exclude.contains(FilterType.vcfName(IMPRECISE)) && (se == SE_END && beStartFilters.contains(IMPRECISE)) || imprecise(sv))
+            if(!filters_to_exclude.contains(IMPRECISE.name()) && (se == SE_END && beStartFilters.contains(IMPRECISE)) || imprecise(sv))
                 filters.add(IMPRECISE);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(MAX_POLY_G_LENGTH)) && (se == SE_END && beStartFilters.contains(MAX_POLY_G_LENGTH)) || polyGCInsert(sv))
+            if(!filters_to_exclude.contains(MAX_POLY_G_LENGTH.name()) && (se == SE_END && beStartFilters.contains(MAX_POLY_G_LENGTH)) || polyGCInsert(sv))
                 filters.add(MAX_POLY_G_LENGTH);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(MAX_POLY_A_HOM_LENGTH)) && (se == SE_END && beStartFilters.contains(MAX_POLY_A_HOM_LENGTH)) || polyATHomology(sv))
+            if(!filters_to_exclude.contains(MAX_POLY_A_HOM_LENGTH.name()) && (se == SE_END && beStartFilters.contains(MAX_POLY_A_HOM_LENGTH)) || polyATHomology(sv))
                 filters.add(MAX_POLY_A_HOM_LENGTH);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(MAX_HOM_LENGTH_SHORT_INV)) && (se == SE_END && beStartFilters.contains(MAX_HOM_LENGTH_SHORT_INV)) || homologyLengthFilterShortInversion(sv))
+            if(!filters_to_exclude.contains(MAX_HOM_LENGTH_SHORT_INV.name()) && (se == SE_END && beStartFilters.contains(MAX_HOM_LENGTH_SHORT_INV)) || homologyLengthFilterShortInversion(sv))
                 filters.add(MAX_HOM_LENGTH_SHORT_INV);
 
-            if(!filters_to_exclude.contains(FilterType.vcfName(MIN_LENGTH)) && (se == SE_END && beStartFilters.contains(MIN_LENGTH)) || minLength(sv))
+            if(!filters_to_exclude.contains(MIN_LENGTH.name()) && (se == SE_END && beStartFilters.contains(MIN_LENGTH)) || minLength(sv))
                 filters.add(MIN_LENGTH);
 
             if((se == SE_END && beStartFilters.contains(MODIFIED_AF)) || modifiedAF(sv, false))
