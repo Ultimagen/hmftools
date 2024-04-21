@@ -39,4 +39,7 @@ RUN adduser --disabled-password --gecos '' ubuntu && \
 USER ubuntu
 WORKDIR /home/ubuntu
 
+# add license
+COPY LICENSE .
+
 CMD ["/bin/bash"]
