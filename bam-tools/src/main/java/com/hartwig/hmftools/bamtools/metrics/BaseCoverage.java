@@ -35,7 +35,7 @@ public class BaseCoverage
         mUnmappableRegions = unmappableRegions;
     }
 
-    public void processRead(final SAMRecord read, final List<int[]> mateBaseCoords)
+    public void processRead(final SAMRecord read, final List<int[]> mateBaseCoords, boolean isConsensusRead)
     {
         // some filters exclude all matched bases
         int alignedBases = read.getCigar().getCigarElements().stream().filter(x -> x.getOperator() == M).mapToInt(x -> x.getLength()).sum();
@@ -44,7 +44,9 @@ public class BaseCoverage
 
         if(read.getMappingQuality() < mConfig.MapQualityThreshold)
         {
-            mFilterTypeCounts[FilterType.LOW_MAP_QUAL.ordinal()] += alignedBases;
+            if(!isConsensusRead)
+                mFilterTypeCounts[FilterType.LOW_MAP_QUAL.ordinal()] += alignedBases;
+
             return;
         }
 
@@ -52,6 +54,12 @@ public class BaseCoverage
         {
             mFilterTypeCounts[FilterType.DUPLICATE.ordinal()] += alignedBases;
             return;
+        }
+        else
+        {
+            // lower duplicate data to account for additionally marked duplicate - see previous comments in BamReader
+            if(isConsensusRead)
+                mFilterTypeCounts[FilterType.DUPLICATE.ordinal()] -= alignedBases;
         }
 
         if(!read.getReadPairedFlag() || read.getMateUnmappedFlag())
@@ -124,19 +132,19 @@ public class BaseCoverage
 
             boolean exceedsCoverage = mBaseDepth[baseIndex] >= mConfig.MaxCoverage;
 
-            boolean passFilters = !lowBaseQual && !exceedsCoverage && !overlapped;
-
-            if(passFilters)
+            if(!lowBaseQual && !exceedsCoverage && !overlapped)
             {
                 ++mBaseDepth[baseIndex];
+
+                // overlapping fragments count once towards unfiltered and a second time towards overlap counts
                 ++mFilterTypeCounts[FilterType.UNFILTERED.ordinal()];
             }
             else
             {
-                if(lowBaseQual)
-                    ++mFilterTypeCounts[FilterType.LOW_BASE_QUAL.ordinal()];
-                else if(overlapped)
+                if(overlapped)
                     ++mFilterTypeCounts[FilterType.OVERLAPPED.ordinal()];
+                else if(lowBaseQual)
+                    ++mFilterTypeCounts[FilterType.LOW_BASE_QUAL.ordinal()];
                 else if(exceedsCoverage)
                     ++mFilterTypeCounts[FilterType.MAX_COVERAGE.ordinal()];
             }

@@ -5,7 +5,7 @@ import static java.util.Collections.singleton;
 import static com.hartwig.hmftools.purple.copynumber.StructuralVariantLegsFactoryTest.createLeg;
 import static com.hartwig.hmftools.purple.copynumber.StructuralVariantPloidyTest.CHROMOSOME;
 import static com.hartwig.hmftools.purple.copynumber.StructuralVariantPloidyTest.PURE;
-import static com.hartwig.hmftools.purple.TestUtils.buildPurityAdjuster;
+import static com.hartwig.hmftools.purple.MiscTestUtils.buildPurityAdjuster;
 
 import static org.apache.commons.math3.util.Precision.EPSILON;
 import static org.junit.Assert.assertEquals;
@@ -22,7 +22,7 @@ import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.genome.region.GenomeRegionSelectorFactory;
-import com.hartwig.hmftools.purple.purity.PurityAdjuster;
+import com.hartwig.hmftools.purple.fitting.PurityAdjuster;
 import com.hartwig.hmftools.common.purple.PurpleTestUtils;
 import com.hartwig.hmftools.common.purple.PurpleCopyNumber;
 import com.hartwig.hmftools.common.purple.Gender;

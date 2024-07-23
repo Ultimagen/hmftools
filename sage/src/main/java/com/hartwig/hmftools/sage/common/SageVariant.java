@@ -1,5 +1,9 @@
 package com.hartwig.hmftools.sage.common;
 
+import static java.lang.Math.round;
+
+import static com.hartwig.hmftools.sage.SageConstants.LONG_GERMLINE_INSERT_LENGTH;
+
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -7,27 +11,26 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Sets;
 import com.hartwig.hmftools.sage.candidate.Candidate;
 import com.hartwig.hmftools.sage.evidence.ReadContextCounter;
+import com.hartwig.hmftools.sage.filter.SoftFilter;
 
 import org.jetbrains.annotations.Nullable;
 
 public class SageVariant
 {
     private final Candidate mCandidate;
-    private final Set<String> mFilters;
-    private final List<ReadContextCounter> mNormalReadCounters;
+    private final Set<SoftFilter> mFilters;
+    private final List<ReadContextCounter> mReferenceReadCounters;
     private final List<ReadContextCounter> mTumorReadCounters;
 
     private int mMixedImpact;
-    private boolean mDedupIndelDiff; // temp during switch to new method
 
     public SageVariant(
-            final Candidate candidate,  final List<ReadContextCounter> normalCounters, final List<ReadContextCounter> tumorReadCounters)
+            final Candidate candidate,  final List<ReadContextCounter> referenceCounters, final List<ReadContextCounter> tumorReadCounters)
     {
         mCandidate = candidate;
-        mNormalReadCounters = normalCounters;
+        mReferenceReadCounters = referenceCounters;
         mTumorReadCounters = tumorReadCounters;
         mFilters = Sets.newHashSet();
-        mDedupIndelDiff = false;
     }
 
     public Candidate candidate()
@@ -148,28 +151,23 @@ public class SageVariant
 
     public boolean isPassing() { return mFilters.isEmpty(); }
 
-    public boolean dedupIndelDiff() { return mDedupIndelDiff; }
-    public void markDedupIndelDiff() { mDedupIndelDiff = true; }
-
-    public boolean isTumorEmpty() { return mTumorReadCounters.isEmpty(); }
-    public boolean isNormalEmpty() { return mNormalReadCounters.isEmpty(); }
+    public boolean hasTumorSamples() { return !mTumorReadCounters.isEmpty(); }
+    public boolean hasReferenceSamples() { return !mReferenceReadCounters.isEmpty(); }
 
     public SimpleVariant variant() { return mCandidate.variant(); }
 
     public VariantTier tier() { return mCandidate.tier(); }
 
-    public Set<String> filters() { return mFilters; }
-    public String filtersStr() { return mFilters.stream().collect(Collectors.joining(",")); }
+    public Set<SoftFilter> filters() { return mFilters; }
+    public Set<String> filtersStringSet() { return mFilters.stream().map(x -> x.filterName()).collect(Collectors.toSet()); }
+    public String filtersStr() { return mFilters.stream().map(x -> x.filterName()).collect(Collectors.joining(",")); }
 
-    public ReadContext readContext() { return mTumorReadCounters.get(0).readContext(); }
+    public VariantReadContext readContext() { return mTumorReadCounters.get(0).readContext(); }
 
-    public List<ReadContextCounter> normalReadCounters() { return mNormalReadCounters; }
+    public List<ReadContextCounter> referenceReadCounters() { return mReferenceReadCounters; }
     public List<ReadContextCounter> tumorReadCounters() { return mTumorReadCounters; }
 
-    public int totalQuality()
-    {
-        return mTumorReadCounters.stream().mapToInt(ReadContextCounter::tumorQuality).sum();
-    }
+    public int totalQuality() { return mTumorReadCounters.stream().mapToInt(x -> (int)round(x.tumorQuality())).sum(); }
 
     public boolean isIndel() { return variant().ref().length() != variant().alt().length(); }
     public boolean isMnv()
@@ -182,6 +180,8 @@ public class SageVariant
     }
     public boolean isDelete() { return variant().ref().length() > variant().alt().length(); }
     public boolean isInsert() { return variant().ref().length() < variant().alt().length(); }
+
+    public boolean isLongInsert() { return SimpleVariant.isLongInsert(mCandidate.variant()); }
 
     public String toString()
     {

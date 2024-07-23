@@ -3,8 +3,9 @@ package com.hartwig.hmftools.teal.breakend
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeCoordinates
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion
-import com.hartwig.hmftools.common.samtools.CigarUtils
-import com.hartwig.hmftools.common.samtools.CigarUtils.*
+import com.hartwig.hmftools.common.bam.CigarUtils
+import com.hartwig.hmftools.common.bam.CigarUtils.*
+import com.hartwig.hmftools.common.bam.SamRecordUtils
 import com.hartwig.hmftools.teal.ReadGroup
 import com.hartwig.hmftools.teal.TealUtils
 import com.hartwig.hmftools.teal.util.TelomereMatcher
@@ -70,7 +71,7 @@ class BreakEndSupportCounter(refGenomeVersion: RefGenomeVersion, telomereMatchTh
             return null
         }
 
-        val pairedRead = if (alignedRead.firstOfPairFlag) rg.secondOfPair else rg.firstOfPair
+        val pairedRead = if (SamRecordUtils.firstInPair(alignedRead)) rg.secondOfPair else rg.firstOfPair
 
         if (pairedRead == null)
         {

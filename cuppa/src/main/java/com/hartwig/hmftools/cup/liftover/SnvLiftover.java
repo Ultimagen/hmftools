@@ -4,15 +4,14 @@ import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.loadSampleIdsFile;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.setLogLevel;
 import static com.hartwig.hmftools.common.utils.TaskExecutor.parseThreads;
-import static com.hartwig.hmftools.cup.CuppaConfig.CUP_LOGGER;
-import static com.hartwig.hmftools.cup.CuppaRefFiles.purpleSomaticVcfFile;
+import static com.hartwig.hmftools.cup.common.CupConstants.CUP_LOGGER;
 
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.genome.refgenome.GenomeLiftoverCache;
+import com.hartwig.hmftools.common.purple.PurpleCommon;
 import com.hartwig.hmftools.common.utils.TaskExecutor;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 
@@ -22,11 +21,7 @@ public class SnvLiftover
 {
     private final LiftoverConfig mConfig;
     private final List<String> mSampleIds;
-    private final GenomeLiftoverCache mMappingCache;
     private final int mThreads;
-
-    @Deprecated
-    public static final String LIFTOVER_FILE = ".snv_liftover.csv";
 
     public SnvLiftover(final ConfigBuilder configBuilder)
     {
@@ -41,8 +36,6 @@ public class SnvLiftover
             mSampleIds = loadSampleIdsFile(configBuilder);
         }
         mThreads = parseThreads(configBuilder);
-
-        mMappingCache = new GenomeLiftoverCache(true);
     }
 
     public void run()
@@ -53,15 +46,15 @@ public class SnvLiftover
             System.exit(1);
         }
 
-        CUP_LOGGER.info("converting positions for {} samples", mSampleIds.size());
+        CUP_LOGGER.info("Outputting converted positions for {} samples at: {}", mSampleIds.size(), mConfig.OutputDir);
 
         List<VcfPositionConverter> sampleTasks = Lists.newArrayList();
 
         for(String sampleId : mSampleIds)
         {
             String purpleDir = mConfig.SampleVcfDir.replaceAll("\\*", sampleId);
-            String vcfFile = purpleSomaticVcfFile(purpleDir, sampleId);
-            VcfPositionConverter vcfTask = new VcfPositionConverter(sampleId, vcfFile, mMappingCache, mConfig);
+            String vcfFile = PurpleCommon.purpleSomaticVcfFile(purpleDir, sampleId);
+            VcfPositionConverter vcfTask = new VcfPositionConverter(sampleId, vcfFile, mConfig);
             sampleTasks.add(vcfTask);
         }
 
@@ -75,7 +68,7 @@ public class SnvLiftover
             sampleTasks.forEach(x -> x.call());
         }
 
-        CUP_LOGGER.info("conversion complete");
+        CUP_LOGGER.info("Liftover complete");
     }
 
     public static void main(@NotNull final String[] args)

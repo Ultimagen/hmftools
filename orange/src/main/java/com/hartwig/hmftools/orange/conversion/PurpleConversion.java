@@ -57,6 +57,7 @@ public final class PurpleConversion
                 .chromosome(geneCopyNumber.chromosome())
                 .chromosomeBand(geneCopyNumber.chromosomeBand())
                 .minCopyNumber(geneCopyNumber.minCopyNumber())
+                .maxCopyNumber(geneCopyNumber.maxCopyNumber())
                 .minMinorAlleleCopyNumber(geneCopyNumber.minMinorAlleleCopyNumber())
                 .build();
     }
@@ -82,6 +83,7 @@ public final class PurpleConversion
                 .germlineAberrations(ConversionUtil.mapToIterable(purpleQC.germlineAberrations(), PurpleConversion::convert))
                 .amberMeanDepth(purpleQC.amberMeanDepth())
                 .contamination(purpleQC.contamination())
+                .totalCopyNumberSegments(purpleQC.copyNumberSegments())
                 .unsupportedCopyNumberSegments(purpleQC.unsupportedCopyNumberSegments())
                 .deletedGenes(purpleQC.deletedGenes())
                 .build();
@@ -91,8 +93,8 @@ public final class PurpleConversion
     public static PurpleAllelicDepth convert(@NotNull AllelicDepth allelicDepth)
     {
         return ImmutablePurpleAllelicDepth.builder()
-                .totalReadCount(allelicDepth.totalReadCount())
-                .alleleReadCount(allelicDepth.alleleReadCount())
+                .totalReadCount(allelicDepth.TotalReadCount)
+                .alleleReadCount(allelicDepth.AlleleReadCount)
                 .build();
     }
 
@@ -144,7 +146,7 @@ public final class PurpleConversion
     }
 
     @NotNull
-    public static PurpleTranscriptImpact convert(@NotNull VariantTranscriptImpact impact)
+    public static PurpleTranscriptImpact convert(@NotNull VariantTranscriptImpact impact, boolean reported)
     {
         List<VariantEffect> effectsList = VariantEffect.effectsToList(impact.Effects);
         List<PurpleVariantEffect> purpleEffects = ConversionUtil.mapToList(effectsList, PurpleConversion::convert);
@@ -157,6 +159,7 @@ public final class PurpleConversion
                 .inSpliceRegion(impact.SpliceRegion)
                 .effects(purpleEffects)
                 .codingEffect(purpleCodingEffect)
+                .reported(reported)
                 .build();
     }
 }

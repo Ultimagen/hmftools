@@ -1,17 +1,12 @@
 package com.hartwig.hmftools.esvee.assembly;
 
-import static java.lang.Math.max;
-import static java.lang.Math.min;
-
-import static com.hartwig.hmftools.esvee.SvConstants.PRIMARY_ASSEMBLY_MERGE_READ_OVERLAP;
-import static com.hartwig.hmftools.esvee.SvConstants.PROXIMATE_JUNCTION_DISTANCE;
-import static com.hartwig.hmftools.esvee.SvConstants.PROXIMATE_JUNCTION_OVERLAP;
+import static com.hartwig.hmftools.esvee.AssemblyConstants.PROXIMATE_JUNCTION_DISTANCE;
+import static com.hartwig.hmftools.esvee.assembly.read.ReadFilters.recordSoftClipsAtJunction;
 
 import java.util.List;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.esvee.common.AssemblySupport;
-import com.hartwig.hmftools.esvee.common.JunctionAssembly;
+import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 
 public class AssemblyDeduper
 {
@@ -31,12 +26,6 @@ public class AssemblyDeduper
             while(nextIndex < assemblies.size())
             {
                 JunctionAssembly second = assemblies.get(nextIndex);
-
-                if(!haveOverlappingReads(first, second))
-                {
-                    ++nextIndex;
-                    continue;
-                }
 
                 if(!SequenceCompare.matchedAssemblySequences(first, second))
                 {
@@ -70,7 +59,7 @@ public class AssemblyDeduper
 
         // start with the most recent previous assemblies since they are added in order
         int index = existingAssemblies.size() - 1;
-        int minPosition = newAssemblies.get(0).initialJunction().Position - PROXIMATE_JUNCTION_DISTANCE;
+        int minPosition = newAssemblies.get(0).junction().Position - PROXIMATE_JUNCTION_DISTANCE;
 
         List<JunctionAssembly> removeExisting = Lists.newArrayList();
 
@@ -78,7 +67,7 @@ public class AssemblyDeduper
         {
             JunctionAssembly assembly = existingAssemblies.get(index);
 
-            if(assembly.initialJunction().Position < minPosition)
+            if(assembly.junction().Position < minPosition)
                 break;
 
             int newIndex = 0;
@@ -87,14 +76,8 @@ public class AssemblyDeduper
             {
                 JunctionAssembly newAssembly = newAssemblies.get(newIndex);
 
-                if(newAssembly.initialJunction() == assembly.initialJunction()
-                || newAssembly.initialJunction().Orientation != assembly.initialJunction().Orientation)
-                {
-                    ++newIndex;
-                    continue;
-                }
-
-                if(!haveOverlapDistance(assembly, newAssembly) || !haveOverlappingReads(assembly, newAssembly))
+                if(newAssembly.junction() == assembly.junction()
+                || newAssembly.junction().Orient != assembly.junction().Orient)
                 {
                     ++newIndex;
                     continue;
@@ -107,7 +90,7 @@ public class AssemblyDeduper
                 }
 
                 // take the assembly with the most read support
-                if(assembly.supportCount() >= newAssembly.supportCount())
+                if(selectFirstAssembly(assembly, newAssembly))
                 {
                     assembly.addMergedAssembly();
                     newAssemblies.remove(newIndex);
@@ -127,29 +110,16 @@ public class AssemblyDeduper
         removeExisting.forEach(x -> existingAssemblies.remove(x));
     }
 
-    private static boolean haveOverlapDistance(final JunctionAssembly lower, final JunctionAssembly upper)
+
+    private static boolean selectFirstAssembly(final JunctionAssembly first, final JunctionAssembly second)
     {
-        int overlapDistance = min(upper.maxAlignedPosition(), lower.maxAlignedPosition())
-                - max(upper.minAlignedPosition(), lower.minAlignedPosition());
+        if(first.supportCount() != second.supportCount())
+            return first.supportCount() > second.supportCount();
 
-        return overlapDistance >= PROXIMATE_JUNCTION_OVERLAP;
-    }
+        // take the one with the most precise support
+        long preciseFirst = first.support().stream().filter(x -> recordSoftClipsAtJunction(x.cachedRead(), first.junction())).count();
+        long preciseSecond = second.support().stream().filter(x -> recordSoftClipsAtJunction(x.cachedRead(), second.junction())).count();
 
-    private static boolean haveOverlappingReads(final JunctionAssembly first, final JunctionAssembly second)
-    {
-        int matchedReads = 0;
-
-        for(AssemblySupport support : first.support())
-        {
-            if(second.support().stream().anyMatch(x -> x.read() == support.read()))
-            {
-                ++matchedReads;
-
-                if(matchedReads >= PRIMARY_ASSEMBLY_MERGE_READ_OVERLAP)
-                    return true;
-            }
-        }
-
-        return false;
+        return preciseFirst >= preciseSecond;
     }
 }

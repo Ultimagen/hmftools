@@ -20,7 +20,6 @@ import com.hartwig.hmftools.common.variant.AllelicDepth;
 import com.hartwig.hmftools.common.variant.CodingEffect;
 import com.hartwig.hmftools.common.variant.GermlineVariant;
 import com.hartwig.hmftools.common.variant.Hotspot;
-import com.hartwig.hmftools.common.variant.ImmutableAllelicDepthImpl;
 import com.hartwig.hmftools.common.variant.ImmutableGermlineVariantImpl;
 import com.hartwig.hmftools.common.variant.VariantContextDecorator;
 import com.hartwig.hmftools.common.variant.VariantTier;
@@ -28,7 +27,6 @@ import com.hartwig.hmftools.common.variant.VariantType;
 import com.hartwig.hmftools.common.variant.impact.VariantImpact;
 
 import org.apache.logging.log4j.util.Strings;
-import org.jetbrains.annotations.NotNull;
 import org.jooq.DSLContext;
 import org.jooq.InsertValuesStep19;
 import org.jooq.InsertValuesStepN;
@@ -40,15 +38,13 @@ import htsjdk.variant.variantcontext.VariantContext;
 
 public class GermlineVariantDAO
 {
-    @NotNull
     private final DSLContext context;
 
-    public GermlineVariantDAO(@NotNull final DSLContext context)
+    public GermlineVariantDAO(final DSLContext context)
     {
         this.context = context;
     }
 
-    @NotNull
     public BufferedWriter<VariantContext> writer(String tumorSample, String referenceSample, String rnaSample)
     {
         BufferedWriterConsumer<VariantContext> consumer = new BufferedWriterConsumer<>()
@@ -69,25 +65,24 @@ public class GermlineVariantDAO
         return new BufferedWriter<>(consumer);
     }
 
-    private void writeAll(@NotNull final Timestamp timestamp, String tumorSample, String referenceSample, String rnaSample,
-            @NotNull List<VariantContext> variants)
+    private void writeAll(final Timestamp timestamp, String tumorSample, String referenceSample, String rnaSample,
+            final List<VariantContext> variants)
     {
         final InsertValuesStepN inserter = createInserter();
         variants.forEach(variant -> addRecord(timestamp, inserter, tumorSample, referenceSample, rnaSample, variant));
         inserter.execute();
     }
 
-    public void deleteGermlineVariantsForSample(@NotNull String sampleId)
+    public void deleteGermlineVariantsForSample(final String sampleId)
     {
         context.delete(GERMLINEVARIANT).where(GERMLINEVARIANT.SAMPLEID.eq(sampleId)).execute();
     }
 
-    public void deleteGermlineStructuralVariantsForSample(@NotNull String sampleId)
+    public void deleteGermlineStructuralVariantsForSample(final String sampleId)
     {
         context.delete(STRUCTURALVARIANTGERMLINE).where(STRUCTURALVARIANTGERMLINE.SAMPLEID.eq(sampleId)).execute();
     }
 
-    @NotNull
     private InsertValuesStepN createInserter()
     {
         return context.insertInto(GERMLINEVARIANT,
@@ -157,12 +152,12 @@ public class GermlineVariantDAO
                 decorator.qual(),
                 decorator.tier(),
                 decorator.genotypeStatus(referenceSample).simplifiedDisplay(),
-                referenceDepth.alleleReadCount(),
-                referenceDepth.totalReadCount(),
-                rnaDepth.alleleReadCount(),
-                rnaDepth.totalReadCount(),
-                tumorDepth.alleleReadCount(),
-                tumorDepth.totalReadCount(),
+                referenceDepth.AlleleReadCount,
+                referenceDepth.TotalReadCount,
+                rnaDepth.AlleleReadCount,
+                rnaDepth.TotalReadCount,
+                tumorDepth.AlleleReadCount,
+                tumorDepth.TotalReadCount,
                 checkStringLength(decorator.localPhaseSetsToString(), GERMLINEVARIANT.LOCALPHASESET),
                 decorator.adjustedVaf(),
                 decorator.variantCopyNumber(),
@@ -172,7 +167,7 @@ public class GermlineVariantDAO
                 pathogenicSummary.ClinvarInfo,
                 pathogenicSummary.Status.toString(),
                 decorator.isPathogenic(),
-                variantImpact.CanonicalGeneName,
+                variantImpact.GeneName,
                 variantImpact.GenesAffected,
                 variantImpact.CanonicalEffect,
                 variantImpact.CanonicalCodingEffect != CodingEffect.UNDEFINED ? variantImpact.CanonicalCodingEffect : Strings.EMPTY,
@@ -191,7 +186,7 @@ public class GermlineVariantDAO
         );
     }
 
-    protected static String checkTrimHgsvString(final String hgvsStr, @NotNull TableField<?, String> field)
+    protected static String checkTrimHgsvString(final String hgvsStr, final TableField<?, String> field)
     {
         int maxLength = field.getDataType().length();
 
@@ -360,8 +355,7 @@ public class GermlineVariantDAO
                 germlineBreakend.totalExonCount());
     }
 
-    @NotNull
-    public List<GermlineVariant> read(@NotNull String sample)
+    public List<GermlineVariant> read(final String sample)
     {
         List<GermlineVariant> variants = Lists.newArrayList();
 
@@ -379,10 +373,9 @@ public class GermlineVariantDAO
     {
         Integer rnaAlleleReadCount = record.getValue(GERMLINEVARIANT.RNAALLELEREADCOUNT);
         Integer rnaTotalCount = record.getValue(GERMLINEVARIANT.RNATOTALREADCOUNT);
-        AllelicDepth rnaAllelicDepth = rnaAlleleReadCount != null && rnaTotalCount != null ? ImmutableAllelicDepthImpl.builder()
-                .alleleReadCount(rnaAlleleReadCount)
-                .totalReadCount(rnaTotalCount)
-                .build() : null;
+
+        AllelicDepth rnaAllelicDepth = rnaAlleleReadCount != null && rnaTotalCount != null ?
+                new AllelicDepth(rnaTotalCount, rnaAlleleReadCount) : null;
 
         return ImmutableGermlineVariantImpl.builder()
                 .chromosome(record.getValue(GERMLINEVARIANT.CHROMOSOME))
@@ -405,8 +398,8 @@ public class GermlineVariantDAO
                 .canonicalHgvsProteinImpact(record.getValue(GERMLINEVARIANT.CANONICALHGVSPROTEINIMPACT))
                 .spliceRegion(DatabaseUtil.byteToBoolean(record.getValue(GERMLINEVARIANT.SPLICEREGION)))
                 .otherReportedEffects(DatabaseUtil.valueNotNull(record.getValue(GERMLINEVARIANT.OTHERTRANSCRIPTEFFECTS)))
-                .alleleReadCount(record.getValue(GERMLINEVARIANT.GERMLINEALLELEREADCOUNT))
-                .totalReadCount(record.getValue(GERMLINEVARIANT.GERMLINETOTALREADCOUNT))
+                .allelicDepth(new AllelicDepth(
+                        record.getValue(GERMLINEVARIANT.GERMLINETOTALREADCOUNT), record.getValue(GERMLINEVARIANT.GERMLINEALLELEREADCOUNT)))
                 .adjustedCopyNumber(record.getValue(GERMLINEVARIANT.COPYNUMBER))
                 .adjustedVAF(record.getValue(GERMLINEVARIANT.ADJUSTEDVAF))
                 .variantCopyNumber(record.getValue(GERMLINEVARIANT.VARIANTCOPYNUMBER))

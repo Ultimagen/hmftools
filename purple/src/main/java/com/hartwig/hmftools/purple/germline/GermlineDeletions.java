@@ -17,14 +17,14 @@ import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.NEG_ORIENT;
 import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.POS_ORIENT;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
 import static com.hartwig.hmftools.purple.PurpleUtils.PPL_LOGGER;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_DEL_CN_CONSISTENCY_MACN_PERC;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_DEL_CN_CONSISTENCY_MIN;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_DEL_COHORT_FREQ;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_DEL_GENE_BUFFER;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_DEL_NORMAL_RATIO;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_DEL_REGION_MATCH_BUFFER;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_DEL_REGION_MIN;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.WINDOW_SIZE;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_DEL_CN_CONSISTENCY_MACN_PERC;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_DEL_CN_CONSISTENCY_MIN;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_DEL_COHORT_FREQ;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_DEL_GENE_BUFFER;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_DEL_NORMAL_RATIO;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_DEL_REGION_MATCH_BUFFER;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_DEL_REGION_MIN;
+import static com.hartwig.hmftools.purple.PurpleConstants.WINDOW_SIZE;
 
 import java.util.List;
 import java.util.StringJoiner;
@@ -353,10 +353,8 @@ public class GermlineDeletions
 
         final List<String> filters = checkFilters(region, matchedCopyNumber, cohortFrequency);
 
-        int exonRankMin = 0;
-        int exonRankMax = 0;
-
         List<GeneData> deletedGenes = Lists.newArrayList();
+        List<int[]> deletedExonRanges = Lists.newArrayList();
 
         for(GeneData geneData : overlappingGenes)
         {
@@ -375,15 +373,12 @@ public class GermlineDeletions
             PPL_LOGGER.trace("region({}: {}-{}) overlaps gene({}) exons({})",
                     region.chromosome(), region.start(), region.end(), geneData.GeneName, overlappedExons.size());
 
-            // take the first if more than one overlapping gene
-            if(transcripts.isEmpty())
-            {
-                exonRankMin = overlappedExons.stream().mapToInt(x -> x.Rank).min().orElse(0);
-                exonRankMax = overlappedExons.stream().mapToInt(x -> x.Rank).max().orElse(0);
-            }
+            int exonRankMin = overlappedExons.stream().mapToInt(x -> x.Rank).min().orElse(0);
+            int exonRankMax = overlappedExons.stream().mapToInt(x -> x.Rank).max().orElse(0);
 
             transcripts.add(transData);
             deletedGenes.add(geneData);
+            deletedExonRanges.add(new int[] {exonRankMin, exonRankMax} );
         }
 
         if(transcripts.isEmpty())
@@ -404,13 +399,16 @@ public class GermlineDeletions
             filter = sj.toString();
         }
 
-        for(GeneData geneData : deletedGenes)
+        for(int i = 0; i < deletedGenes.size(); ++i)
         {
+            GeneData geneData = deletedGenes.get(i);
+            int[] deletedExonRange = deletedExonRanges.get(i);
+
             boolean reportedGene = filters.isEmpty() && driverGenes.stream().anyMatch(x -> x.gene().equals(geneData.GeneName));
 
             mDeletions.add(new GermlineDeletion(
                     geneData.GeneName, region.chromosome(), geneData.KaryotypeBand, adjustPosStart, adjustPosEnd,
-                    region.depthWindowCount(), exonRankMin, exonRankMax,
+                    region.depthWindowCount(), deletedExonRange[0], deletedExonRange[1],
                     GermlineDetectionMethod.SEGMENT, region.germlineStatus(), tumorStatus, germlineCopyNumber, tumorCopyNumber,
                     filter, cohortFrequency, reportedGene));
         }

@@ -1,12 +1,9 @@
 package com.hartwig.hmftools.orange.algo;
 
-import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
-import static com.hartwig.hmftools.common.utils.file.FileReaderUtils.createFieldsIndexMap;
 import static com.hartwig.hmftools.orange.OrangeApplication.LOGGER;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.text.DecimalFormat;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +16,6 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.chord.ChordData;
 import com.hartwig.hmftools.common.chord.ChordDataFile;
-import com.hartwig.hmftools.common.cuppa2.CuppaPredictions;
 import com.hartwig.hmftools.common.doid.DiseaseOntology;
 import com.hartwig.hmftools.common.doid.DoidEntry;
 import com.hartwig.hmftools.common.doid.DoidNode;
@@ -40,7 +36,6 @@ import com.hartwig.hmftools.common.peach.PeachGenotype;
 import com.hartwig.hmftools.common.peach.PeachGenotypeFile;
 import com.hartwig.hmftools.common.pipeline.PipelineVersionFile;
 import com.hartwig.hmftools.common.purple.PurityContext;
-import com.hartwig.hmftools.common.sage.GeneDepthFile;
 import com.hartwig.hmftools.common.sigs.SignatureAllocation;
 import com.hartwig.hmftools.common.sigs.SignatureAllocationFile;
 import com.hartwig.hmftools.common.virus.VirusInterpreterData;
@@ -48,6 +43,7 @@ import com.hartwig.hmftools.common.virus.VirusInterpreterDataLoader;
 import com.hartwig.hmftools.datamodel.cohort.Evaluation;
 import com.hartwig.hmftools.datamodel.cuppa.CuppaData;
 import com.hartwig.hmftools.datamodel.flagstat.Flagstat;
+import com.hartwig.hmftools.datamodel.immuno.ImmuneEscapeRecord;
 import com.hartwig.hmftools.datamodel.isofox.IsofoxRecord;
 import com.hartwig.hmftools.datamodel.linx.LinxRecord;
 import com.hartwig.hmftools.datamodel.metrics.WGSMetrics;
@@ -62,7 +58,9 @@ import com.hartwig.hmftools.datamodel.purple.PurpleRecord;
 import com.hartwig.hmftools.datamodel.wildtype.WildTypeGene;
 import com.hartwig.hmftools.orange.OrangeConfig;
 import com.hartwig.hmftools.orange.OrangeRnaConfig;
+import com.hartwig.hmftools.orange.OrangeWGSRefConfig;
 import com.hartwig.hmftools.orange.algo.cuppa.CuppaDataFactory;
+import com.hartwig.hmftools.orange.algo.immuno.ImmuneEscapeInterpreter;
 import com.hartwig.hmftools.orange.algo.isofox.IsofoxInterpreter;
 import com.hartwig.hmftools.orange.algo.linx.LinxInterpreter;
 import com.hartwig.hmftools.orange.algo.linx.LinxReportableClusters;
@@ -71,12 +69,17 @@ import com.hartwig.hmftools.orange.algo.plot.DummyPlotManager;
 import com.hartwig.hmftools.orange.algo.plot.FileBasedPlotManager;
 import com.hartwig.hmftools.orange.algo.plot.PlotManager;
 import com.hartwig.hmftools.orange.algo.purple.GermlineGainLossFactory;
+import com.hartwig.hmftools.orange.algo.purple.GermlineLossOfHeterozygosityFactory;
 import com.hartwig.hmftools.orange.algo.purple.PurpleData;
 import com.hartwig.hmftools.orange.algo.purple.PurpleDataLoader;
 import com.hartwig.hmftools.orange.algo.purple.PurpleInterpreter;
 import com.hartwig.hmftools.orange.algo.purple.PurpleVariantFactory;
+import com.hartwig.hmftools.orange.algo.sage.GermlineMVLHFactory;
+import com.hartwig.hmftools.orange.algo.sigs.SigsEtiologiesLoader;
+import com.hartwig.hmftools.orange.algo.sigs.SigsInterpreter;
 import com.hartwig.hmftools.orange.algo.util.GermlineConversion;
 import com.hartwig.hmftools.orange.algo.util.ReportLimiter;
+import com.hartwig.hmftools.orange.algo.virus.VirusInterpreter;
 import com.hartwig.hmftools.orange.algo.wildtype.WildTypeAlgo;
 import com.hartwig.hmftools.orange.cohort.datamodel.ImmutableObservation;
 import com.hartwig.hmftools.orange.cohort.datamodel.ImmutableSample;
@@ -105,6 +108,8 @@ public class OrangeAlgo
     private final CohortPercentilesModel percentilesModel;
     @NotNull
     private final List<DriverGene> driverGenes;
+    @NotNull
+    private final Map<String, String> etiologyPerSignature;
     @NotNull
     private final KnownFusionCache knownFusionCache;
     @NotNull
@@ -135,6 +140,10 @@ public class OrangeAlgo
         List<DriverGene> driverGenes = DriverGeneFile.read(config.driverGenePanelTsv());
         LOGGER.info(" Read {} driver genes", driverGenes.size());
 
+        LOGGER.info("Reading signatures etiology from {}", config.signaturesEtiologyTsv());
+        Map<String, String> etiologyPerSignature = SigsEtiologiesLoader.read(config.signaturesEtiologyTsv());
+        LOGGER.info(" Read {} signatures etiology", etiologyPerSignature.size());
+
         LOGGER.info("Reading known fusions from {}", config.knownFusionFile());
         KnownFusionCache knownFusionCache = new KnownFusionCache();
         if(!knownFusionCache.loadFile(config.knownFusionFile()))
@@ -150,11 +159,13 @@ public class OrangeAlgo
         String outputDir = config.outputDir();
         PlotManager plotManager = !outputDir.isEmpty() ? new FileBasedPlotManager(outputDir) : new DummyPlotManager();
 
-        return new OrangeAlgo(doidEntry, mapper, percentilesModel, driverGenes, knownFusionCache, ensemblDataCache, plotManager);
+        return new OrangeAlgo(doidEntry, mapper, percentilesModel, driverGenes, etiologyPerSignature, knownFusionCache, ensemblDataCache,
+                plotManager);
     }
 
     private OrangeAlgo(@NotNull final DoidEntry doidEntry, @NotNull final CohortMapper cohortMapper,
             @NotNull final CohortPercentilesModel percentilesModel, @NotNull final List<DriverGene> driverGenes,
+            @NotNull final Map<String, String> etiologyPerSignature,
             @NotNull final KnownFusionCache knownFusionCache, @NotNull final EnsemblDataCache ensemblDataCache,
             @NotNull final PlotManager plotManager)
     {
@@ -162,6 +173,7 @@ public class OrangeAlgo
         this.cohortMapper = cohortMapper;
         this.percentilesModel = percentilesModel;
         this.driverGenes = driverGenes;
+        this.etiologyPerSignature = etiologyPerSignature;
         this.knownFusionCache = knownFusionCache;
         this.ensemblDataCache = ensemblDataCache;
         this.plotManager = plotManager;
@@ -178,7 +190,7 @@ public class OrangeAlgo
 
         PurpleData purpleData = loadPurpleData(config);
         LinxData linxData = loadLinxData(config);
-        Map<String, Double> mvlhPerGene = loadGermlineMVLHPerGene(config);
+        Map<String, Double> mvlhPerGene = loadGermlineMVLHPerGene(config, driverGenes);
         ChordData chord = loadChordAnalysis(config);
         LilacSummaryData lilac = loadLilacData(config);
         VirusInterpreterData virusInterpreter = loadVirusInterpreterData(config);
@@ -194,9 +206,12 @@ public class OrangeAlgo
 
         PurpleVariantFactory purpleVariantFactory = new PurpleVariantFactory(pave);
         GermlineGainLossFactory germlineGainLossFactory = new GermlineGainLossFactory(ensemblDataCache);
+        GermlineLossOfHeterozygosityFactory germlineLOHFactory = new GermlineLossOfHeterozygosityFactory(ensemblDataCache);
         PurpleInterpreter purpleInterpreter =
-                new PurpleInterpreter(purpleVariantFactory, germlineGainLossFactory, driverGenes, linx, chord);
+                new PurpleInterpreter(purpleVariantFactory, germlineGainLossFactory, germlineLOHFactory, driverGenes, linx, chord);
         PurpleRecord purple = purpleInterpreter.interpret(purpleData);
+
+        ImmuneEscapeRecord immuneEscape = ImmuneEscapeInterpreter.interpret(purple, linx);
 
         IsofoxRecord isofox = null;
         if(isofoxData != null)
@@ -222,12 +237,7 @@ public class OrangeAlgo
             LOGGER.info("Wild-type calling skipped due to insufficient tumor sample quality");
         }
 
-        // TODO update hasRef flag after LILAC v1.6 is released, which fixes tumor-only fragments
-        // being written to the ref field.
-        //   boolean hasRef = config.refSampleWGSMetricsFile() != null && config.refSampleFlagstatFile() != null;
-        boolean hasRef = true;
-        boolean hasRna = config.rnaConfig() != null;
-
+        boolean hasRefSample = config.wgsRefConfig() != null && config.wgsRefConfig().referenceSampleId() != null;
         OrangeRecord report = ImmutableOrangeRecord.builder()
                 .sampleId(config.tumorSampleId())
                 .samplingDate(config.samplingDate())
@@ -242,12 +252,13 @@ public class OrangeAlgo
                 .linx(linx)
                 .wildTypeGenes(wildTypeGenes)
                 .isofox(isofox)
-                .lilac(OrangeConversion.convert(lilac, hasRef, hasRna))
-                .virusInterpreter(virusInterpreter != null ? OrangeConversion.convert(virusInterpreter) : null)
+                .lilac(OrangeConversion.convert(lilac, hasRefSample, config.rnaConfig() != null))
+                .immuneEscape(immuneEscape)
+                .virusInterpreter(virusInterpreter != null ? VirusInterpreter.interpret(virusInterpreter) : null)
                 .chord(chord != null ? OrangeConversion.convert(chord) : null)
                 .cuppa(cuppa)
                 .peach(ConversionUtil.mapToIterable(peach, OrangeConversion::convert))
-                .sigAllocations(ConversionUtil.mapToIterable(sigAllocations, OrangeConversion::convert))
+                .sigAllocations(SigsInterpreter.interpret(sigAllocations, etiologyPerSignature))
                 .cohortEvaluations(evaluateCohortPercentiles(config, purple))
                 .plots(buildPlots(config))
                 .build();
@@ -366,35 +377,20 @@ public class OrangeAlgo
     }
 
     @Nullable
-    private static Map<String, Double> loadGermlineMVLHPerGene(@NotNull OrangeConfig config) throws IOException
+    private static Map<String, Double> loadGermlineMVLHPerGene(@NotNull OrangeConfig config, @NotNull List<DriverGene> driverGenes)
+            throws IOException
     {
-        String sageGermlineGeneCoverageTsv =
-                config.wgsRefConfig() != null ? config.wgsRefConfig().sageGermlineGeneCoverageTsv() : null;
+        OrangeWGSRefConfig orangeWGSRefConfig = config.wgsRefConfig();
+        String sageGermlineGeneCoverageTsv = orangeWGSRefConfig != null ? orangeWGSRefConfig.sageGermlineGeneCoverageTsv() : null;
         if(sageGermlineGeneCoverageTsv == null)
         {
             LOGGER.info("Skipping loading of germline MVLH as no germline gene coverage has been provided");
             return null;
         }
 
-        Map<String, Double> mvlhPerGene = Maps.newTreeMap();
-
-        List<String> lines = Files.readAllLines(new File(sageGermlineGeneCoverageTsv).toPath());
-        String header = lines.get(0);
-
-        Map<String, Integer> fieldsIndexMap = createFieldsIndexMap(header, TSV_DELIM);
-        int geneIndex = fieldsIndexMap.get(GeneDepthFile.COL_GENE);
-        int mvlhIndex = fieldsIndexMap.get(GeneDepthFile.COL_MV_LIKELIHOOD);
-
-        for(String line : lines.subList(1, lines.size()))
-        {
-            String[] values = line.split(TSV_DELIM);
-            String gene = values[geneIndex];
-            String mvlhString = values[mvlhIndex].substring(0, values[mvlhIndex].length() - 1);
-            double missedVariantLikelihood = Double.parseDouble(mvlhString) / 100D;
-            mvlhPerGene.put(gene, missedVariantLikelihood);
-        }
-
+        Map<String, Double> mvlhPerGene = GermlineMVLHFactory.loadGermlineMVLHPerGene(sageGermlineGeneCoverageTsv, driverGenes);
         LOGGER.info("Loaded MVLH data for {} genes", mvlhPerGene.keySet().size());
+
         return mvlhPerGene;
     }
 
@@ -503,11 +499,28 @@ public class OrangeAlgo
             return null;
         }
 
-        String isofoxCancerType = cohortMapper.cancerTypeForSample(createSample(config));
-        if(isofoxCancerType == null)
+        String orangeCancerType = cohortMapper.cancerTypeForSample(createSample(config));
+        if(orangeCancerType == null)
         {
-            LOGGER.warn("Could not resolve isofox cancer type for {}", config.tumorSampleId());
+            LOGGER.warn("Could not resolve ORANGE cancer type for {}", config.tumorSampleId());
             return null;
+        }
+
+        String isofoxCancerType;
+        // TODO (KD): Replace with unified cohort mapping code (see also ACTIN-1010)
+        if(orangeCancerType.equals("Ovary/Fallopian tube"))
+        {
+            isofoxCancerType = "Ovary";
+            LOGGER.debug("Converted orange cancer type '{}' to isofox cancer type '{}'", orangeCancerType, isofoxCancerType);
+        }
+        else if(orangeCancerType.equals("Unknown"))
+        {
+            isofoxCancerType = null;
+            LOGGER.debug("Converted orange cancer type '{}' to null isofox cancer type", orangeCancerType);
+        }
+        else
+        {
+            isofoxCancerType = orangeCancerType;
         }
 
         return IsofoxDataLoader.load(isofoxCancerType,
@@ -567,21 +580,18 @@ public class OrangeAlgo
     @Nullable
     private static CuppaData loadCuppaData(@NotNull OrangeConfig config) throws Exception
     {
-        if(config.wgsRefConfig() == null)
+        OrangeWGSRefConfig orangeWGSRefConfig = config.wgsRefConfig();
+        if(orangeWGSRefConfig == null)
         {
             return null;
         }
 
-        CuppaPredictions cuppaPredictions = null;
-        String cuppaVisDataTsv = config.wgsRefConfig().cuppaVisDataTsv();
-        if(cuppaVisDataTsv != null)
-        {
-            LOGGER.info("Loading CUPPA predictions from {}", new File(cuppaVisDataTsv).getParent());
-            cuppaPredictions = CuppaPredictions.fromTsv(cuppaVisDataTsv);
-            LOGGER.info(" Loaded {} CUPPA prediction entries from {}", cuppaPredictions.PredictionEntries.size(), cuppaVisDataTsv);
-        }
+        String cuppaVisDataTsv = orangeWGSRefConfig.cuppaVisDataTsv();
+        LOGGER.info("Loading CUPPA predictions from {}", new File(cuppaVisDataTsv).getParent());
+        CuppaData cuppaData = CuppaDataFactory.create(cuppaVisDataTsv);
+        LOGGER.info(" Loaded {} CUPPA predictions from {}", cuppaData.predictions().size(), cuppaVisDataTsv);
 
-        return CuppaDataFactory.create(cuppaPredictions);
+        return cuppaData;
     }
 
     @Nullable

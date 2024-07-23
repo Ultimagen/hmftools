@@ -1,14 +1,14 @@
 package com.hartwig.hmftools.purple.copynumber;
 
-import static com.hartwig.hmftools.purple.TestUtils.createDefaultFittedRegion;
-import static com.hartwig.hmftools.purple.TestUtils.buildPurityAdjuster;
+import static com.hartwig.hmftools.purple.MiscTestUtils.createDefaultFittedRegion;
+import static com.hartwig.hmftools.purple.MiscTestUtils.buildPurityAdjuster;
 
 import static org.junit.Assert.assertEquals;
 
 import java.util.List;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.purple.purity.PurityAdjuster;
+import com.hartwig.hmftools.purple.fitting.PurityAdjuster;
 import com.hartwig.hmftools.common.purple.Gender;
 import com.hartwig.hmftools.purple.region.ObservedRegion;
 import com.hartwig.hmftools.common.purple.GermlineStatus;

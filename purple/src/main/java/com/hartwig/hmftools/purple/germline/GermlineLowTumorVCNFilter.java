@@ -2,6 +2,8 @@ package com.hartwig.hmftools.purple.germline;
 
 import com.hartwig.hmftools.common.utils.Doubles;
 
+import htsjdk.variant.variantcontext.VariantContext;
+import htsjdk.variant.variantcontext.VariantContextBuilder;
 import htsjdk.variant.vcf.VCFFilterHeaderLine;
 import htsjdk.variant.vcf.VCFHeader;
 
@@ -22,13 +24,14 @@ public final class GermlineLowTumorVCNFilter
             if(variant.context().getPhredScaledQual() < minQual)
             {
                 variant.filters().add(LOW_TUMOR_VCN_FILTER);
+                VariantContext newContext = new VariantContextBuilder(variant.context()).filter(LOW_TUMOR_VCN_FILTER).make();
+                variant.setContext(newContext);
             }
         }
     }
 
-    public static VCFHeader enrichHeader(final VCFHeader template)
+    public static void enrichHeader(final VCFHeader header)
     {
-        template.addMetaDataLine(new VCFFilterHeaderLine(LOW_TUMOR_VCN_FILTER, "Germline variant has very low tumor variant copy number"));
-        return template;
+        header.addMetaDataLine(new VCFFilterHeaderLine(LOW_TUMOR_VCN_FILTER, "Germline variant has very low tumor variant copy number"));
     }
 }

@@ -1,22 +1,23 @@
 package com.hartwig.hmftools.bamtools.compare;
 
-import static java.lang.String.format;
-
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.BT_LOGGER;
-import static com.hartwig.hmftools.common.samtools.SamRecordUtils.SUPPLEMENTARY_ATTRIBUTE;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.SUPPLEMENTARY_ATTRIBUTE;
+import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
+import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.util.List;
+import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
-import com.hartwig.hmftools.common.samtools.SupplementaryReadData;
+import com.hartwig.hmftools.common.bam.SupplementaryReadData;
 
 import htsjdk.samtools.SAMRecord;
 
-public class ReadWriter
+public class ReadWriter implements AutoCloseable
 {
     private final BufferedWriter mWriter;
 
@@ -31,11 +32,12 @@ public class ReadWriter
     {
         try
         {
-            // write summary metrics
             BufferedWriter writer = createBufferedWriter(filename, false);
 
-            writer.write("ReadId\tChromosome\tPosStart\tMismatchType\tDiff\tMateChr\tMatePos");
-            writer.write("\tCigar\tFlags\tMapQual\tPaired\tIsFirst\tNegStrand\tDuplicate\tIsSupp\tSuppData");
+            StringJoiner sj = new StringJoiner(TSV_DELIM);
+            sj.add("ReadId").add("Chromosome").add("PosStart").add("MismatchType").add("Diff").add("MateChr").add("MatePos");
+            sj.add("Cigar").add("Flags").add("MapQual").add("IsFirst").add("NegStrand").add("Duplicate").add("IsSupp").add("SuppData");
+            writer.write(sj.toString());
             writer.newLine();
             return writer;
         }
@@ -50,16 +52,25 @@ public class ReadWriter
     {
         try
         {
-            String diffDetails = diffList != null ? diffList.stream().collect(Collectors.joining(";")) : "";
-            mWriter.write(format("%s\t%s\t%d\t%s\t%s\t%s\t%d",
-                    read.getReadName(), read.getReferenceName(), read.getAlignmentStart(), mismatchType, diffDetails,
-                    read.getMateReferenceName(), read.getMateAlignmentStart()));
+            String diffDetails = diffList != null ? diffList.stream().collect(Collectors.joining(ITEM_DELIM)) : "";
 
-            mWriter.write(format("\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s",
-                    read.getCigarString(), read.getFlags(), read.getMappingQuality(), read.getReadPairedFlag(), read.getFirstOfPairFlag(),
-                    read.getReadNegativeStrandFlag(), read.getDuplicateReadFlag(), read.getSupplementaryAlignmentFlag(),
-                    read.hasAttribute(SUPPLEMENTARY_ATTRIBUTE) ? SupplementaryReadData.extractAlignment(read).asCsv() : "N/A"));
-
+            StringJoiner sj = new StringJoiner(TSV_DELIM);
+            sj.add(read.getReadName());
+            sj.add(read.getReferenceName());
+            sj.add(String.valueOf(read.getAlignmentStart()));
+            sj.add(String.valueOf(mismatchType));
+            sj.add(diffDetails);
+            sj.add(read.getMateReferenceName());
+            sj.add(String.valueOf(read.getMateAlignmentStart()));
+            sj.add(read.getCigarString());
+            sj.add(String.valueOf(read.getFlags()));
+            sj.add(String.valueOf(read.getMappingQuality()));
+            sj.add(String.valueOf(!read.getReadPairedFlag() || read.getFirstOfPairFlag()));
+            sj.add(String.valueOf(read.getReadNegativeStrandFlag()));
+            sj.add(String.valueOf(read.getDuplicateReadFlag()));
+            sj.add(String.valueOf(read.getSupplementaryAlignmentFlag()));
+            sj.add(read.hasAttribute(SUPPLEMENTARY_ATTRIBUTE) ? SupplementaryReadData.extractAlignment(read).asCsv() : "N/A");
+            mWriter.write(sj.toString());
             mWriter.newLine();
         }
         catch(IOException e)
@@ -68,18 +79,6 @@ public class ReadWriter
         }
     }
 
+    @Override
     public void close() { closeBufferedWriter(mWriter); }
-
-    public static String readDetails(final SAMRecord read)
-    {
-        boolean unmapped = read.getReadUnmappedFlag();
-
-        return format("%s_%s_%d_%s_%s_%s",
-                read.getReadName(),
-                unmapped ? "unmapped" : read.getReferenceName(),
-                unmapped ? 0 : read.getAlignmentStart(),
-                read.getReadNegativeStrandFlag() ? "fwd" : "rev",
-                read.getFirstOfPairFlag() ? "R1" : "R2",
-                read.getSupplementaryAlignmentFlag() ? "supp" : "prim");
-    }
 }

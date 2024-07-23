@@ -1,30 +1,53 @@
 package com.hartwig.hmftools.common.amber;
 
+import static java.lang.String.format;
+
 import com.hartwig.hmftools.common.genome.position.GenomePosition;
+import com.hartwig.hmftools.common.region.BasePosition;
 
-import org.immutables.value.Value;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
-@Value.Immutable
-@Value.Style(passAnnotations = { NotNull.class, Nullable.class })
-public interface AmberBAF extends GenomePosition
+public class AmberBAF implements GenomePosition
 {
-    double tumorBAF();
+    public final String Chromosome;
+    public final int Position;
+    public final double TumorBAF;
+    public final int TumorDepth;
+    public final double NormalBAF;
+    public final int NormalDepth;
 
-    default double tumorModifiedBAF()
+    public AmberBAF(
+            final String chromosome, final int position, final double tumorBAF, final int tumorDepth, final double normalBAF,
+            final int normalDepth)
+    {
+        Chromosome = chromosome;
+        Position = position;
+        TumorBAF = tumorBAF;
+        TumorDepth = tumorDepth;
+        NormalBAF = normalBAF;
+        NormalDepth = normalDepth;
+    }
+
+    @Override
+    public String chromosome() { return Chromosome; }
+    public int position() { return Position; }
+
+    public double tumorModifiedBAF()
     {
         return 0.5 + Math.abs(tumorBAF() - 0.5);
     }
-
-    int tumorDepth();
-
-    double normalBAF();
-
-    default double normalModifiedBAF()
+    public double normalModifiedBAF()
     {
         return 0.5 + Math.abs(normalBAF() - 0.5);
     }
 
-    int normalDepth();
+    public String toString()
+    {
+        return format("location(%s) tumor(baf=%.4f depth=%d) normal(baf=%.4f depth=%d)",
+                    super.toString(), TumorBAF, TumorDepth, NormalBAF, NormalDepth);
+    }
+
+    // backwards compatibility
+    public double tumorBAF() { return TumorBAF; }
+    public int tumorDepth() { return TumorDepth; }
+    public double normalBAF() { return NormalBAF; }
+    public int normalDepth() { return NormalDepth; }
 }

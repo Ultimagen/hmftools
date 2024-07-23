@@ -3,6 +3,7 @@ package com.hartwig.hmftools.sage.pipeline;
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
+import static com.hartwig.hmftools.sage.common.RepeatInfo.setReferenceMaxRepeatInfo;
 
 import java.util.List;
 import java.util.Map;
@@ -16,22 +17,23 @@ import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
 import com.hartwig.hmftools.common.region.BaseRegion;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.common.utils.PerformanceCounter;
-import com.hartwig.hmftools.common.variant.hotspot.VariantHotspot;
 import com.hartwig.hmftools.sage.SageCallConfig;
 import com.hartwig.hmftools.sage.bqr.BqrRecordMap;
 import com.hartwig.hmftools.sage.candidate.Candidate;
 import com.hartwig.hmftools.sage.common.RefSequence;
 import com.hartwig.hmftools.sage.common.SageVariant;
 import com.hartwig.hmftools.sage.common.SamSlicerFactory;
+import com.hartwig.hmftools.sage.common.SimpleVariant;
 import com.hartwig.hmftools.sage.coverage.Coverage;
 import com.hartwig.hmftools.sage.dedup.VariantDeduper;
-import com.hartwig.hmftools.sage.evidence.FragmentLengthData;
+import com.hartwig.hmftools.common.sage.FragmentLengthCounts;
 import com.hartwig.hmftools.sage.evidence.FragmentLengths;
 import com.hartwig.hmftools.sage.evidence.ReadContextCounter;
 import com.hartwig.hmftools.sage.evidence.ReadContextCounters;
 import com.hartwig.hmftools.sage.filter.VariantFilters;
 import com.hartwig.hmftools.sage.phase.PhaseSetCounter;
 import com.hartwig.hmftools.sage.phase.VariantPhaser;
+import com.hartwig.hmftools.sage.quality.MsiJitterCalcs;
 import com.hartwig.hmftools.sage.vis.VariantVis;
 
 public class RegionTask
@@ -59,9 +61,9 @@ public class RegionTask
 
     public RegionTask(
             final int taskId, final ChrBaseRegion region, final RegionResults results, final SageCallConfig config,
-            final RefGenomeInterface refGenome, final List<VariantHotspot> hotspots, final List<BaseRegion> panelRegions,
+            final RefGenomeInterface refGenome, final List<SimpleVariant> hotspots, final List<BaseRegion> panelRegions,
             final List<TranscriptData> transcripts, final List<BaseRegion> highConfidenceRegions,
-            final Map<String, BqrRecordMap> qualityRecalibrationMap, final PhaseSetCounter phaseSetCounter,
+            final Map<String, BqrRecordMap> qualityRecalibrationMap, final MsiJitterCalcs msiJitterCalcs, final PhaseSetCounter phaseSetCounter,
             final Coverage coverage, final SamSlicerFactory samSlicerFactory, final FragmentLengths fragmentLengths)
     {
         mTaskId = taskId;
@@ -72,9 +74,11 @@ public class RegionTask
         mFragmentLengths = fragmentLengths;
 
         mCandidateState = new CandidateStage(config, hotspots, panelRegions, highConfidenceRegions, coverage, samSlicerFactory);
-        mEvidenceStage = new EvidenceStage(config.Common, refGenome, qualityRecalibrationMap, phaseSetCounter, samSlicerFactory);
 
-        mVariantDeduper = new VariantDeduper(transcripts, mRefGenome, mConfig.OldIndelDedup, mConfig.Common.getReadLength());
+        mEvidenceStage = new EvidenceStage(
+                config.Common, refGenome, qualityRecalibrationMap, msiJitterCalcs, phaseSetCounter, samSlicerFactory);
+
+        mVariantDeduper = new VariantDeduper(transcripts, mRefGenome, mConfig.Common.getReadLength(), mConfig.Common.Filter);
 
         mSageVariants = Lists.newArrayList();
         mPassingPhaseSets = Sets.newHashSet();
@@ -110,6 +114,8 @@ public class RegionTask
             return;
         }
 
+        mResults.addCandidates(initialCandidates.size());
+
         SG_LOGGER.trace("{}: region({}) building evidence for {} candidates", mTaskId, mRegion, initialCandidates.size());
 
         mPerfCounters.get(PC_EVIDENCE).start();
@@ -119,8 +125,8 @@ public class RegionTask
 
         List<Candidate> finalCandidates = tumorEvidence.filterCandidates();
 
-        ReadContextCounters normalEvidence = mEvidenceStage.findEvidence
-                (mRegion, "normal", mConfig.Common.ReferenceIds, finalCandidates, false);
+        ReadContextCounters referenceEvidence = mEvidenceStage.findEvidence
+                (mRegion, "reference", mConfig.Common.ReferenceIds, finalCandidates, false);
 
         mPerfCounters.get(PC_EVIDENCE).stop();
 
@@ -141,7 +147,7 @@ public class RegionTask
 
             VariantFilters filters = new VariantFilters(mConfig.Common);
 
-            // combine normal and tumor together to create variants, then apply soft filters
+            // combine reference and tumor together to create variants, then apply soft filters
             Set<ReadContextCounter> passingTumorReadCounters = Sets.newHashSet();
             Set<ReadContextCounter> validTumorReadCounters = Sets.newHashSet(); // those not hard-filtered
 
@@ -149,12 +155,13 @@ public class RegionTask
             {
                 Candidate candidate = finalCandidates.get(candidateIndex);
 
-                final List<ReadContextCounter> normalReadCounters = !mConfig.Common.ReferenceIds.isEmpty() ?
-                        normalEvidence.getReadCounters(candidateIndex) : Lists.newArrayList();
+                final List<ReadContextCounter> refCounters = !mConfig.Common.ReferenceIds.isEmpty() ?
+                        referenceEvidence.getReadCounters(candidateIndex) : Lists.newArrayList();
 
                 final List<ReadContextCounter> tumorReadCounters = tumorEvidence.getFilteredReadCounters(candidateIndex);
 
-                SageVariant sageVariant = new SageVariant(candidate, normalReadCounters, tumorReadCounters);
+                SageVariant sageVariant = new SageVariant(candidate, refCounters, tumorReadCounters);
+                setReferenceMaxRepeatInfo(sageVariant, refSequence);
                 mSageVariants.add(sageVariant);
 
                 // apply filters
@@ -220,7 +227,7 @@ public class RegionTask
                 for(int s = 0; s < mConfig.TumorIds.size(); ++s)
                 {
                     String sampleId = mConfig.TumorIds.get(s);
-                    FragmentLengthData fragmentLengthData = variant.tumorReadCounters().get(s).fragmentLengths();
+                    FragmentLengthCounts fragmentLengthData = variant.tumorReadCounters().get(s).fragmentLengths();
                     mFragmentLengths.writeVariantFragmentLength(variantInfo, sampleId, fragmentLengthData);
                 }
             }

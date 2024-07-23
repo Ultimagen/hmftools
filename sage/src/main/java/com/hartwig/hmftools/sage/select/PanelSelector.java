@@ -11,7 +11,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.hartwig.hmftools.common.region.BaseRegion;
 
-@NotThreadSafe
 public class PanelSelector
 {
     private final List<BaseRegion> mRegions;
@@ -53,6 +52,8 @@ public class PanelSelector
         return MIXED;
     }
 
+    public List<BaseRegion> regions() { return mRegions; }
+
     public boolean inPanel(int start, int end)
     {
         // returns true if start and end fall within the same panel region
@@ -92,5 +93,4 @@ public class PanelSelector
     {
         return mRegions.get(mIndex);
     }
-
 }

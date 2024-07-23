@@ -10,9 +10,8 @@ public enum SoftFilter
     MIN_TUMOR_VAF("minTumorVAF", "min_tumor_vaf", true, false, "Insufficient tumor VAF"),
     MIN_GERMLINE_DEPTH("minGermlineDepth", "min_germline_depth", false, true, "Insufficient germline depth"),
     MAX_GERMLINE_VAF("maxGermlineVAF", "max_germline_vaf", false, true, "Excess germline VAF"),
-    MAX_GERMLINE_REL_RAW_BASE_QUAL(
-            "maxGermlineRelRawBaseQual", "max_germline_rel_raw_base_qual", false, true,
-            "Excess germline relative quality"),
+    MAX_GERMLINE_RELATIVE_QUAL(
+            "maxGermlineRelQual", "max_germline_rel_qual", false, true, "Excess germline relative qual"),
     MAX_GERMLINE_ALT_SUPPORT(
             "maxGermlineAltSupport", "max_germline_alt_support", false, true, "Excess germline alt support"),
     MIN_AVG_BASE_QUALITY("minAvgBaseQual", "", true, false, "Variant average base quality below limit"),
@@ -20,11 +19,18 @@ public enum SoftFilter
     READ_STRAND_BIAS("readStrandBias", "", true, false, "Variant exceeds read strand bias limit"),
     FRAGMENT_COORDS("minFragmentCoords", "", true, false, "Insufficient fragment coordinate variation"),
     MAX_EDGE_DISTANCE("maxEdgeDistance", "", true, false, "Variant close to read edge"),
-    MAP_QUAL_REF_ALT_DIFFERENCE("mapQualRefAltDiff", "", true, false, "Alt support map qual well below ref support"),
-    JITTER("jitter", "", true, false, "Jitter filter");
+    MAP_QUAL_REF_ALT_DIFFERENCE(
+            "mapQualRefAltDiff", "", true, false, "Alt support map qual well below ref support"),
+    JITTER("jitter", "", true, false, "Jitter filter"),
+    DEDUP_MNV("dedupMnv", "", true, false, "Filter MNV duplicate"),
+    DEDUP_MIXED_GERMLINE_SOMATIC(
+            "dedupMixedGermlineSomatic", "", true, false, "Variant duplicate mixed somatic/germline"),
+    DEDUP_SNV_MNV("dedupSnvMnv", "", true, false, "Variant duplicate MNV vs SNV"),
+    DEDUP_INDEL("dedupIndel", "", true, false, "Variant duplicate SNV/MNV vs INDEL"),
+    DEDUP_MATCH("dedupMatch", "", true, false, "Variant duplicate with different read contexts");
 
-    private static final Set<String> TUMOR_FILTERS = Sets.newHashSet();
-    public static final Set<String> GERMLINE_FILTERS = Sets.newHashSet();
+    private static final Set<SoftFilter> TUMOR_FILTERS = Sets.newHashSet();
+    public static final Set<SoftFilter> GERMLINE_FILTERS = Sets.newHashSet();
 
     static
     {
@@ -32,11 +38,11 @@ public enum SoftFilter
         {
             if(softFilter.mGermline)
             {
-                GERMLINE_FILTERS.add(softFilter.filterName());
+                GERMLINE_FILTERS.add(softFilter);
             }
             if(softFilter.mTumor)
             {
-                TUMOR_FILTERS.add(softFilter.filterName());
+                TUMOR_FILTERS.add(softFilter);
             }
         }
     }
@@ -62,9 +68,9 @@ public enum SoftFilter
 
     public String toString() { return mFilter; }
 
-    public static boolean isGermlineAndNotTumorFiltered(final Set<String> softFilters)
+    public static boolean isGermlineAndNotTumorFiltered(final Set<SoftFilter> softFilters)
     {
-        for(final String softFilter : softFilters)
+        for(SoftFilter softFilter : softFilters)
         {
             if(TUMOR_FILTERS.contains(softFilter))
                 return false;

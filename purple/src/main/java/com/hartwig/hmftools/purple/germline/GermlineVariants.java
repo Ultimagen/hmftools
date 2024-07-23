@@ -8,13 +8,14 @@ import java.util.List;
 import java.util.Set;
 
 import com.hartwig.hmftools.common.purple.PurpleCommon;
-import com.hartwig.hmftools.purple.purity.PurityAdjuster;
+import com.hartwig.hmftools.common.variant.VcfFileReader;
+import com.hartwig.hmftools.purple.fitting.PurityAdjuster;
 import com.hartwig.hmftools.common.purple.PurpleCopyNumber;
 import com.hartwig.hmftools.common.variant.CommonVcfTags;
-import com.hartwig.hmftools.purple.config.PurpleConfig;
-import com.hartwig.hmftools.purple.config.ReferenceData;
+import com.hartwig.hmftools.purple.PurpleConfig;
+import com.hartwig.hmftools.purple.ReferenceData;
 
-import org.apache.commons.compress.utils.Lists;
+import com.google.common.collect.Lists;
 import org.jetbrains.annotations.Nullable;
 
 import htsjdk.variant.variantcontext.VariantContext;
@@ -58,12 +59,12 @@ public class GermlineVariants
         if(germlineVcf.isEmpty())
             return;
 
-        VCFFileReader vcfReader = new VCFFileReader(new File(germlineVcf), false);
+        VcfFileReader vcfReader = new VcfFileReader(germlineVcf);
 
         GermlineReportedEnrichment germlineReportedEnrichment = checkReported ?
                 new GermlineReportedEnrichment(mReferenceData.DriverGenes.driverGenes(), Collections.emptySet()) : null;
 
-        for(VariantContext context : vcfReader)
+        for(VariantContext context : vcfReader.iterator())
         {
             GermlineVariant variant = new GermlineVariant(context);
 
@@ -116,7 +117,8 @@ public class GermlineVariants
                 mVersion, referenceId, tumorSample, mReferenceData, purityAdjuster, copyNumbers,
                 mReferenceData.GermlineHotspots, somaticReportedGenes);
 
-        VCFHeader header = enrichment.enrichHeader(vcfReader.getFileHeader());
+        VCFHeader header = vcfReader.getFileHeader();
+        enrichment.enrichHeader(header);
         writer.writeHeader(header);
 
         for(GermlineVariant variant : mVariants)

@@ -3,6 +3,7 @@ package com.hartwig.hmftools.teal
 import htsjdk.samtools.SAMRecord
 import htsjdk.samtools.SAMTag
 import com.hartwig.hmftools.common.region.ChrBaseRegion
+import com.hartwig.hmftools.common.bam.SamRecordUtils
 import org.apache.logging.log4j.Level
 import org.apache.logging.log4j.LogManager
 import java.util.ArrayList
@@ -18,7 +19,7 @@ class ReadGroup(val name: String)
     {
         fun isMatch(read: SAMRecord): Boolean
         {
-            return read.firstOfPairFlag == firstOfPair &&
+            return SamRecordUtils.firstInPair(read) == firstOfPair &&
                 read.alignmentStart == position &&
                 read.readNegativeStrandFlag == negativeStrand &&
                 read.referenceName == chromosome &&
@@ -48,7 +49,7 @@ class ReadGroup(val name: String)
             // we have to find it
             for (r in Reads)
             {
-                if (r.firstOfPairFlag)
+                if (SamRecordUtils.firstInPair(r))
                 {
                     return r
                 }
@@ -63,7 +64,7 @@ class ReadGroup(val name: String)
             // we have to find it
             for (r in Reads)
             {
-                if (!r.firstOfPairFlag)
+                if (!SamRecordUtils.firstInPair(r))
                 {
                     return r
                 }
@@ -101,7 +102,7 @@ class ReadGroup(val name: String)
             val saAttribute = read.getStringAttribute(SAMTag.SA.name)
             if (saAttribute != null)
             {
-                for (sa in suppAlignmentPositions(read.firstOfPairFlag, saAttribute)!!)
+                for (sa in suppAlignmentPositions(SamRecordUtils.firstInPair(read), saAttribute)!!)
                 {
                     // check if this supplementary read exists
                     if (SupplementaryReads.stream().noneMatch { r: SAMRecord -> sa.isMatch(r) })
@@ -135,7 +136,12 @@ class ReadGroup(val name: String)
 
         // we only check chromosome and alignment start
         return listToLook.stream()
-            .anyMatch { x: SAMRecord -> x.firstOfPairFlag == read.firstOfPairFlag && x.alignmentStart == read.alignmentStart && x.readNegativeStrandFlag == read.readNegativeStrandFlag && x.referenceName == read.referenceName && x.cigar == read.cigar }
+            .anyMatch { x: SAMRecord ->
+                    SamRecordUtils.firstInPair(x) == SamRecordUtils.firstInPair(read) &&
+                    x.alignmentStart == read.alignmentStart &&
+                    x.readNegativeStrandFlag == read.readNegativeStrandFlag &&
+                    x.referenceName == read.referenceName &&
+                    x.cigar == read.cigar }
     }
 
     //public boolean isDuplicate() { return Reads.stream().anyMatch(x -> x.isDuplicate()); }
@@ -201,7 +207,7 @@ class ReadGroup(val name: String)
             val saAttribute = read.getStringAttribute(SAMTag.SA.name)
             if (saAttribute != null)
             {
-                for (sa in suppAlignmentPositions(read.firstOfPairFlag, saAttribute)!!)
+                for (sa in suppAlignmentPositions(SamRecordUtils.firstInPair(read), saAttribute)!!)
                 {
                     // check if this supplementary read exists
                     if (SupplementaryReads.stream().noneMatch { r: SAMRecord -> sa.isMatch(r) })
@@ -255,7 +261,8 @@ class ReadGroup(val name: String)
                 if (items.size < 5) continue
 
                 // supplementary(SA) string attribute looks like
-                // 4,191039958,+,68S33M,0,0
+                // SA:Z:(rname ,pos ,strand ,CIGAR ,mapQ ,NM ;)+
+                // 20,61647163,+,99M52S,0,1;11,70524575,+,95S30M26S,0,0;
                 // the first word is the chromosome, the second is the alignment start
                 val sa = SupplementaryAlignment(
                     firstOfPair = firstOfPair,

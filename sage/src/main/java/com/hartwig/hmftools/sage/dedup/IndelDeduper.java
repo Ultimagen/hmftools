@@ -9,9 +9,7 @@ import static com.hartwig.hmftools.common.region.BaseRegion.positionsWithin;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
 import static com.hartwig.hmftools.sage.SageConstants.INDEL_DEDUP_MIN_MATCHED_LPS_PERCENT;
 import static com.hartwig.hmftools.sage.SageConstants.MAX_READ_EDGE_DISTANCE_PERC;
-import static com.hartwig.hmftools.sage.dedup.DedupIndelOld.dedupIndelsOld;
-import static com.hartwig.hmftools.sage.vcf.VariantVCF.DEDUP_INDEL_FILTER;
-import static com.hartwig.hmftools.sage.vcf.VariantVCF.DEDUP_INDEL_FILTER_OLD;
+import static com.hartwig.hmftools.sage.filter.SoftFilter.DEDUP_INDEL;
 
 import java.util.Collections;
 import java.util.Comparator;
@@ -23,7 +21,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
-import com.hartwig.hmftools.sage.common.IndexedBases;
+import com.hartwig.hmftools.sage.common.VariantReadContext;
 import com.hartwig.hmftools.sage.common.SageVariant;
 import com.hartwig.hmftools.sage.common.SimpleVariant;
 import com.hartwig.hmftools.sage.evidence.ReadContextCounter;
@@ -34,24 +32,16 @@ public class IndelDeduper
     private final RefGenomeInterface mRefGenome;
     private int mGroupIterations;
     private final int mReadEdgeDistanceThreshold;
-    private boolean mRunOldDedup;
 
     public IndelDeduper(final RefGenomeInterface refGenome, int readLength)
     {
         mRefGenome = refGenome;
         mReadEdgeDistanceThreshold = (int)(readLength * MAX_READ_EDGE_DISTANCE_PERC);
         mGroupIterations = 0;
-        mRunOldDedup = false;
     }
-
-    public void setRunOldDedup() { mRunOldDedup = true; }
 
     public void dedupVariants(final List<SageVariant> variants)
     {
-        // first mark indels with the old method for comparison's sake
-        if(mRunOldDedup)
-            dedupIndelsOld(variants);
-
         List<VariantData> indels = Lists.newArrayList();
         List<VariantData> candidates = Lists.newArrayList();
 
@@ -62,7 +52,7 @@ public class IndelDeduper
 
             VariantData adjustedVariant = new VariantData(variant);
 
-            if(variant.isIndel() && adjustedVariant.unfiltered())
+            if(variant.isIndel() && adjustedVariant.allowByFilter())
                 indels.add(adjustedVariant);
 
             candidates.add(adjustedVariant);
@@ -97,16 +87,6 @@ public class IndelDeduper
 
                 if(variant.Variant.isIndel())
                     indels.remove(variant);
-            }
-        }
-
-        if(mRunOldDedup)
-        {
-            // mark any differences and clear the old filter
-            for(SageVariant variant : variants)
-            {
-                if(variant.filters().contains(DEDUP_INDEL_FILTER_OLD))
-                    variant.filters().remove(DEDUP_INDEL_FILTER_OLD);
             }
         }
     }
@@ -164,7 +144,7 @@ public class IndelDeduper
         {
             VariantData variant = dedupGroup.get(index);
 
-            hasPassingVariant |= variant.unfiltered();
+            hasPassingVariant |= variant.allowByFilter();
 
             if(variant.Variant.isDelete() && positionsOverlap(indelPosition, indelPosition, variant.position(), variant.positionEnd()))
             {
@@ -186,8 +166,7 @@ public class IndelDeduper
         if(refBases == null || refBases.isEmpty())
             return;
 
-        IndexedBases indelReadContextBases = indel.ReadCounter.readContext().indexedBases();
-        String indelCoreFlankBases = indelReadContextBases.fullString();
+        String indelCoreFlankBases = indel.ReadCounter.readContext().readBases();
 
         mGroupIterations = 0;
 
@@ -218,9 +197,6 @@ public class IndelDeduper
             }
             else if(recoverFilteredVariant(variant.Variant, nonDedupedVariants))
             {
-                if(mRunOldDedup && variant.Variant.filters().contains(DEDUP_INDEL_FILTER_OLD))
-                    variant.Variant.markDedupIndelDiff();
-
                 variant.Variant.filters().clear();
             }
         }
@@ -271,10 +247,7 @@ public class IndelDeduper
     private void markAsDedup(final SageVariant variant)
     {
         // mark only otherwise passing
-        if(mRunOldDedup && variant.isPassing())
-            variant.markDedupIndelDiff();
-
-        variant.filters().add(DEDUP_INDEL_FILTER);
+        variant.filters().add(DEDUP_INDEL);
     }
 
     private boolean isDedupCandidate(final VariantData indel, final VariantData variant, boolean requireCoreEndInclusion)
@@ -290,7 +263,7 @@ public class IndelDeduper
                 return true;
         }
 
-        if(variant.ReadCounter.readEdgeDistance().maxAltDistanceFromAlignedEdge() < mReadEdgeDistanceThreshold)
+        if(variant.ReadCounter.readEdgeDistance().maxAltDistanceFromEdge() < mReadEdgeDistanceThreshold)
             return true;
 
         return false;
@@ -474,22 +447,13 @@ public class IndelDeduper
             IndelScore = Variant.isIndel() ? indelScore() : 0;
 
             // flank positions are estimate since they aren't aware of other variants in their core and flanks
-            final IndexedBases indexedBases = ReadCounter.readContext().indexedBases();
+            VariantReadContext readContext = ReadCounter.readContext();
 
-            // note that flank positions are estimates of position since they aren't aware of other INDELs in their context
-            int leftFlankFromIndex = indexedBases.Index - indexedBases.LeftFlankIndex;
-            FlankPosStart = variant.position() - leftFlankFromIndex;
+            FlankPosStart = readContext.AlignmentStart;
+            FlankPosEnd = readContext.AlignmentEnd;
 
-            int rightFlankFromIndex = indexedBases.RightFlankIndex - indexedBases.Index;
-
-            int insertedBaseCount = variant.isInsert() ? variant.alt().length() : 0;
-            FlankPosEnd = positionEnd() + rightFlankFromIndex - insertedBaseCount;
-
-            int leftCoreFromIndex = indexedBases.Index - indexedBases.LeftCoreIndex;
-            CorePosStart = variant.position() - leftCoreFromIndex;
-
-            int rightCoreFromIndex = indexedBases.RightCoreIndex - indexedBases.Index;
-            CorePosEnd = positionEnd() + rightCoreFromIndex - insertedBaseCount;
+            CorePosStart = readContext.CorePositionStart;
+            CorePosEnd = readContext.CorePositionEnd;
         }
 
         public String ref()
@@ -502,27 +466,26 @@ public class IndelDeduper
         }
 
         public int position() { return Variant.position(); }
+        public int positionEnd() { return Variant.variant().positionEnd(); }
 
-        public int positionEnd()
+        public boolean allowByFilter()
         {
-            if(Variant.isSnv())
-                return position();
-            else if(Variant.isInsert())
-                return position() + 1;
-            else // deletes and MNVs
-                return position() + Variant.ref().length() - 1;
-        }
+            return Variant.isPassing();
 
-        public boolean unfiltered() // diff name so a to be clear whether takes old DEDUP into consideration
-        {
-            // ignores variants filtered only by the old indel dedup routine
-            return Variant.isPassing() || (Variant.filters().size() == 1 && Variant.filters().contains(DEDUP_INDEL_FILTER_OLD));
+            /* no inclusion of germline filtered variants any longer
+            if(Variant.isPassing())
+                return true;
+
+            // must only have the germline filters below
+            return Variant.filters().stream()
+                    .allMatch(x -> x.equals(MAX_GERMLINE_VAF) || x.equals(MAX_GERMLINE_RELATIVE_VAF) || x.equals(MAX_GERMLINE_ALT_SUPPORT));
+            */
         }
 
         public int indelScore()
         {
-            return (Variant.isIndel() ? (ReadCounter.indelLength() - 1) * INDEL_LENGTH_FACTOR : 0)
-                        + ReadCounter.readEdgeDistance().maxAltDistanceFromAlignedEdge()
+            return (Variant.isIndel() ? ReadCounter.variant().indelLengthAbs() * INDEL_LENGTH_FACTOR : 0)
+                        + ReadCounter.readEdgeDistance().maxAltDistanceFromEdge()
                         - MIN_EVENTS_FACTOR * ReadCounter.minNumberOfEvents();
         }
 
@@ -544,7 +507,7 @@ public class IndelDeduper
         {
             return format("var(%s:%d %s>%s) corePos(%d - %d) flankPos(%d - %d) distFromEdge(%d) score(%d) filters(%s)",
                 Variant.chromosome(), Variant.position(), Variant.ref(), Variant.alt(), CorePosStart, CorePosEnd, FlankPosStart,
-                    FlankPosEnd, ReadCounter.readEdgeDistance().maxAltDistanceFromAlignedEdge(), IndelScore, Variant.filtersStr());
+                    FlankPosEnd, ReadCounter.readEdgeDistance().maxAltDistanceFromEdge(), IndelScore, Variant.filtersStr());
         }
     }
 }

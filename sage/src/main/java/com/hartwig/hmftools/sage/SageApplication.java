@@ -1,13 +1,17 @@
 package com.hartwig.hmftools.sage;
 
 import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
+import static com.hartwig.hmftools.common.utils.version.VersionInfo.appVersionFile;
+import static com.hartwig.hmftools.common.utils.version.VersionInfo.fromAppName;
 import static com.hartwig.hmftools.sage.SageCommon.APP_NAME;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 
+import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.common.utils.version.VersionInfo;
 import com.hartwig.hmftools.sage.coverage.Coverage;
@@ -16,6 +20,7 @@ import com.hartwig.hmftools.sage.phase.PhaseSetCounter;
 import com.hartwig.hmftools.sage.pipeline.ChromosomePipeline;
 import com.hartwig.hmftools.sage.bqr.BaseQualityRecalibration;
 import com.hartwig.hmftools.sage.bqr.BqrRecordMap;
+import com.hartwig.hmftools.sage.quality.MsiJitterCalcs;
 import com.hartwig.hmftools.sage.vcf.VcfWriter;
 
 import htsjdk.samtools.SAMSequenceDictionary;
@@ -35,7 +40,7 @@ public class SageApplication implements AutoCloseable
 
     private SageApplication(final ConfigBuilder configBuilder)
     {
-        final VersionInfo version = new VersionInfo("sage.version");
+        final VersionInfo version = fromAppName(APP_NAME);
         mConfig = new SageCallConfig(version.version(), configBuilder);
 
         if(!mConfig.isValid())
@@ -54,8 +59,7 @@ public class SageApplication implements AutoCloseable
 
         mPhaseSetCounter = new PhaseSetCounter();
 
-        mVcfWriter = new VcfWriter(
-                mConfig.Common.Version, mConfig.Common.OutputFile, mConfig.TumorIds, mConfig.Common.ReferenceIds, mRefData.RefGenome);
+        mVcfWriter = new VcfWriter(mConfig.Common, mConfig.TumorIds, mConfig.Common.ReferenceIds, mRefData.RefGenome);
 
         mFragmentLengths = new FragmentLengths(mConfig.Common);
 
@@ -76,7 +80,17 @@ public class SageApplication implements AutoCloseable
         if(!baseQualityRecalibration.isValid())
             System.exit(1);
 
+        if(mConfig.Common.bqrRecordWritingOnly())
+        {
+            SG_LOGGER.info("exiting after BQR read writing");
+            return;
+        }
+
         final Map<String, BqrRecordMap> recalibrationMap = baseQualityRecalibration.getSampleRecalibrationMap();
+
+        List<String> combinedSampleIds = Lists.newArrayList(mConfig.TumorIds);
+        combinedSampleIds.addAll(mConfig.Common.ReferenceIds);
+        MsiJitterCalcs msiJitterCalcs = MsiJitterCalcs.build(combinedSampleIds, mConfig.Common.JitterParamsDir);
 
         final SAMSequenceDictionary dictionary = dictionary();
         for(final SAMSequenceRecord samSequenceRecord : dictionary.getSequences())
@@ -87,7 +101,7 @@ public class SageApplication implements AutoCloseable
                 continue;
 
             final ChromosomePipeline pipeline = new ChromosomePipeline(
-                    chromosome, mConfig, mRefData, recalibrationMap, coverage, mPhaseSetCounter, mVcfWriter, mFragmentLengths);
+                    chromosome, mConfig, mRefData, recalibrationMap, msiJitterCalcs, coverage, mPhaseSetCounter, mVcfWriter, mFragmentLengths);
 
             pipeline.process();
         }

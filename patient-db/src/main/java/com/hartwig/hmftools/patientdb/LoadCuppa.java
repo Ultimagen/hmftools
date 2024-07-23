@@ -1,75 +1,56 @@
 package com.hartwig.hmftools.patientdb;
 
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE;
+import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE_DESC;
+import static com.hartwig.hmftools.patientdb.CommonUtils.APP_NAME;
 import static com.hartwig.hmftools.patientdb.CommonUtils.LOGGER;
-import static com.hartwig.hmftools.patientdb.CommonUtils.logVersion;
 import static com.hartwig.hmftools.patientdb.dao.DatabaseAccess.addDatabaseCmdLineArgs;
 import static com.hartwig.hmftools.patientdb.dao.DatabaseAccess.databaseAccess;
 
 import java.io.File;
 import java.io.IOException;
 import java.sql.SQLException;
-import java.util.List;
 
-import com.hartwig.hmftools.common.cuppa.CuppaDataFile;
-import com.hartwig.hmftools.common.cuppa.interpretation.CuppaPrediction;
-import com.hartwig.hmftools.common.cuppa.interpretation.CuppaPredictionFactory;
+import com.hartwig.hmftools.common.cuppa.CuppaPredictions;
+import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.patientdb.dao.DatabaseAccess;
 
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.DefaultParser;
-import org.apache.commons.cli.HelpFormatter;
-import org.apache.commons.cli.Options;
-import org.apache.commons.cli.ParseException;
+import org.apache.commons.cli.*;
 import org.jetbrains.annotations.NotNull;
 
 public class LoadCuppa
 {
-    private static final String CUPPA_RESULTS_CSV = "cuppa_results_csv";
+    private static final String CUPPA_VIS_DATA_TSV = "cuppa_vis_data_tsv";
 
     public static void main(@NotNull String[] args) throws ParseException, SQLException, IOException
     {
-        Options options = createOptions();
-        CommandLine cmd = new DefaultParser().parse(options, args);
+        ConfigBuilder configBuilder = new ConfigBuilder(APP_NAME);
 
-        logVersion();
+        configBuilder.addConfigItem(SAMPLE, SAMPLE_DESC);
+        addDatabaseCmdLineArgs(configBuilder, true);
+        configBuilder.addPath(CUPPA_VIS_DATA_TSV, true, "Path to the Cuppa vis data file");
 
-        String sample = cmd.getOptionValue(SAMPLE);
-        String cuppaResultsCsv = cmd.getOptionValue(CUPPA_RESULTS_CSV);
+        configBuilder.checkAndParseCommandLine(args);
 
-        if(CommonUtils.anyNull(sample, cuppaResultsCsv))
+        String sample = configBuilder.getValue(SAMPLE);
+        String cuppaVisDataTsv = configBuilder.getValue(CUPPA_VIS_DATA_TSV);
+
+        try (DatabaseAccess dbWriter = databaseAccess(configBuilder))
         {
-            HelpFormatter formatter = new HelpFormatter();
-            formatter.printHelp("Patient-DB - Load CUPPA Data", options);
+            LOGGER.info("loading Cuppa from {}", new File(cuppaVisDataTsv).getParent());
+            CuppaPredictions cuppaPredictions = CuppaPredictions.fromTsv(cuppaVisDataTsv);
+            LOGGER.info("loaded {} entries from {} for sample {}", cuppaPredictions.size(), cuppaVisDataTsv, sample);
+
+            int TOP_N_PROBS = 3;
+            LOGGER.info("writing top {} probabilities from all classifiers to database", TOP_N_PROBS);
+
+            dbWriter.writeCuppa(sample, cuppaPredictions, TOP_N_PROBS);
+            LOGGER.info("Complete");
+        }
+        catch(Exception e)
+        {
+            LOGGER.error("failed to load Cuppa data", e);
             System.exit(1);
         }
-
-        DatabaseAccess dbWriter = databaseAccess(cmd);
-
-        LOGGER.info("Loading CUPPA from {}", new File(cuppaResultsCsv).getParent());
-        List<CuppaDataFile> cuppaEntries = CuppaDataFile.read(cuppaResultsCsv);
-        LOGGER.info(" Loaded {} entries from {}", cuppaEntries.size(), cuppaResultsCsv);
-
-        List<CuppaPrediction> predictions = CuppaPredictionFactory.create(cuppaEntries);
-        CuppaPrediction best = predictions.get(0);
-        LOGGER.info(" Predicted cancer type '{}' with likelihood {}", best.cancerType(), best.likelihood());
-
-        LOGGER.info("Writing CUPPA into database for {}", sample);
-        dbWriter.writeCuppa(sample, best.cancerType(), best.likelihood());
-
-        LOGGER.info("Complete");
-    }
-
-    @NotNull
-    private static Options createOptions()
-    {
-        Options options = new Options();
-
-        options.addOption(SAMPLE, true, "Sample for which we are going to load the CUPPA results");
-        options.addOption(CUPPA_RESULTS_CSV, true, "Path to the *.cup.data.csv file");
-
-        addDatabaseCmdLineArgs(options);
-
-        return options;
     }
 }

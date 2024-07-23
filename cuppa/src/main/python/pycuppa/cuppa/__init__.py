@@ -8,16 +8,11 @@ __all__ = [
     if isfile(f) and not f.endswith('__init__.py')
 ]
 
+## Set up logging
+from cuppa.logger import initialize_logging
+initialize_logging()
+
 ## Increase pandas df display width
 import pandas as pd
 pd.set_option('display.max_columns', 10)
 pd.set_option('display.width', 300)
-
-## Disable interactive matplotlib
-import matplotlib
-matplotlib.use('Agg')
-
-## Ignore warnings from plotting
-import warnings
-warnings.filterwarnings("ignore", module = "matplotlib\..*" )
-warnings.filterwarnings("ignore", module = "plotnine\..*" )

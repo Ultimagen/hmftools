@@ -130,15 +130,15 @@ public class SvVisualiser implements AutoCloseable
         VIS_LOGGER.info("Linx Visualiser complete");
     }
 
-    private void submitChromosome(@NotNull final List<String> chromosomes)
+    private void submitChromosome(final List<String> chromosomes)
     {
         if(chromosomes.stream().anyMatch(x -> !HumanChromosome.contains(x)))
         {
-            VIS_LOGGER.warn("Invalid chromosomes: {}", chromosomes.toString());
+            VIS_LOGGER.warn("invalid chromosomes: {}", chromosomes.toString());
             return;
         }
 
-        final String chromosomesStr = chromosomes.size() >= 24
+        final String chromosomesStr = chromosomes.size() >= HumanChromosome.values().length
                 ? "All"
                 : chromosomes.stream().map(RefGenomeFunctions::stripChrPrefix).collect(Collectors.joining("-"));
 
@@ -157,7 +157,14 @@ public class SvVisualiser implements AutoCloseable
         final List<VisSvData> chromosomeLinks = mSampleData.SvData.stream().filter(x -> clusterIds.contains(x.ClusterId)).collect(toList());
         if(chromosomeLinks.isEmpty())
         {
-            VIS_LOGGER.warn("Chromosomes {} not present in file", chromosomesStr);
+            VIS_LOGGER.warn("chromosomes({}) not present in file", chromosomesStr);
+            return;
+        }
+
+        if(mCircosConfig.exceedsMaxPlotSvCount(chromosomeLinks.size()))
+        {
+            VIS_LOGGER.warn("chromosomes({}) svCount({}) exceeds limit({})",
+                    chromosomesStr, chromosomeLinks.size(), mCircosConfig.MaxPlotSvCount);
             return;
         }
 
@@ -189,10 +196,19 @@ public class SvVisualiser implements AutoCloseable
 
     private void submitCluster(final List<Integer> clusterIds, final List<Integer> chainIds, boolean skipSingles)
     {
-        final List<VisSvData> clusterLinks = mSampleData.SvData.stream()
+        final List<VisSvData> clusterSvs = mSampleData.SvData.stream()
                 .filter(x -> clusterIds.contains(x.ClusterId))
                 .filter(x -> chainIds.isEmpty() || chainIds.contains(x.ChainId))
                 .collect(toList());
+
+        String clusterIdsStr = clusterIds.stream().map(x -> String.valueOf(x)).collect(Collectors.joining("-"));
+
+        if(mCircosConfig.exceedsMaxPlotSvCount(clusterSvs.size()))
+        {
+            VIS_LOGGER.warn("clusterIds({}) svCount({}) exceeds limit({})",
+                    clusterIdsStr, clusterSvs.size(), mCircosConfig.MaxPlotSvCount);
+            return;
+        }
 
         final List<VisSegment> clusterSegments = mSampleData.Segments.stream()
                 .filter(x -> clusterIds.contains(x.ClusterId))
@@ -202,23 +218,19 @@ public class SvVisualiser implements AutoCloseable
         final List<VisGeneExon> clusterExons =
                 mSampleData.Exons.stream().filter(x -> clusterIds.contains(x.ClusterId)).distinct().collect(toList());
 
-        StringJoiner clustersSj = new StringJoiner("-");
-        clusterIds.forEach(x -> clustersSj.add(String.valueOf(x)));
-        String clusterIdsStr = clustersSj.toString();
-
-        if(clusterLinks.isEmpty())
+        if(clusterSvs.isEmpty())
         {
             VIS_LOGGER.warn("cluster {} not present in file", clusterIdsStr);
             return;
         }
 
-        if(clusterLinks.size() == 1 && skipSingles && clusterExons.isEmpty())
+        if(clusterSvs.size() == 1 && skipSingles && clusterExons.isEmpty())
         {
             VIS_LOGGER.debug("skipping simple cluster {}", clusterIdsStr);
             return;
         }
 
-        final Set<Integer> linkChainIds = clusterLinks.stream().map(x -> x.ChainId).collect(Collectors.toSet());
+        final Set<Integer> linkChainIds = clusterSvs.stream().map(x -> x.ChainId).collect(Collectors.toSet());
         final Set<Integer> segmentChainIds = clusterSegments.stream().map(x -> x.ChainId).collect(Collectors.toSet());
         segmentChainIds.removeAll(linkChainIds);
         if(!segmentChainIds.isEmpty())
@@ -244,12 +256,12 @@ public class SvVisualiser implements AutoCloseable
 
             if(mConfig.ClusterIds.size() == 1)
             {
-                final String resolvedTypeString = clusterLinks.get(0).ClusterResolvedType.toString();
+                final String resolvedTypeString = clusterSvs.get(0).ClusterResolvedType.toString();
                 fileId += "." + resolvedTypeString;
             }
         }
 
-        fileId += ".sv" + clusterLinks.size();
+        fileId += ".sv" + clusterSvs.size();
 
         if(mConfig.Debug)
             fileId += ".debug";
@@ -260,7 +272,7 @@ public class SvVisualiser implements AutoCloseable
         final List<VisFusion> clusterFusions = mSampleData.Fusions.stream().filter(x -> clusterIds.contains(x.ClusterId)).collect(toList());
 
         submitFiltered(clusterIds.size() == 1 ? ColorPicker::chainColors : ColorPicker::clusterColors,
-                fileId, clusterLinks, clusterSegments, clusterExons, clusterProteinDomains, clusterFusions, true);
+                fileId, clusterSvs, clusterSegments, clusterExons, clusterProteinDomains, clusterFusions, true);
     }
 
     private void submitFiltered(final ColorPickerFactory colorPickerFactory,
@@ -279,9 +291,8 @@ public class SvVisualiser implements AutoCloseable
         positionsToCover.addAll(Span.allPositions(filteredExons));
 
         // Limit copy numbers to within segments, links and exons (plus a little extra)
-        final List<VisCopyNumber> alterations =
-                VisCopyNumbers.copyNumbers(mSampleData.CopyNumbers, Span.spanPositions(positionsToCover));
-        positionsToCover.addAll(Span.allPositions(alterations));
+        final List<VisCopyNumber> copyNumbers = VisCopyNumbers.copyNumbers(mSampleData.CopyNumbers, Span.spanPositions(positionsToCover));
+        positionsToCover.addAll(Span.allPositions(copyNumbers));
 
         // Need to extend terminal segments past any current segments, links and exons and copy numbers
         final List<VisSegment> segments = VisSegments.extendTerminals(
@@ -291,8 +302,9 @@ public class SvVisualiser implements AutoCloseable
 
         final ColorPicker color = colorPickerFactory.create(links);
 
-        final CircosData circosData =
-                new CircosData(showSimpleSvSegments, mCircosConfig, segments, links, alterations, filteredExons, filteredFusions);
+        final CircosData circosData = new CircosData(
+                showSimpleSvSegments, mCircosConfig, segments, links, copyNumbers, filteredExons, filteredFusions);
+
         final CircosConfigWriter confWrite = new CircosConfigWriter(sample, mConfig.OutputConfPath, circosData, mCircosConfig);
         final FusionDataWriter fusionDataWriter = new FusionDataWriter(filteredFusions, filteredExons, filteredProteinDomains);
 
@@ -329,7 +341,7 @@ public class SvVisualiser implements AutoCloseable
 
         final Object circosResult = new CircosExecution(
                 mConfig.CircosBin).generateCircos(mConfig.OutputConfPath + File.separator + confFileName,
-                mConfig.OutputPlotPath, outputFileName, mConfig.OutputConfPath);
+                mConfig.OutputPlotPath, outputFileName);
 
         if(plotFusion)
         {

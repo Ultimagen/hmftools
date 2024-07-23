@@ -1,21 +1,16 @@
 package com.hartwig.hmftools.cup.somatics;
 
-import static java.lang.String.format;
-
-import static com.hartwig.hmftools.common.variant.SageVcfTags.REPEAT_COUNT_FLAG;
-import static com.hartwig.hmftools.common.variant.SageVcfTags.TRINUCLEOTIDE_FLAG;
+import static com.hartwig.hmftools.common.utils.file.FileDelimiters.CSV_DELIM;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.REPEAT_COUNT;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.TRINUCLEOTIDE_CONTEXT;
 import static com.hartwig.hmftools.common.variant.impact.VariantImpactSerialiser.VAR_IMPACT;
 import static com.hartwig.hmftools.common.variant.impact.VariantImpactSerialiser.fromVariantContext;
-import static com.hartwig.hmftools.cup.CuppaConfig.DATA_DELIM;
-import static com.hartwig.hmftools.patientdb.database.hmfpatients.Tables.SOMATICVARIANT;
 
 import java.util.StringJoiner;
 
+import com.hartwig.hmftools.common.utils.file.FileWriterUtils;
 import com.hartwig.hmftools.common.variant.VariantType;
 import com.hartwig.hmftools.common.variant.impact.VariantImpact;
-import com.hartwig.hmftools.patientdb.database.hmfpatients.Tables;
-
-import org.jooq.Record;
 
 import htsjdk.variant.variantcontext.VariantContext;
 
@@ -41,6 +36,8 @@ public class SomaticVariant
     public static final String FLD_TRINUC_CONTEXT = "TriNucContext";
 
     public static final String SOMATIC_VAR_FILE_ID = ".somatic_variants.csv";
+    public static final String SOMATIC_VARIANTS_DIR_CFG = "somatic_variants_dir";
+    public static final String SOMATIC_VARIANTS_DIR_DESC = "Directory containing somatic variant generic tabular files";
 
     public SomaticVariant(
             final String chromosome, final int position, final String ref, final String alt, final VariantType type,
@@ -58,7 +55,7 @@ public class SomaticVariant
 
     public static String generateFilename(final String baseDir, final String sampleId)
     {
-        return baseDir + sampleId + SOMATIC_VAR_FILE_ID;
+        return FileWriterUtils.checkAddDirSeparator(baseDir) + sampleId + SOMATIC_VAR_FILE_ID;
     }
 
     public static SomaticVariant fromContext(final VariantContext variantContext)
@@ -77,31 +74,18 @@ public class SomaticVariant
         if(variantContext.hasAttribute(VAR_IMPACT))
         {
             VariantImpact impact = fromVariantContext(variantContext);
-            gene = impact.CanonicalGeneName;
+            gene = impact.GeneName;
         }
 
         return new SomaticVariant(
                 chromosome, position, ref, alt, VariantType.type(variantContext), gene,
-                variantContext.getAttributeAsString(TRINUCLEOTIDE_FLAG, ""),
-                variantContext.getAttributeAsInt(REPEAT_COUNT_FLAG, 0));
-    }
-
-    public static SomaticVariant fromRecord(final Record record)
-    {
-        return new SomaticVariant(
-                record.getValue(Tables.SOMATICVARIANT.CHROMOSOME),
-                record.getValue(Tables.SOMATICVARIANT.POSITION),
-                record.getValue(Tables.SOMATICVARIANT.REF),
-                record.getValue(Tables.SOMATICVARIANT.ALT),
-                VariantType.valueOf(record.getValue(SOMATICVARIANT.TYPE)),
-                record.getValue(Tables.SOMATICVARIANT.GENE),
-                record.getValue(SOMATICVARIANT.TRINUCLEOTIDECONTEXT),
-                0); // features makes its own DB call for specific INDELs so isn't retrieved here
+                variantContext.getAttributeAsString(TRINUCLEOTIDE_CONTEXT, ""),
+                variantContext.getAttributeAsInt(REPEAT_COUNT, 0));
     }
 
     public static String csvHeader()
     {
-        StringJoiner sj = new StringJoiner(DATA_DELIM);
+        StringJoiner sj = new StringJoiner(CSV_DELIM);
         sj.add(FLD_CHR);
         sj.add(FLD_POSITION);
         sj.add(FLD_REF);

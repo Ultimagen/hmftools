@@ -6,6 +6,10 @@ import static java.lang.String.format;
 import static com.hartwig.hmftools.common.stats.PoissonCalcs.calcPoissonNoiseValue;
 import static com.hartwig.hmftools.wisp.common.CommonUtils.CT_LOGGER;
 import static com.hartwig.hmftools.wisp.purity.PurityConstants.HIGH_PROBABILITY;
+import static com.hartwig.hmftools.wisp.purity.PurityConstants.LOW_COUNT_MODEL_MIN_2_PLUS_FRAGS;
+import static com.hartwig.hmftools.wisp.purity.PurityConstants.LOW_COUNT_MODEL_MIN_2_PLUS_FRAG_PERC;
+import static com.hartwig.hmftools.wisp.purity.PurityConstants.LOW_COUNT_MODEL_MIN_AVG_DEPTH;
+import static com.hartwig.hmftools.wisp.purity.PurityConstants.LOW_COUNT_MODEL_MIN_FRAG_VARIANTS;
 import static com.hartwig.hmftools.wisp.purity.PurityConstants.LOW_PROBABILITY;
 import static com.hartwig.hmftools.wisp.purity.variant.ClonalityData.NO_RESULT;
 
@@ -27,10 +31,63 @@ public class LowCountModel extends ClonalityModel
         super(config, resultsWriter, sample,  variants);
     }
 
+    public static List<SomaticVariant> filterVariants(
+            final String sampleId, final FragmentTotals fragmentTotals, final List<SomaticVariant> variants, double medianVcn)
+    {
+        // We should exclude variants from LOW_COUNT which are not close to the normal copy number profile or depth of the sample.
+        // ie. if VCN > 2x median VCN or if sampleDP > 2x wAD
+        double vcnThreshold = 2 * medianVcn;
+        double sampleDpThreshold = 2 * fragmentTotals.weightedSampleDepth();
+
+        List<SomaticVariant> filteredVariants = Lists.newArrayList();
+
+        for(SomaticVariant variant : variants)
+        {
+            if(variant.VariantCopyNumber > vcnThreshold)
+                continue;
+
+            GenotypeFragments sampleFragData = variant.findGenotypeData(sampleId);
+
+            if(sampleFragData.Depth > sampleDpThreshold)
+                continue;
+
+            filteredVariants.add(variant);
+        }
+
+        return filteredVariants;
+    }
+
+    public static boolean canUseModel(final String sampleId, final FragmentTotals fragmentTotals, final List<SomaticVariant> variants)
+    {
+        int oneFragVariantCount = 0;
+        int twoPlusFragVariantCount = 0;
+
+        for(SomaticVariant variant : variants)
+        {
+            GenotypeFragments sampleFragData = variant.findGenotypeData(sampleId);
+
+            if(sampleFragData.AlleleCount >= 2)
+                ++twoPlusFragVariantCount;
+            else if(sampleFragData.AlleleCount == 1)
+                ++oneFragVariantCount;
+        }
+
+        if(twoPlusFragVariantCount < LOW_COUNT_MODEL_MIN_FRAG_VARIANTS)
+            return false;
+
+        if(fragmentTotals.weightedSampleDepth() >= LOW_COUNT_MODEL_MIN_AVG_DEPTH)
+            return false;
+
+        double twoPlusPercent = twoPlusFragVariantCount / (double)variants.size();
+
+        return twoPlusFragVariantCount >= LOW_COUNT_MODEL_MIN_2_PLUS_FRAGS && twoPlusPercent >= LOW_COUNT_MODEL_MIN_2_PLUS_FRAG_PERC;
+    }
+
     @Override
-    public ClonalityData calculate(final String sampleId, final FragmentTotals fragmentTotals, final double rawEstimatedPurity)
+    public ClonalityData calculate(final String sampleId, final FragmentTotals fragmentTotals, final PurityCalcData purityCalcData)
     {
         double estimateVaf = fragmentTotals.adjSampleVaf();
+        double rawEstimatedPurity = purityCalcData.RawPurityEstimate;
 
         if(estimateVaf == 0)
             return NO_RESULT;
@@ -88,12 +145,6 @@ public class LowCountModel extends ClonalityModel
 
             SimulatedVafCalcs simVafCalcs = new SimulatedVafCalcs(dropoutRate, simulatedVaf, probTotalFrag1, probTotalFrag2Plus);
             simulatedVafCalcs.add(simVafCalcs);
-
-            /*
-            writeSimulatedDropoutData(
-                    mResultsWriter.getCnPlotCalcWriter(), mConfig, mSample, sampleId, filteredVariants.size(), simVafCalcs,
-                    observedFrag1, observedFrag2Plus);
-            */
         }
 
         // now find the closest ratio to the observed ratio

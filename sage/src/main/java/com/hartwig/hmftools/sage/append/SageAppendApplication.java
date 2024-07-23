@@ -2,9 +2,11 @@ package com.hartwig.hmftools.sage.append;
 
 import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
+import static com.hartwig.hmftools.common.utils.version.VersionInfo.fromAppName;
 import static com.hartwig.hmftools.sage.SageCommon.APP_NAME;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
 import static com.hartwig.hmftools.sage.vcf.VariantVCF.appendHeader;
+import static com.hartwig.hmftools.sage.vcf.VcfTags.VERSION_META_DATA;
 
 import java.io.File;
 import java.io.IOException;
@@ -56,7 +58,7 @@ public class SageAppendApplication
 
     public SageAppendApplication(final ConfigBuilder configBuilder)
     {
-        final VersionInfo version = new VersionInfo("sage.version");
+        final VersionInfo version = fromAppName(APP_NAME);
         mConfig = new SageAppendConfig(version.version(), configBuilder);
         mFragmentLengths = new FragmentLengths(mConfig.Common);
 
@@ -126,12 +128,17 @@ public class SageAppendApplication
             {
                 VariantImpact variantImpact = VariantImpactSerialiser.fromVariantContext(variant);
 
-                if(variantImpact == null || variantImpact.CanonicalGeneName.isEmpty())
+                if(variantImpact == null || variantImpact.GeneName.isEmpty())
                     continue;
             }
 
-            if(!mConfig.Common.SpecificPositions.isEmpty() && mConfig.Common.SpecificPositions.stream().noneMatch(x -> x == variant.getStart()))
-                continue;
+            if(!mConfig.Common.SpecificPositions.isEmpty())
+            {
+                if(mConfig.Common.SpecificPositions.stream().noneMatch(x -> x.matches(variant.getContig(), variant.getStart())))
+                {
+                    continue;
+                }
+            }
 
             existingVariants.add(variant);
         }
@@ -141,7 +148,7 @@ public class SageAppendApplication
         SG_LOGGER.info("loaded {} variants", existingVariants.size());
 
         SG_LOGGER.info("writing to file: {}", mConfig.Common.OutputFile);
-        final VariantVCF outputVCF = new VariantVCF(mRefGenome, mConfig.Common, inputHeader);
+        VariantVCF outputVCF = new VariantVCF(mRefGenome, mConfig.Common, inputHeader);
 
         if(existingVariants.isEmpty())
         {
@@ -150,23 +157,24 @@ public class SageAppendApplication
             return;
         }
 
-        final SAMSequenceDictionary dictionary = dictionary();
+        SageCommon.setReadLength(mConfig.Common, Collections.emptyMap(), mConfig.Common.ReferenceBams.get(0));
 
         BaseQualityRecalibration baseQualityRecalibration = new BaseQualityRecalibration(
                 mConfig.Common, mRefGenome, "", Collections.emptyList(), Collections.emptyList());
+
+        if(mConfig.Common.BQR.ExcludeKnown)
+            baseQualityRecalibration.setKnownVariants(existingVariants);
 
         baseQualityRecalibration.produceRecalibrationMap();
 
         if(!baseQualityRecalibration.isValid())
             System.exit(1);
 
-        SageCommon.setReadLength(mConfig.Common, Collections.emptyMap(), mConfig.Common.ReferenceBams.get(0));
-
         final Map<String, BqrRecordMap> recalibrationMap = baseQualityRecalibration.getSampleRecalibrationMap();
 
         final ChromosomePartition chromosomePartition = new ChromosomePartition(mConfig.Common, mRefGenome);
 
-        for(final SAMSequenceRecord samSequenceRecord : dictionary.getSequences())
+        for(final SAMSequenceRecord samSequenceRecord : dictionary().getSequences())
         {
             final String chromosome = samSequenceRecord.getSequenceName();
 
@@ -249,7 +257,7 @@ public class SageAppendApplication
 
     private static double sageVersion(@NotNull final VCFHeader header)
     {
-        VCFHeaderLine oldVersion = header.getMetaDataLine(VariantVCF.VERSION_META_DATA);
+        VCFHeaderLine oldVersion = header.getMetaDataLine(VERSION_META_DATA);
 
         if(oldVersion == null)
             return 0;

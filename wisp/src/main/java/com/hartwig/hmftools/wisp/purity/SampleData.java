@@ -24,17 +24,21 @@ public class SampleData
 {
     public final String PatientId;
     public final String TumorId;
-    public final List<String> CtDnaSamples;
+    public final String AmberExtraTumorId;
+    public final List<String> SampleIds;
     public final String VcfTag;
-    public final boolean ApplyGcRatioLimits;
+    public final boolean IsPanel;
 
-    public SampleData(final String patientId, final String tumorId, final List<String> ctDnaSamples, final String vcfTag, final boolean applyGcRatioLimits)
+    public SampleData(
+            final String patientId, final String tumorId, final List<String> sampleIds, final String vcfTag, final boolean isPanel,
+            final String amberExtraTumorId)
     {
         PatientId = patientId;
         TumorId = tumorId;
-        CtDnaSamples = ctDnaSamples;
+        SampleIds = sampleIds;
         VcfTag = vcfTag;
-        ApplyGcRatioLimits = applyGcRatioLimits;
+        IsPanel = isPanel;
+        AmberExtraTumorId = amberExtraTumorId;
     }
 
     public boolean isBatchControl() { return VcfTag != null && VcfTag.contains(BATCH_CONTROL_TAG); }
@@ -42,13 +46,13 @@ public class SampleData
     public String toString()
     {
         StringJoiner sj = new StringJoiner(", ");
-        CtDnaSamples.forEach(x -> sj.add(x));
-        return format("patient(%s) tumor(%s) ctDnaSamples(%s)", PatientId, TumorId, sj);
+        SampleIds.forEach(x -> sj.add(x));
+        return format("patient(%s) tumor(%s) samples(%s)", PatientId, TumorId, sj);
     }
 
-    public static List<String> ctDnaSamplesFromStr(final String ctDnaSamples)
+    public static List<String> sampleIdsFromStr(final String sampleIds)
     {
-        return Arrays.stream(ctDnaSamples.split(ITEM_DELIM, -1)).collect(Collectors.toList());
+        return Arrays.stream(sampleIds.split(ITEM_DELIM, -1)).collect(Collectors.toList());
     }
 
     public static List<SampleData> loadSampleDataFile(final String filename)
@@ -65,9 +69,10 @@ public class SampleData
 
             int patientIndex = fieldsIndexMap.get("PatientId");
             int tumorIndex = fieldsIndexMap.get("TumorId");
-            int ctdnaIndex = fieldsIndexMap.get("CtDnaSampleIds");
+            int sampleIdsIndex = fieldsIndexMap.get("SampleIds");
             Integer vcfIndex = fieldsIndexMap.get("VcfTag");
-            Integer applyGcRatioIndex = fieldsIndexMap.get("ApplyGcRatio");
+            Integer isPanelIndex = fieldsIndexMap.get("IsPanel");
+            Integer amberExtraTumorIdIndex = fieldsIndexMap.get("AmberExtraTumorId");
 
             for(String line : fileContents)
             {
@@ -77,11 +82,15 @@ public class SampleData
                 String[] values = line.split(CSV_DELIM, -1);
                 String vcfTag = vcfIndex != null && vcfIndex < values.length ? values[vcfIndex] : "";
 
-                boolean applyGcRatio = applyGcRatioIndex != null && applyGcRatioIndex < values.length ?
-                        Boolean.parseBoolean(values[applyGcRatioIndex]) : false;
+                boolean isPanel = isPanelIndex != null && isPanelIndex < values.length ?
+                        Boolean.parseBoolean(values[isPanelIndex]) : false;
 
-                samples.add(new SampleData(
-                        values[patientIndex], values[tumorIndex], ctDnaSamplesFromStr(values[ctdnaIndex]), vcfTag, applyGcRatio));
+                String patientId = values[patientIndex];
+                String tumorId = values[tumorIndex];
+                String amberExtraTumorId = amberExtraTumorIdIndex != null ? values[amberExtraTumorIdIndex] : null;
+                List<String> sampleIds = sampleIdsFromStr(values[sampleIdsIndex]);
+
+                samples.add(new SampleData(patientId, tumorId, sampleIds, vcfTag, isPanel, amberExtraTumorId));
             }
         }
         catch (IOException e)

@@ -3,10 +3,12 @@ package com.hartwig.hmftools.wisp.purity.variant;
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
+import static com.hartwig.hmftools.wisp.purity.ResultsWriter.formatDetectionResult;
 import static com.hartwig.hmftools.wisp.purity.ResultsWriter.formatProbabilityValue;
 import static com.hartwig.hmftools.wisp.purity.ResultsWriter.formatPurityValue;
 
 import java.util.StringJoiner;
+import java.util.stream.Collectors;
 
 public class SomaticPurityResult
 {
@@ -49,38 +51,43 @@ public class SomaticPurityResult
     public static String header()
     {
         StringJoiner sj = new StringJoiner(TSV_DELIM);
+        sj.add("SNV_MRD");
         sj.add("TotalVariants");
         sj.add("CalcVariants");
         sj.add("ChipVariants");
         sj.add("SNVPurity");
-        sj.add("RawSomaticPurity");
-        sj.add("SNVProbability");
+        sj.add("RawSNVPurity");
+        sj.add("SNVPValue");
         sj.add("SNVPurityLow");
         sj.add("SNVPurityHigh");
         sj.add("ClonalMethod");
-        sj.add("TumorVaf");
-        sj.add("AdjSampleVaf");
         sj.add("Frag1Variants");
         sj.add("Frag2PlusVariants");
         sj.add("ClonalPeakVariants");
         sj.add("ClonalDropoutRate");
-        sj.add("DualSNVProbability");
-        sj.add("LodPurity");
+        sj.add("DualSNVPValue");
+        sj.add("SNVLod");
         sj.add("TotalFragments");
         sj.add("TotalDual");
         sj.add("AlleleFragments");
         sj.add("AlleleDual");
         sj.add("WeightedAvgDepth");
+        sj.add("WeightedAvgVCN");
+        sj.add("WeightedAvgCN");
         sj.add("PeakBandwidth");
         sj.add("PeakBandwidthLow");
         sj.add("PeakBandwidthHigh");
+        sj.add("ErrorRate");
+        sj.add("RawBqrErrorRate");
+        sj.add("BqrThreshold");
+        sj.add("BqrExtraInfo");
         return sj.toString();
     }
 
     public String toTsv()
     {
         StringJoiner sj = new StringJoiner(TSV_DELIM);
-
+        sj.add(formatDetectionResult(PurityCalcs.PurityEstimate, PurityCalcs.LodPurityEstimate));
         sj.add(format("%d", TotalVariants));
         sj.add(format("%d", FragTotals.variantCount()));
         sj.add(format("%d", ChipVariants));
@@ -90,8 +97,6 @@ public class SomaticPurityResult
         sj.add(formatPurityValue(PurityCalcs.PurityRangeLow));
         sj.add(formatPurityValue(PurityCalcs.PurityRangeHigh));
         sj.add(String.valueOf(PurityCalcs.Clonality.Method));
-        sj.add(formatPurityValue(FragTotals.rawTumorVaf()));
-        sj.add(formatPurityValue(FragTotals.adjSampleVaf()));
 
         sj.add(format("%d", FragTotals.sampleOneFragmentCount()));
         sj.add(format("%d", FragTotals.sampleTwoPlusCount()));
@@ -105,9 +110,17 @@ public class SomaticPurityResult
         sj.add(format("%d", FragTotals.sampleAdTotal()));
         sj.add(format("%d", UmiCounts.AlleleDual));
         sj.add(format("%.1f", FragTotals.weightedSampleDepth()));
-        sj.add(format("%.3f", PurityCalcs.Clonality.PeakBandwidth));
-        sj.add(format("%.3f", PurityCalcs.Clonality.PeakBandwidthLow));
-        sj.add(format("%.3f", PurityCalcs.Clonality.PeakBandwidthHigh));
+        sj.add(format("%.1f", FragTotals.weightedVariantCopyNumber()));
+        sj.add(format("%.1f", FragTotals.weightedCopyNumber()));
+        sj.add(format("%.4f", PurityCalcs.Clonality.PeakBandwidth));
+        sj.add(format("%.4f", PurityCalcs.Clonality.PeakBandwidthLow));
+        sj.add(format("%.4f", PurityCalcs.Clonality.PeakBandwidthHigh));
+        sj.add(format("%.6f", PurityCalcs.ErrorRate));
+        sj.add(format("%.6f", PurityCalcs.RawBqrErrorRate));
+        sj.add(format("%d", PurityCalcs.BqrQualThreshold));
+
+        String bqrDataStr = PurityCalcs.BqrExtraInfo.stream().collect(Collectors.joining(";"));
+        sj.add(bqrDataStr);
 
         return sj.toString();
     }

@@ -10,7 +10,9 @@ import static com.hartwig.hmftools.amber.AmberUtils.fromBaseDepth;
 import static com.hartwig.hmftools.amber.AmberUtils.fromTumorBaf;
 import static com.hartwig.hmftools.amber.AmberUtils.isValid;
 import static com.hartwig.hmftools.common.genome.bed.BedFileReader.loadBedFileChrMap;
+import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.V37;
 import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
+import static com.hartwig.hmftools.common.utils.version.VersionInfo.fromAppName;
 
 import java.io.File;
 import java.io.IOException;
@@ -30,6 +32,7 @@ import com.hartwig.hmftools.common.amber.AmberSite;
 import com.hartwig.hmftools.common.amber.AmberSitesFile;
 import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.genome.region.GenomeRegion;
+import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.common.utils.Doubles;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.common.region.BaseRegion;
@@ -55,7 +58,7 @@ public class AmberApplication implements AutoCloseable
     {
         long startTimeMs = System.currentTimeMillis();
 
-        mVersionInfo = new VersionInfo("amber.version");
+        mVersionInfo = fromAppName(APP_NAME);
 
         mPersistence = new ResultsWriter(mConfig);
 
@@ -180,7 +183,10 @@ public class AmberApplication implements AutoCloseable
         TumorAnalysis tumor = new TumorAnalysis(mConfig, readerFactory,
                 germline.getHeterozygousLoci(), germline.getHomozygousLoci());
 
-        final List<TumorBAF> tumorBAFList = tumor.getBafs().values().stream().sorted().collect(toList());
+        final List<TumorBAF> tumorBAFList = tumor.getBafs().values().stream()
+                .filter(x -> x.TumorEvidence.ReadDepth >= mConfig.TumorMinDepth)
+                .sorted().collect(toList());
+
         final List<AmberBAF> amberBAFList = tumorBAFList.stream().map(x -> fromTumorBaf(x)).filter(AmberUtils::isValid).collect(toList());
 
         final List<TumorContamination> contaminationList = new ArrayList<>(tumor.getContamination().values());
@@ -267,20 +273,13 @@ public class AmberApplication implements AutoCloseable
         return readerFactory;
     }
 
-    private List<GenomeRegion> loadTumorOnlyExcludedSnp() throws IOException
+    private List<GenomeRegion> loadTumorOnlyExcludedSnp()
     {
-        String resourcePath = null;
-        switch (mConfig.RefGenVersion)
-        {
-            case V37:
-                // we don't have excluded region for v37 genome
-                return Collections.emptyList();
-            case V38:
-                resourcePath = "tumorOnlyExcludedSnp.38.bed";
-                break;
-        }
+        if(mConfig.RefGenVersion == V37)
+            return Collections.emptyList();
 
-        return AmberUtils.loadBedFromResource(resourcePath);
+        List<ChrBaseRegion> regions = AmberUtils.loadBedFromResource("tumorOnlyExcludedSnp.38.bed");
+        return regions.stream().map(x -> x.genomeRegion()).collect(toList());
     }
 
     @Override

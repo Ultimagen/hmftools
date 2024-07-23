@@ -8,14 +8,14 @@ import static com.hartwig.hmftools.common.purple.GermlineStatus.DIPLOID;
 import static com.hartwig.hmftools.common.purple.GermlineStatus.EXCLUDED;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionsWithin;
 import static com.hartwig.hmftools.purple.PurpleUtils.PPL_LOGGER;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.CENTROMERIC_WIDTH;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_AMP_DEL_EXCLUSION_CHR_1;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_AMP_DEL_EXCLUSION_CHR_17;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_AMP_DEL_EXCLUSION_CHR_19;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_AMP_DEL_EXCLUSION_CHR_9;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_AMP_RATIO;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_DEL_MIN_LENGTH;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.GERMLINE_DEL_RATIO;
+import static com.hartwig.hmftools.purple.PurpleConstants.CENTROMERIC_WIDTH;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_AMP_DEL_EXCLUSION_CHR_1;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_AMP_DEL_EXCLUSION_CHR_17;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_AMP_DEL_EXCLUSION_CHR_19;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_AMP_DEL_EXCLUSION_CHR_9;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_AMP_RATIO;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_DEL_MIN_LENGTH;
+import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_DEL_RATIO;
 
 import java.util.Collections;
 import java.util.List;
@@ -336,9 +336,9 @@ public class ObservedRegionFactory
         @Override
         public void accept(final AmberBAF baf)
         {
-            if(mCobaltChromosomes.hasChromosome(baf.chromosome()))
+            if(mCobaltChromosomes.hasChromosome(baf.Chromosome))
             {
-                CobaltChromosome cobaltChromosome = mCobaltChromosomes.get(baf.chromosome());
+                CobaltChromosome cobaltChromosome = mCobaltChromosomes.get(baf.Chromosome);
                 if(cobaltChromosome.isNormal() && cobaltChromosome.isDiploid() && !Double.isNaN(baf.tumorModifiedBAF()))
                 {
                     mCount++;

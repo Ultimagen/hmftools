@@ -4,13 +4,16 @@ import static java.lang.Math.abs;
 
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionsWithin;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.getGenotypeAttributeAsDouble;
 import static com.hartwig.hmftools.common.variant.SageVcfTags.LOCAL_PHASE_SET;
-import static com.hartwig.hmftools.common.variant.SageVcfTags.MICROHOMOLOGY_FLAG;
-import static com.hartwig.hmftools.common.variant.SageVcfTags.REPEAT_COUNT_FLAG;
-import static com.hartwig.hmftools.common.variant.SageVcfTags.REPEAT_SEQUENCE_FLAG;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.MICROHOMOLOGY;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.REPEAT_COUNT;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.REPEAT_SEQUENCE;
 import static com.hartwig.hmftools.common.variant.VariantType.INDEL;
 import static com.hartwig.hmftools.common.variant.VariantType.MNP;
 import static com.hartwig.hmftools.common.variant.VariantType.SNP;
+
+import static htsjdk.variant.vcf.VCFConstants.ALLELE_FREQUENCY_KEY;
 
 import java.util.List;
 import java.util.Map;
@@ -28,6 +31,8 @@ import com.hartwig.hmftools.pave.impact.VariantTransImpact;
 
 import org.apache.logging.log4j.util.Strings;
 
+import htsjdk.variant.variantcontext.Genotype;
+import htsjdk.variant.variantcontext.GenotypeBuilder;
 import htsjdk.variant.variantcontext.VariantContext;
 
 public class VariantData
@@ -49,9 +54,9 @@ public class VariantData
 
     // other key data
     private int mLocalPhaseSetId;
-    public String mMicrohomology;
-    public int mRepeatCount;
-    public String mRepeatSequence;
+    private String mMicrohomology;
+    private int mRepeatCount;
+    private String mRepeatSequence;
 
     private final int mIndelBaseDiff;
 
@@ -74,6 +79,7 @@ public class VariantData
     public final Set<String> mFilters;
     public int mPonSampleCount;
     public int mPonMaxReadCount;
+    public int mPonMeanReadCount;
     private Double mGnomadFrequency;
 
     public static final int NO_LOCAL_PHASE_SET = -1;
@@ -152,6 +158,7 @@ public class VariantData
         mFilters = Sets.newHashSet();
         mPonSampleCount = 0;
         mPonMaxReadCount = 0;
+        mPonMeanReadCount = 0;
         mGnomadFrequency = null;
     }
 
@@ -163,7 +170,6 @@ public class VariantData
         String ref = variantContext.getReference().getBaseString();
 
         // only support the first of multiple alts (as can be the case for Strelka)
-        // String alt = variantContext.getAlternateAlleles().get(0)stream().map(Allele::toString).collect(Collectors.joining(","));
         String alt = !variantContext.getAlternateAlleles().isEmpty() ? variantContext.getAlternateAlleles().get(0).toString() : ref;
 
         if(alt.equals("*") || alt.equals("N")) // unhandled for now
@@ -176,9 +182,9 @@ public class VariantData
 
         variant.setVariantDetails(
                 !localPhaseSets.isEmpty() ? localPhaseSets.get(0) : NO_LOCAL_PHASE_SET,
-                variantContext.getAttributeAsString(MICROHOMOLOGY_FLAG, Strings.EMPTY),
-                variantContext.getAttributeAsString(REPEAT_SEQUENCE_FLAG, Strings.EMPTY),
-                variantContext.getAttributeAsInt(REPEAT_COUNT_FLAG, 0));
+                variantContext.getAttributeAsString(MICROHOMOLOGY, Strings.EMPTY),
+                variantContext.getAttributeAsString(REPEAT_SEQUENCE, Strings.EMPTY),
+                variantContext.getAttributeAsInt(REPEAT_COUNT, 0));
 
         return variant;
     }
@@ -325,15 +331,24 @@ public class VariantData
         return VariantTier.fromContext(mVariantContext);
     }
 
+    public double sampleVaf(final String sampleId)
+    {
+        Genotype sampleGenotype = mVariantContext.getGenotype(sampleId);
+        return sampleGenotype != null ? getGenotypeAttributeAsDouble(sampleGenotype, ALLELE_FREQUENCY_KEY, 0) : 0;
+    }
+
     public Set<String> filters() { return mFilters; }
     public void addFilter(final String filter) { mFilters.add(filter); }
 
     public int ponSampleCount() { return mPonSampleCount; }
     public int ponMaxReadCount() { return mPonMaxReadCount; }
-    public void setPonFrequency(int sampleCount, int maxReadCount)
+    public int ponMeanReadCount() { return mPonMaxReadCount; }
+
+    public void setPonFrequency(int sampleCount, int maxReadCount, int meanReadCount)
     {
         mPonSampleCount = sampleCount;
         mPonMaxReadCount = maxReadCount;
+        mPonMeanReadCount = meanReadCount;
     }
 
     public Double gnomadFrequency() { return mGnomadFrequency; }
@@ -401,10 +416,9 @@ public class VariantData
         sj.add(varDetails.filter());
         sj.add(varDetails.tier().toString());
         sj.add(String.valueOf(varDetails.qual()));
-        sj.add(String.valueOf(allelicDepth.alleleReadCount()));
-        sj.add(String.valueOf(allelicDepth.totalReadCount()));
+        sj.add(String.valueOf(allelicDepth.AlleleReadCount));
+        sj.add(String.valueOf(allelicDepth.TotalReadCount));
 
         return sj.toString();
     }
-
 }

@@ -17,7 +17,6 @@ import com.hartwig.hmftools.common.purple.GermlineStatus;
 import com.hartwig.hmftools.common.variant.AllelicDepth;
 import com.hartwig.hmftools.common.variant.CodingEffect;
 import com.hartwig.hmftools.common.variant.Hotspot;
-import com.hartwig.hmftools.common.variant.ImmutableAllelicDepthImpl;
 import com.hartwig.hmftools.common.variant.ImmutableSomaticVariantImpl;
 import com.hartwig.hmftools.common.variant.SomaticLikelihood;
 import com.hartwig.hmftools.common.variant.SomaticVariant;
@@ -35,17 +34,15 @@ import org.jooq.Result;
 
 public class SomaticVariantDAO
 {
-    @NotNull
     private final DSLContext context;
 
     private static final int DB_BATCH_INSERT_SIZE = 10000;
 
-    SomaticVariantDAO(@NotNull final DSLContext context)
+    SomaticVariantDAO(final DSLContext context)
     {
         this.context = context;
     }
 
-    @NotNull
     public BufferedWriter<SomaticVariant> writer(String tumorSample)
     {
         BufferedWriterConsumer<SomaticVariant> consumer = new BufferedWriterConsumer<SomaticVariant>()
@@ -66,8 +63,7 @@ public class SomaticVariantDAO
         return new BufferedWriter<>(consumer, DB_BATCH_INSERT_SIZE);
     }
 
-    @NotNull
-    public List<SomaticVariant> read(@NotNull String sample, VariantType type)
+    public List<SomaticVariant> read(final String sample, VariantType type)
     {
         List<SomaticVariant> variants = Lists.newArrayList();
 
@@ -91,18 +87,14 @@ public class SomaticVariantDAO
     {
         Integer referenceAlleleReadCount = record.getValue(SOMATICVARIANT.REFERENCEALLELEREADCOUNT);
         Integer referenceTotalCount = record.getValue(SOMATICVARIANT.REFERENCETOTALREADCOUNT);
-        AllelicDepth referenceAllelicDepth = referenceAlleleReadCount != null && referenceTotalCount != null ? ImmutableAllelicDepthImpl
-                .builder()
-                .alleleReadCount(referenceAlleleReadCount)
-                .totalReadCount(referenceTotalCount)
-                .build() : null;
+
+        AllelicDepth referenceAllelicDepth = referenceAlleleReadCount != null && referenceTotalCount != null ?
+                new AllelicDepth(referenceTotalCount, referenceAlleleReadCount) : null;
 
         Integer rnaAlleleReadCount = record.getValue(SOMATICVARIANT.RNAALLELEREADCOUNT);
         Integer rnaTotalCount = record.getValue(SOMATICVARIANT.RNATOTALREADCOUNT);
-        AllelicDepth rnaAllelicDepth = rnaAlleleReadCount != null && rnaTotalCount != null ? ImmutableAllelicDepthImpl.builder()
-                .alleleReadCount(rnaAlleleReadCount)
-                .totalReadCount(rnaTotalCount)
-                .build() : null;
+        AllelicDepth rnaAllelicDepth = rnaAlleleReadCount != null && rnaTotalCount != null ?
+                new AllelicDepth(rnaTotalCount, rnaAlleleReadCount) : null;
 
         return ImmutableSomaticVariantImpl.builder()
                 .chromosome(record.getValue(SOMATICVARIANT.CHROMOSOME))
@@ -125,8 +117,7 @@ public class SomaticVariantDAO
                 .canonicalHgvsProteinImpact(record.getValue(SOMATICVARIANT.CANONICALHGVSPROTEINIMPACT))
                 .spliceRegion(byteToBoolean(record.getValue(SOMATICVARIANT.SPLICEREGION)))
                 .otherReportedEffects(DatabaseUtil.valueNotNull(record.getValue(SOMATICVARIANT.OTHERTRANSCRIPTEFFECTS)))
-                .alleleReadCount(record.getValue(SOMATICVARIANT.ALLELEREADCOUNT))
-                .totalReadCount(record.getValue(SOMATICVARIANT.TOTALREADCOUNT))
+                .allelicDepth(new AllelicDepth(record.getValue(SOMATICVARIANT.TOTALREADCOUNT), record.getValue(SOMATICVARIANT.ALLELEREADCOUNT)))
                 .adjustedCopyNumber(record.getValue(SOMATICVARIANT.COPYNUMBER))
                 .adjustedVAF(record.getValue(SOMATICVARIANT.ADJUSTEDVAF))
                 .variantCopyNumber(record.getValue(SOMATICVARIANT.VARIANTCOPYNUMBER))
@@ -153,7 +144,7 @@ public class SomaticVariantDAO
     }
 
 
-    void writeAll(@NotNull final Timestamp timestamp, @NotNull String sample, @NotNull List<SomaticVariant> variants)
+    void writeAll(final Timestamp timestamp, final String sample, final List<SomaticVariant> variants)
     {
         final InsertValuesStepN inserter = context.insertInto(SOMATICVARIANT,
                 SOMATICVARIANT.SAMPLEID,
@@ -243,8 +234,8 @@ public class SomaticVariantDAO
                 checkTrimHgsvString(variant.canonicalHgvsProteinImpact(), SOMATICVARIANT.CANONICALHGVSPROTEINIMPACT),
                 variant.spliceRegion(),
                 otherReportedEffects,
-                variant.alleleReadCount(),
-                variant.totalReadCount(),
+                variant.allelicDepth().AlleleReadCount,
+                variant.allelicDepth().TotalReadCount,
                 DatabaseUtil.decimal(variant.adjustedCopyNumber()),
                 DatabaseUtil.decimal(variant.adjustedVAF()),
                 DatabaseUtil.decimal(variant.variantCopyNumber()),
@@ -261,10 +252,10 @@ public class SomaticVariantDAO
                 variant.recovered(),
                 variant.kataegis(),
                 variant.tier().toString(),
-                Optional.ofNullable(variant.referenceDepth()).map(AllelicDepth::alleleReadCount).orElse(null),
-                Optional.ofNullable(variant.referenceDepth()).map(AllelicDepth::totalReadCount).orElse(null),
-                Optional.ofNullable(variant.rnaDepth()).map(AllelicDepth::alleleReadCount).orElse(null),
-                Optional.ofNullable(variant.rnaDepth()).map(AllelicDepth::totalReadCount).orElse(null),
+                Optional.ofNullable(variant.referenceDepth() != null ? variant.referenceDepth().AlleleReadCount : null),
+                Optional.ofNullable(variant.referenceDepth() != null ? variant.referenceDepth().TotalReadCount : null),
+                Optional.ofNullable(variant.rnaDepth() != null ? variant.rnaDepth().AlleleReadCount : null),
+                Optional.ofNullable(variant.rnaDepth() != null ? variant.rnaDepth().TotalReadCount : null),
                 variant.qual(),
                 variant.localPhaseSets() != null ? checkStringLength(variant.localPhaseSetsStr(), SOMATICVARIANT.LOCALPHASESET) : null,
                 variant.clinvarInfo(),

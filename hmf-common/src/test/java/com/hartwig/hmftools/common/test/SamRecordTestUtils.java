@@ -3,17 +3,18 @@ package com.hartwig.hmftools.common.test;
 import static java.lang.Math.abs;
 
 import static com.hartwig.hmftools.common.genome.chromosome.MitochondrialChromosome.MT_LENGTH;
-import static com.hartwig.hmftools.common.samtools.SamRecordUtils.MATE_CIGAR_ATTRIBUTE;
-import static com.hartwig.hmftools.common.samtools.SamRecordUtils.NO_CHROMOSOME_INDEX;
-import static com.hartwig.hmftools.common.samtools.SamRecordUtils.NO_CHROMOSOME_NAME;
-import static com.hartwig.hmftools.common.samtools.SamRecordUtils.NO_POSITION;
-import static com.hartwig.hmftools.common.samtools.SamRecordUtils.SUPPLEMENTARY_ATTRIBUTE;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.MATE_CIGAR_ATTRIBUTE;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_CHROMOSOME_INDEX;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_CHROMOSOME_NAME;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_POSITION;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.SUPPLEMENTARY_ATTRIBUTE;
 
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.genome.chromosome.MitochondrialChromosome;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeCoordinates;
-import com.hartwig.hmftools.common.samtools.SupplementaryReadData;
+import com.hartwig.hmftools.common.bam.SupplementaryReadData;
 
+import htsjdk.samtools.SAMFlag;
 import htsjdk.samtools.SAMRecord;
 import htsjdk.samtools.SAMRecordSetBuilder;
 import htsjdk.samtools.SAMSequenceDictionary;
@@ -80,7 +81,6 @@ public final class SamRecordTestUtils
         }
     }
 
-
     public static SAMRecord createSamRecord(
             final String readId, final String chrStr, int readStart, final String readBases, final String cigar, final String mateChr,
             int mateStart, boolean isReversed, boolean isSupplementary, final SupplementaryReadData suppAlignment)
@@ -97,7 +97,7 @@ public final class SamRecordTestUtils
 
         record.setReadBases(readBases.getBytes());
 
-        final byte[] qualities = new byte[readBases.length()];
+        byte[] qualities = buildDefaultBaseQuals(readBases.length());
 
         for(int i = 0; i < readBases.length(); ++i)
         {
@@ -153,5 +153,25 @@ public final class SamRecordTestUtils
             return HumanChromosome.values().length;
 
         else return HumanChromosome.values().length + 1;
+    }
+
+    public static byte[] buildDefaultBaseQuals(int length) { return buildBaseQuals(length, DEFAULT_BASE_QUAL); }
+
+    public static byte[] buildBaseQuals(int length, int qualValue)
+    {
+        final byte[] baseQuals = new byte[length];
+
+        for(int i = 0; i < length; ++i)
+        {
+            baseQuals[i] = (byte)qualValue;
+        }
+
+        return baseQuals;
+    }
+
+    public static int setReadFlag(int flags, final SAMFlag flag)
+    {
+        flags |= flag.intValue();
+        return flags;
     }
 }

@@ -4,6 +4,8 @@ import static java.lang.Math.abs;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
+import static com.hartwig.hmftools.common.qual.BaseQualAdjustment.BASE_QUAL_MINIMUM;
+import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionsOverlap;
 import static com.hartwig.hmftools.sage.sync.FragmentSyncType.BASE_MISMATCH;
 import static com.hartwig.hmftools.sage.sync.FragmentSyncType.CIGAR_MISMATCH;
@@ -23,6 +25,7 @@ import com.hartwig.hmftools.common.qual.BaseQualAdjustment;
 import htsjdk.samtools.Cigar;
 import htsjdk.samtools.CigarElement;
 import htsjdk.samtools.CigarOperator;
+import htsjdk.samtools.SAMFileHeader;
 import htsjdk.samtools.SAMRecord;
 import htsjdk.samtools.SAMRecordSetBuilder;
 
@@ -30,6 +33,7 @@ public class CombinedSyncData
 {
     // workings and components of the fragment creation
     private int mFragmentStart;
+    private int mFragmentEnd;
     private int mCombinedEffectiveStart;
     private int mFirstEffectivePosStart;
     private int mSecondEffectivePosStart;
@@ -44,12 +48,13 @@ public class CombinedSyncData
         mCombinedBases = null;
         mCombinedBaseQualities = null;
         mFragmentStart = 0;
+        mFragmentEnd = 0;
         mFirstEffectivePosStart = 0;
         mSecondEffectivePosStart = 0;
         mCombinedEffectiveStart = 0;
     }
 
-    public static FragmentSyncOutcome formFragmentRead(final SAMRecord first, final SAMRecord second)
+    public static FragmentSyncOutcome formFragmentRead(final SAMRecord first, final SAMRecord second, final SAMFileHeader samHeader)
     {
         if(!positionsOverlap(first.getAlignmentStart(), first.getAlignmentEnd(), second.getAlignmentStart(), second.getAlignmentEnd()))
         {
@@ -73,13 +78,18 @@ public class CombinedSyncData
             return new FragmentSyncOutcome(BASE_MISMATCH);
         }
 
-        return new FragmentSyncOutcome(combinedSyncData.buildSyncedRead(first, second), COMBINED);
+        return new FragmentSyncOutcome(combinedSyncData.buildSyncedRead(first, second, samHeader), COMBINED);
     }
 
-    private SAMRecord buildSyncedRead(final SAMRecord first, final SAMRecord second)
+    private SAMRecord buildSyncedRead(final SAMRecord first, final SAMRecord second, final SAMFileHeader samHeader)
     {
         SAMRecordSetBuilder recordBuilder = new SAMRecordSetBuilder();
         recordBuilder.setUnmappedHasBasesAndQualities(false);
+
+        if(samHeader != null)
+            recordBuilder.setHeader(samHeader);
+        else
+            recordBuilder.setHeader(first.getHeader());
 
         SAMRecord combinedRecord = recordBuilder.addFrag(
                 first.getReadName(),
@@ -91,13 +101,10 @@ public class CombinedSyncData
 
         combinedRecord.setReadBases(mCombinedBases);
         combinedRecord.setAlignmentStart(mFragmentStart);
-        combinedRecord.setReferenceIndex(first.getReferenceIndex());
 
         combinedRecord.setBaseQualities(mCombinedBaseQualities);
-        combinedRecord.setReferenceName(first.getReferenceName());
         combinedRecord.setMateAlignmentStart(mFragmentStart);
-        combinedRecord.setMateReferenceName(first.getReferenceName());
-        combinedRecord.setMateReferenceIndex(first.getReferenceIndex());
+        combinedRecord.setMateReferenceIndex(first.getMateReferenceIndex());
 
         combinedRecord.setFlags(first.getFlags());
 
@@ -136,7 +143,9 @@ public class CombinedSyncData
         // for short fragments, less than standard read length, cap fragment boundaries from the five-prime read
         if(!first.getReadNegativeStrandFlag())
         {
+            // first is the 5' read at the start, second is 5' from the right/end
             mFragmentStart = firstPosStart;
+            mFragmentEnd = secondPosEnd;
 
             mCombinedEffectiveStart = mFirstEffectivePosStart;
             combinedEffectiveEnd = secondEffectivePosEnd;
@@ -144,18 +153,19 @@ public class CombinedSyncData
         else
         {
             mFragmentStart = secondPosStart;
+            mFragmentEnd = firstPosEnd;
 
             mCombinedEffectiveStart = mSecondEffectivePosStart;
             combinedEffectiveEnd = firstEffectivePosEnd;
         }
 
-        // now walk through the 2 cigars, building a combined one and checking for any incompatibilities
         // skip past any bases prior to the fragment effective start
         if(mFirstEffectivePosStart < mCombinedEffectiveStart)
             firstCigar.moveToPosition(mFirstEffectivePosStart, mCombinedEffectiveStart);
         else if(mSecondEffectivePosStart < mCombinedEffectiveStart)
             secondCigar.moveToPosition(mSecondEffectivePosStart, mCombinedEffectiveStart);
 
+        // now walk through the 2 cigars, building a combined one and checking for any incompatibilities
         int combinedCigarElementLength = 0;
         CigarOperator combinedCigarOperator = null;
 
@@ -212,8 +222,11 @@ public class CombinedSyncData
                         if(!ignoreCigarOperatorMismatch(firstOperator, secondOperator))
                             return false; // a mismatch
 
-                        // always favour an aligned element
-                        newOperator = M;
+                        // always favour an aligned element if it is within the permitted 5' aligned region
+                        if(positionWithin(currentPos, mFragmentStart, mFragmentEnd))
+                            newOperator = M;
+                        else
+                            newOperator = S;
                     }
                     else
                     {
@@ -270,8 +283,6 @@ public class CombinedSyncData
         final byte[] secondBases = second.getReadBases();
         final int secondLength = second.getReadLength();
 
-        int baseMismatches = 0;
-
         CigarState combinedCigar = new CigarState(mCombinedCigar);
         int currentPosition = mCombinedEffectiveStart;
 
@@ -292,11 +303,6 @@ public class CombinedSyncData
                     }
                     else
                     {
-                        // no base-mismatch logic applied anymore, instead allow qual calc model to handle differences
-                        // ++baseMismatches;
-                        // if(baseMismatches >= SYNC_FRAG_MAX_MISMATCHES)
-                        //    return false;
-
                         byte[] baseAndQual = getCombinedBaseAndQual(
                                 firstBases[firstReadIndex], firstBaseQualities[firstReadIndex],
                                 secondBases[secondReadIndex], secondBaseQualities[secondReadIndex]);
@@ -406,12 +412,11 @@ public class CombinedSyncData
         else if(firstQual > secondQual)
         {
             // use the difference in quals
-            return new byte[] { firstBase, (byte)((int)firstQual - (int)secondQual) };
+            return new byte[] { firstBase, (byte)max(BASE_QUAL_MINIMUM, firstQual - secondQual) };
         }
         else
         {
-            return new byte[] { secondBase, (byte)((int)secondQual - (int)firstQual) };
+            return new byte[] { secondBase, (byte)max(BASE_QUAL_MINIMUM, secondQual - firstQual) };
         }
     }
-
 }

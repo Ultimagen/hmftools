@@ -148,6 +148,8 @@ interesting and added to the report:
 - Other potentially relevant fusions. A maximum of 10 additional fusions (picked arbitrarily) are reported as potentially interesting:
     1. Any fusion that is not reported and has a reported type other than NONE.
     2. Any fusion in a gene that is configured as an oncogene in the driver gene panel.
+- Other potentially interesting in-frame fusions in case no high drivers events are detected
+    1. In case no high driver events are detected, any in-frame non chain terminated fusion that is not already reported  
 - Other viral presence:
     1. Any viral presence that is not otherwise reported.
 - Potentially interesting gene disruptions:
@@ -176,6 +178,7 @@ In addition to all germline SNV/Indel tumor drivers determined by [PURPLE](../pu
     1. Any hotspots that are not configured to be reported.
     2. Any hotspots that are filtered based on quality.
 - Potentially pathogenic germline deletions
+- Potentially pathogenic germline LOH events
 - Potentially pathogenic germline homozygous disruptions
 - Potentially pathogenic germline gene disruptions
 - Missed variant likelihood (MVLH) per gene, presenting the likelihood of missing a pathogenic variant in case there would have been one
@@ -186,15 +189,42 @@ In addition to all germline SNV/Indel tumor drivers determined by [PURPLE](../pu
 
 ## Immunology
 
-The immunology chapter is work-in-progress and will report on various immunology properties of the tumor sample.
+The immunology chapter reports on various immunology properties of the tumor sample.
 
-The chapter currently presents the following:
+The chapter presents the following:
 
 - HLA-A/B/C details
     1. QC Status
     2. Detected alleles, annotated with #total fragments and somatic annotation (tumor copy number, #mutations)
 
 In case ORANGE was run in DNA+RNA mode, the alleles will be annotated by RNA fragment support.
+
+- Genetic immune escape analysis (inspired by [this paper](https://www.nature.com/articles/s41588-023-01367-1)). ORANGE attempts to detect the following mechanisms:
+    - HLA-1 loss-of-function, detected in case one of the following mutations is present in either HLA-A, HLA-B or HLA-C:
+        - MACN < 0.3 without the presence of a loss (proxy for LOH)
+        - A clonal variant with canonical coding effect `NONSENSE_OR_FRAMESHIFT` or `SPLICE`
+        - A clonal, biallelic variant with canonical coding effect `MISSENSE`
+        - A full or partial loss
+        - A homozygous disruption
+    - Antigen presentation pathway inactivation, detected in case one of the following mutations is present in either B2M, CALR, TAP1, TAP2,
+      TABBP, NLRC5, CIITA or RFX5:
+        - A clonal variant with canonical coding effect `NONSENSE_OR_FRAMESHIFT` or `SPLICE`
+        - A clonal, biallelic variant with canonical coding effect `MISSENSE`
+        - A full or partial loss
+        - A homozygous disruption
+    - IFN gamma pathway inactivation, detected in case one of the following mutations is present in either JAK1, JAK2, IRF2, IFNGR1, IFNGR2,
+      APLNR or STAT1
+        - A clonal variant with canonical coding effect `NONSENSE_OR_FRAMESHIFT` or `SPLICE`
+        - A clonal, biallelic variant with canonical coding effect `MISSENSE`
+        - A full or partial loss
+        - A homozygous disruption
+    - (Potential) PD-L1 overexpression, detected in case CD274 is fully amplified.
+    - CD58 inactivation, detected in case any of the following mutations happened in CD58:
+        - A clonal variant with canonical coding effect `NONSENSE_OR_FRAMESHIFT` or `SPLICE`
+        - A clonal, biallelic variant with canonical coding effect `MISSENSE`
+        - A full or partial loss
+        - A homozygous disruption
+    - Epigenetics driven immune escape via SETDB1, detected in case SETDB1 is fully amplified.
 
 ## RNA Findings
 
@@ -230,10 +260,44 @@ investigate potential causes for QC failure.
 
 ## Version History and Download Links
 
-- Upcoming
+- Upcoming:
+  - Add unreported reason to fusions in ORANGE
+  - Add etiology information to signatures and sort by allocation
+  - Add percentage of unsupported segments to Quality control page
+  - Show all viable fusions in ORANGE in samples where we detect no HIGH drivers
+  - Ensure HIV is never reported in ORANGE report or included in ORANGE json
+- [3.6.0](https://github.com/hartwigmedical/hmftools/releases/tag/orange-v3.6.0)
+    - Cuppa predictions with NaN likelihood are filtered in the ORANGE conversion of CUPPA results
+- [3.5.1](https://github.com/hartwigmedical/hmftools/releases/tag/orange-v3.5.1)
+    - Workaround added for bug with mapping various ORANGE cohorts to non-existing ISOFOX cohorts.
+- [3.5.0](https://github.com/hartwigmedical/hmftools/releases/tag/orange-v3.5.0)
+    - Add `PurpleTranscriptImpact.reported` and make `PurpleVariant.reported` a derived field. This
+      uses the REPORTABLE_TRANSCRIPTS vcf field introduced in PURPLE 4.0.
+    - Split pharmacogenetic haplotype into separate haplotype and genotype on front page and in table.
+    - A new Genetic Immune Escape analysis has been added to datamodel and report. This analysis determines whether the sample uses any of
+      the immune escape mechanisms known in cancer. See
+      also [Genetic immune landscape paper](https://www.nature.com/articles/s41588-023-01367-1)
+    - Technical: Removed work-around for pre v1.6 LILAC (incorrectly populating ref fragments in case of tumor-only)
+- [3.4.0](https://github.com/hartwigmedical/hmftools/releases/tag/orange-v3.4.0)
+    - Produce ORANGE datamodel v2.4.0 (including max copy number for gene copy numbers)
+    - Bugfix: ORANGE can now map stomach and esophageal squamous cell carcinomas to their rightful cohort.
+        - Note: Available in ORANGE [3.3.1](https://github.com/hartwigmedical/hmftools/releases/tag/orange-v3.3.1)
+- [3.3.0](https://github.com/hartwigmedical/hmftools/releases/tag/orange-v3.3.0)
+    - Clonal likelihood is set to 0 or 1 based on variant copy number when converting germline variants to somatic
+    - Bugfix: Fix bug in germline MVLH parsing that caused them to be underestimated by a factor 100.
+    - Restrict germline MVLH table on PDF and related field in JSON to genes handled by SAGE germline.
+- [3.2.0](https://github.com/hartwigmedical/hmftools/releases/tag/orange-v3.2.0)
+    - Support new ORANGE-datamodel (v2.3.0).
+    - Support germline deletions heterozygous in the tumor:
+        - Included in new section "Potentially pathogenic germline LOH events" on PDF report.
+        - Included in new fields `allGermlineLossOfHeterozygosities` and `reportableGermlineLossOfHeterozygosities` in the JSON.
+        - Converted to somatic LOH events when `convert_germline_to_somatic` parameter is provided.
+        - Changed titles of somatic LOH and germline losses on PDF report to accommodate these changes.
+    - Combine multiple germline loss calls for the same gene into one call.
+    - Merge germline and somatic losses when both exist for the same gene.
     - Bugfix: Simple clusters affecting no exons are now excluded when counting expected number of linx plots
     - Bugfix: ORANGE throws an exception in case a cancer type is resolved for isofox that does not exist in the gene distribution data.
-    - ORANGE throws an exception in case empty cuppa data is provided (without any classifiers being run)  
+    - ORANGE throws an exception in case empty cuppa predictions are provided (cuppa output file is empty or is missing probabilities)
 - [3.1.0](https://github.com/hartwigmedical/hmftools/releases/tag/orange-v3.1.0)
     - ORANGE report now shows the new CUPPA v2.0 visualization
     - New ORANGE-datamodel (v2.2.0) supports the tabular output from both CUPPA v2.0 and CUPPA v1.x

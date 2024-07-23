@@ -23,7 +23,7 @@ doPlot <- function(contig) {
   chr = paste0("chr", contig)
   label = chromosomeRanges[chromosomeRanges$chromosome == contig, "label"]
   chrColor = chromosomeRanges[chromosomeRanges$chromosome == contig, "chrColor"]
-  
+
   itrack <- IdeogramTrack(genome="X",chromosome=chr, name=label, bands=bands, ucscChromosomeNames=FALSE,
                           cex = 1, fontsize = chromosomeFontsize , fontcolor = "black", font = "helvetica",
                           fill = chrColor, col = chrColor, lwd = 10)
@@ -112,5 +112,7 @@ dev.off()
 
 
 pChr <- ggdraw() + draw_image(circosPicturePath)
+pChr = pChr + theme(plot.margin = margin(t = 0, b = 0, l = 3, r = 3, unit = "pt"))
+
 pCombined = plot_grid(pCircos, pChr, ncol = 1, rel_heights = c(circosWidth, chromosomeHeight))
-ggsave(circosPicturePath, pCombined, width = circosWidth/300.0, height = (circosWidth + chromosomeHeight)/300.0, units = "in", dpi = 300)
+ggsave(circosPicturePath, pCombined, width = circosWidth/300.0, height = (circosWidth + chromosomeHeight)/300.0, units = "in", dpi = 300, bg="white")

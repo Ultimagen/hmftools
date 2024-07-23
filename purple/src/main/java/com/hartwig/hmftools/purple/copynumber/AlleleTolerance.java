@@ -1,14 +1,14 @@
 package com.hartwig.hmftools.purple.copynumber;
 
-import static com.hartwig.hmftools.purple.config.PurpleConstants.MAX_DEVIATION_ADJUSTMENT;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.MIN_ABSOLUTE_COPY_NUMBER_ADDITION;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.MIN_ABSOLUTE_COPY_NUMBER_TOLERANCE;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.MIN_OBSERVED_BAF_CHANGE;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.MIN_RELATIVE_COPY_NUMBER_ADDITION;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.MIN_RELATIVE_COPY_NUMBER_TOLERANCE;
+import static com.hartwig.hmftools.purple.PurpleConstants.MAX_DEVIATION_ADJUSTMENT;
+import static com.hartwig.hmftools.purple.PurpleConstants.MIN_ABSOLUTE_COPY_NUMBER_ADDITION;
+import static com.hartwig.hmftools.purple.PurpleConstants.MIN_ABSOLUTE_COPY_NUMBER_TOLERANCE;
+import static com.hartwig.hmftools.purple.PurpleConstants.MIN_OBSERVED_BAF_CHANGE;
+import static com.hartwig.hmftools.purple.PurpleConstants.MIN_RELATIVE_COPY_NUMBER_ADDITION;
+import static com.hartwig.hmftools.purple.PurpleConstants.MIN_RELATIVE_COPY_NUMBER_TOLERANCE;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.hartwig.hmftools.purple.purity.PurityAdjuster;
+import com.hartwig.hmftools.purple.fitting.PurityAdjuster;
 import com.hartwig.hmftools.common.utils.Doubles;
 import com.hartwig.hmftools.purple.region.ObservedRegion;
 

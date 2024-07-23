@@ -1,141 +1,99 @@
 package com.hartwig.hmftools.sage.evidence;
 
-import static com.hartwig.hmftools.sage.evidence.RealignedContext.NONE;
-import static com.hartwig.hmftools.sage.evidence.RealignedType.EXACT;
-import static com.hartwig.hmftools.sage.evidence.RealignedType.LENGTHENED;
-import static com.hartwig.hmftools.sage.evidence.RealignedType.SHORTENED;
+import static com.hartwig.hmftools.common.bam.CigarUtils.getReadIndexFromPosition;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.INVALID_READ_INDEX;
+import static com.hartwig.hmftools.sage.common.ReadContextMatch.NONE;
+import static com.hartwig.hmftools.sage.evidence.JitterMatch.checkJitter;
 
-import com.hartwig.hmftools.common.variant.repeat.RepeatContextFactory;
-import com.hartwig.hmftools.sage.common.ReadContext;
+import com.hartwig.hmftools.common.bam.CigarUtils;
+import com.hartwig.hmftools.sage.common.ReadContextMatch;
+import com.hartwig.hmftools.sage.common.ReadContextMatcher;
+import com.hartwig.hmftools.sage.common.VariantReadContext;
+
+import htsjdk.samtools.SAMRecord;
 
 public class Realignment
 {
-    private static final int MIN_REPEAT_COUNT = 4;
-    public static final int MAX_REPEAT_SIZE = 5;
-
-    private static final Repeat NO_REPEAT = new Repeat(0, 0);
-
-    public static RealignedContext realignedAroundIndex(
-            final ReadContext readContext, final int otherBaseIndex, final byte[] otherBases, int maxSize)
+    public static RealignedType checkRealignment(
+            final VariantReadContext readContext, final ReadContextMatcher readContextMatcher, final SAMRecord record,
+            final int readIndex, int realignedReadIndex, final SplitReadSegment splitReadSegment)
     {
-        int baseStartIndex = readContext.readBasesLeftFlankIndex();
-        int baseEndIndex = readContext.readBasesRightFlankIndex();
+        // the read index corresponding to the ref position at the end of the core
+        if(readIndex == realignedReadIndex)
+            return RealignedType.NONE;
 
-        int leftOffset = readContext.readBasesPositionIndex() - baseStartIndex;
-        int otherStartIndex = otherBaseIndex - leftOffset;
+        ReadContextMatch match = NONE;
 
-        return realigned(baseStartIndex, baseEndIndex, readContext.readBases(), otherStartIndex, otherBases, maxSize);
+        int realignmentOffset = realignedReadIndex - readIndex;
+
+        if(splitReadSegment != null)
+        {
+            realignedReadIndex -= splitReadSegment.SegmentIndexStart;
+
+            if(realignedReadIndex < 0 || realignedReadIndex >= splitReadSegment.length())
+                return RealignedType.NONE;
+
+            match = checkMatch(
+                    readContextMatcher, splitReadSegment.ReadBases, splitReadSegment.ReadQuals, realignedReadIndex, realignmentOffset);
+        }
+        else
+        {
+            if(realignedReadIndex < 0 || realignedReadIndex >= record.getReadBases().length)
+                return RealignedType.NONE;
+
+            match = checkMatch(
+                    readContextMatcher, record.getReadBases(), record.getBaseQualities(), realignedReadIndex, realignmentOffset);
+        }
+
+        if(match == ReadContextMatch.FULL || match == ReadContextMatch.PARTIAL_CORE)
+            return RealignedType.EXACT;
+
+        // otherwise check jitter
+        JitterMatch jitterMatch = checkJitter(readContext, readContextMatcher, record, realignedReadIndex);
+
+        if(jitterMatch == JitterMatch.SHORTENED)
+            return RealignedType.SHORTENED;
+        else if(jitterMatch == JitterMatch.LENGTHENED)
+            return RealignedType.LENGTHENED;
+
+        return RealignedType.NONE;
     }
 
-    public static RealignedContext realigned(
-            int baseStartIndex, int baseEndIndex, final byte[] bases, final int otherBaseIndex, final byte[] otherBases, int maxDistance)
+    private static ReadContextMatch checkMatch(
+            final ReadContextMatcher readContextMatcher, final byte[] readBases, final byte[] readQuals, final int readVarIndex,
+            int realignmentOffset)
     {
-        if(otherBaseIndex >= 0)
-        {
-            final RealignedContext context = realigned(baseStartIndex, baseEndIndex, bases, otherBaseIndex, otherBases);
+        readContextMatcher.setRealignmentIndexOffset(realignmentOffset);
 
-            if(context.Type != RealignedType.NONE)
-                return context;
-        }
+        ReadContextMatch match = readContextMatcher.determineReadMatch(readBases, readQuals, readVarIndex, true);
 
-        RealignedContext result = NONE;
-        for(int i = -maxDistance; i <= maxDistance; i++)
-        {
-            int otherBaseIndexWithOffset = otherBaseIndex + i;
-            if(i != 0 && otherBaseIndexWithOffset >= 0)
-            {
-                final RealignedContext context = realigned(baseStartIndex, baseEndIndex, bases, otherBaseIndexWithOffset, otherBases);
-                if(context.Type != RealignedType.NONE)
-                {
-                    if(context.Type == RealignedType.EXACT)
-                        return context;
+        readContextMatcher.clearRealignmentIndexOffset();
 
-                    result = context;
-                }
-            }
-        }
-
-        return result;
+        return match;
     }
 
-    public static RealignedContext realigned(int baseStartIndex, int baseEndIndex, final byte[] bases, int otherIndex, byte[] otherBases)
+    public static boolean considerRealignedDel(final SAMRecord record, final int minPositionVsRead)
     {
-        int exactLength = baseEndIndex - baseStartIndex + 1;
-
-        int matchingBases = matchingBasesFromLeft(baseStartIndex, baseEndIndex, bases, otherIndex, otherBases);
-
-        if(matchingBases == exactLength)
-        {
-            return new RealignedContext(EXACT, matchingBases, otherIndex);
-        }
-
-        if(matchingBases < MIN_REPEAT_COUNT)
-            return NONE;
-
-        int baseNextIndex = baseStartIndex + matchingBases;
-        int otherNextIndex = otherIndex + matchingBases;
-
-        final Repeat repeat = repeatCount(otherNextIndex, otherBases);
-        int repeatLength = repeat.RepeatLength;
-
-        if(repeatLength == 0)
-            return NONE;
-
-        int matchingBasesShortened = matchingBasesFromLeft(baseNextIndex + repeatLength, baseEndIndex, bases, otherNextIndex, otherBases);
-        if(matchingBasesShortened > 0 && matchingBases + matchingBasesShortened == exactLength - repeatLength)
-        {
-            return new RealignedContext(
-                    SHORTENED, matchingBasesShortened, otherNextIndex, repeat.RepeatCount, repeatLength, otherIndex, matchingBases);
-        }
-
-        int matchingBasesLengthened = matchingBasesFromLeft(baseNextIndex - repeatLength, baseEndIndex, bases, otherNextIndex, otherBases);
-        if(matchingBasesLengthened > 0 && matchingBases + matchingBasesLengthened == exactLength + repeatLength)
-        {
-            return new RealignedContext(
-                    LENGTHENED, matchingBasesLengthened, otherNextIndex, repeat.RepeatCount + 1, repeatLength, otherIndex, matchingBases);
-        }
-
-        return NONE;
+        // eg a DEL at position 100 with 4 bases deleted (ref length 5) needs to consider reads starting as late as 104
+        int unclippedStartPos = record.getAlignmentStart() - CigarUtils.leftSoftClipLength(record);
+        return minPositionVsRead >= unclippedStartPos;
     }
 
-    private static int matchingBasesFromLeft(int startIndex, int endIndex, byte[] bases, int otherStartIndex, byte[] otherBases)
+    public static final int INVALID_INDEX = -1;
+
+    public static int realignedReadIndexPosition(final VariantReadContext readContext, final SAMRecord record)
     {
-        if(startIndex < 0)
-            return 0;
+        int variantCoreEndPosition = readContext.CorePositionEnd;
 
-        int maxLength = Math.min(endIndex - startIndex + 1, otherBases.length - otherStartIndex);
+        int coreEndReadIndex = getReadIndexFromPosition(
+                record.getAlignmentStart(), record.getCigar().getCigarElements(), variantCoreEndPosition,
+                false, true);
 
-        for(int i = 0; i < maxLength; i++)
-        {
-            if(bases[startIndex + i] != otherBases[otherStartIndex + i])
-                return i;
-        }
+        if(coreEndReadIndex == INVALID_READ_INDEX)
+            return INVALID_INDEX;
 
-        return maxLength;
-    }
-
-    private static Repeat repeatCount(int index, byte[] bases)
-    {
-        for(int i = 1; i <= MAX_REPEAT_SIZE; i++)
-        {
-            int repeats = RepeatContextFactory.backwardRepeats(index - i, i, bases) + 1;
-
-            if(repeats >= MIN_REPEAT_COUNT)
-                return new Repeat(i, repeats);
-        }
-
-        return NO_REPEAT;
-    }
-
-    private static class Repeat
-    {
-        public final int RepeatLength;
-        public final int RepeatCount;
-
-        Repeat(final int repeatLength, final int repeatCount)
-        {
-            RepeatLength = repeatLength;
-            RepeatCount = repeatCount;
-        }
+        // convert back to the variant's index location
+        int adjustedReadIndex = coreEndReadIndex - readContext.rightCoreLength();
+        return adjustedReadIndex;
     }
 }

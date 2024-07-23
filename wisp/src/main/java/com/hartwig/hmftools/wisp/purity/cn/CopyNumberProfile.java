@@ -65,8 +65,8 @@ public class CopyNumberProfile
 
         try
         {
-            mCopyNumbers.addAll(PurpleCopyNumberFile.read(
-                    PurpleCopyNumberFile.generateFilenameForReading(mConfig.getPurpleDir(sample.TumorId), mSample.TumorId)));
+            String cnFile = PurpleCopyNumberFile.generateFilenameForReading(mConfig.getPurpleDir(sample.TumorId), mSample.TumorId);
+            mCopyNumbers.addAll(PurpleCopyNumberFile.read(cnFile));
         }
         catch(Exception e)
         {
@@ -74,12 +74,14 @@ public class CopyNumberProfile
         }
     }
 
+    public boolean hasValidData() { return !mCopyNumbers.isEmpty(); }
+
     public CnPurityResult processSample(final String sampleId, final PurityContext purityContext)
     {
         mCopyNumberGcRatios.clear();
 
         if(purityContext == null || mCopyNumbers.isEmpty())
-            return CnPurityResult.INVALID_RESULT;
+            return null;
 
         try
         {
@@ -87,14 +89,14 @@ public class CopyNumberProfile
 
             if(!Files.exists(Paths.get(cobaltFilename)))
             {
-                CT_LOGGER.warn("sample({}) missing Cobalt ctDNA GC ratios file: {}", sampleId, cobaltFilename);
-                return CnPurityResult.INVALID_RESULT;
-
+                CT_LOGGER.warn("sample({}) missing Cobalt sample GC ratios file: {}", sampleId, cobaltFilename);
+                return null;
             }
 
             Map<Chromosome,List<CobaltRatio>> cobaltRatios = CobaltRatioFile.readWithGender(cobaltFilename, null, true);
 
             buildCopyNumberGcRatios(cobaltRatios);
+            cobaltRatios.clear();
 
             if(mCnDataWriter != null)
             {
@@ -129,7 +131,7 @@ public class CopyNumberProfile
             double fitPurityHigh = fitResultHigh.EstimatedPurity;
             double fitPurityLow = fitResultLow.EstimatedPurity;
 
-            CT_LOGGER.info(format("sample(%s) ploidy(%.4f) copy number segments(%d) estimated purity(%.6f)",
+            CT_LOGGER.debug(format("sample(%s) ploidy(%.4f) copy number segments(%d) estimated purity(%.6f)",
                     sampleId, samplePloidy, mCopyNumberGcRatios.size(), fitResult.EstimatedPurity));
 
             // calculate a median GC Ratio count and clonal percentage
@@ -171,7 +173,7 @@ public class CopyNumberProfile
         {
             CT_LOGGER.error("sample({}) failed to load Purple and Cobalt copy-number data: {}", sampleId, e.toString());
             e.printStackTrace();
-            return CnPurityResult.INVALID_RESULT;
+            return null;
         }
     }
 
@@ -224,9 +226,9 @@ public class CopyNumberProfile
 
     private static boolean useCopyNumberSegment(double copyNumber)
     {
-        for(int i = 0; i <= PurityConstants.MAX_COPY_NUMBER; ++i)
+        for(int i = 0; i <= PurityConstants.COPY_NUMBER_MAX; ++i)
         {
-            if(abs(copyNumber - i) <= PurityConstants.CLONAL_COPY_NUMBER_MARGIN)
+            if(abs(copyNumber - i) <= PurityConstants.COPY_NUMBER_CLONAL_MARGIN)
                 return true;
         }
 

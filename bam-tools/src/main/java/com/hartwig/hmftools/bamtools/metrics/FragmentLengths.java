@@ -4,7 +4,7 @@ import static java.lang.Math.abs;
 import static java.lang.Math.max;
 import static java.lang.Math.round;
 
-import static com.hartwig.hmftools.common.samtools.SamRecordUtils.mateNegativeStrand;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.mateNegativeStrand;
 
 import java.util.List;
 
@@ -40,9 +40,13 @@ public class FragmentLengths
 
     private boolean isCandidateRecord(final SAMRecord read)
     {
-        boolean isPaired = read.getReadPairedFlag();
+        if(read.getDuplicateReadFlag())
+            return false;
 
-        if(isPaired)
+        if(read.isSecondaryOrSupplementary())
+            return false;
+
+        if(read.getReadPairedFlag())
         {
             if(read.getSecondOfPairFlag())
                 return false;
@@ -52,12 +56,6 @@ public class FragmentLengths
                 return false;
 
             if(mateNegativeStrand(read) == read.getReadNegativeStrandFlag())
-                return false;
-
-            if(read.getDuplicateReadFlag())
-                return false;
-
-            if(read.isSecondaryOrSupplementary())
                 return false;
         }
 

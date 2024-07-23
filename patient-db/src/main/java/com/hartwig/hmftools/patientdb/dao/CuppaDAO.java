@@ -2,12 +2,12 @@ package com.hartwig.hmftools.patientdb.dao;
 
 import static com.hartwig.hmftools.patientdb.database.hmfpatients.Tables.CUPPA;
 
-import java.io.IOException;
 import java.time.LocalDateTime;
 
-import com.hartwig.hmftools.common.cuppa2.Categories;
-import com.hartwig.hmftools.common.cuppa2.CuppaPredictionEntry;
-import com.hartwig.hmftools.common.cuppa2.CuppaPredictions;
+import com.hartwig.hmftools.common.cuppa.ClassifierName;
+import com.hartwig.hmftools.common.cuppa.CuppaPredictionEntry;
+import com.hartwig.hmftools.common.cuppa.CuppaPredictions;
+import com.hartwig.hmftools.common.cuppa.DataType;
 import com.hartwig.hmftools.patientdb.database.hmfpatients.tables.records.CuppaRecord;
 
 import org.jetbrains.annotations.NotNull;
@@ -16,11 +16,9 @@ import org.jooq.InsertValuesStep7;
 
 public class CuppaDAO
 {
-
-    @NotNull
     private final DSLContext context;
 
-    CuppaDAO(@NotNull final DSLContext context)
+    CuppaDAO(final DSLContext context)
     {
         this.context = context;
     }
@@ -45,25 +43,21 @@ public class CuppaDAO
         return value;
     }
 
-    private static String parseClfName(Categories.ClfName category)
+    private static String parseClfName(ClassifierName category)
     {
-        if(category.equals(Categories.ClfName.NONE))
+        if(category.equals(ClassifierName.NONE))
         {
             return null;
         }
         return category.toString();
     }
 
-    void deleteCuppaForSample(@NotNull String sample)
+    void deleteCuppaForSample(final String sample)
     {
         context.delete(CUPPA).where(CUPPA.SAMPLEID.eq(sample)).execute();
     }
 
-    void writeCuppa2(
-            @NotNull final String sample,
-            @NotNull CuppaPredictions cuppaPredictions,
-            @NotNull final int topNProbs
-    ) throws IOException
+    void writeCuppa2(final String sample, final CuppaPredictions cuppaPredictions, final int topNProbs)
     {
         deleteCuppaForSample(sample);
 
@@ -80,17 +74,17 @@ public class CuppaDAO
 
         LocalDateTime timestamp = LocalDateTime.now();
 
-        cuppaPredictions = cuppaPredictions
-                .subsetByDataType(Categories.DataType.PROB)
+        CuppaPredictions cuppaPredictionsSorted = cuppaPredictions
+                .subsetByDataType(DataType.PROB)
                 .getTopPredictions(topNProbs)
                 .sortByRank();
 
-        for(CuppaPredictionEntry cuppaPredictionEntry : cuppaPredictions.PredictionEntries)
+        for(CuppaPredictionEntry cuppaPredictionEntry : cuppaPredictionsSorted.PredictionEntries)
         {
             inserter.values(
                     timestamp,
                     cuppaPredictionEntry.SampleId,
-                    parseClfName(cuppaPredictionEntry.ClfName),
+                    parseClfName(cuppaPredictionEntry.ClassifierName),
                     cuppaPredictionEntry.CancerType,
                     parseDouble(cuppaPredictionEntry.DataValue),
                     cuppaPredictionEntry.Rank,
@@ -101,7 +95,7 @@ public class CuppaDAO
         inserter.execute();
     }
 
-    void writeCuppa(@NotNull String sample, @NotNull String cancerType, double likelihood)
+    void writeCuppa(final String sample, final String cancerType, double likelihood)
     {
         deleteCuppaForSample(sample);
         LocalDateTime timestamp = LocalDateTime.now();

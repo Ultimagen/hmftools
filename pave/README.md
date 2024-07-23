@@ -52,6 +52,7 @@ output_dir | Output directory for VCF and transcript CSV, will use input VCF dir
 output_vcf_file | Specify the output VCF filename
 only_canonical | Only annotate impacts on canonical transcripts
 read_pass_only | Only process passing variants
+threads | Splits variants by chromosome across threads
 write_pass_only | Only write passing variants
 write_transcript_data | Write a detailed TSV file for each impacted transcript
 
@@ -64,6 +65,7 @@ java -jar pave.jar
   -ref_genome /path_to_ref_genome_fasta/
   -ref_genome_version [37 or 38] 
   -output_dir /path_to_write_data_files/ 
+  -threads 8
 ```
 
 ### Optional Annotations
@@ -75,6 +77,8 @@ pon_file | PON file to annotate variants (see file format below) | PON_COUNT, PO
 pon_filters | Apply PON filters (see details below) | Filter 'PON'
 mappability_bed | BED file with mappability values | MAPPABILITY=value
 clinvar_vcf | VCF from Clinvar database | Writes CLNSIG=significance and CLNSIGCONF=conflicting info
+gnomad_freq_file | CSV with Gnomad frequencies per variant
+gnomad_freq_dir | Path to Gnmoad frequency files per chromosome
 blacklist_bed | BED file with blacklist entries | BLACKLIST_BED
 blacklist_vcf | VCF file with blacklist entries | BLACKLIST_VCF
 
@@ -243,6 +247,7 @@ Version | Samples | HOTSPOT | PANEL | OTHER
 - Frameshifts may not always be fully aligned to 3'UTR for HGNC protein annotation
 - Where multiple ALTs are included on a single line only the 1st ALT allele will be annotated.   A workaround is to split multiallelic lines into multiple records first (eg.  the -m none option in bcftools).
 - Duplications may sometimes be marked as insertions 
+- Inserts between the translation/coding start base and the previous base may not be classified correctly and/or have the wrong codon impact due to left alignment
 
 # Version History and Download Links
 - [1.4](https://github.com/hartwigmedical/hmftools/releases/tag/pave-v1.4.2)

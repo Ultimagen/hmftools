@@ -2,8 +2,8 @@ package com.hartwig.hmftools.sage.vis;
 
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
 
-import com.hartwig.hmftools.sage.evidence.ReadContextCounter;
-import com.hartwig.hmftools.sage.quality.QualityCalculator;
+import com.hartwig.hmftools.sage.common.ReadContextMatch;
+import com.hartwig.hmftools.sage.quality.QualityScores;
 import com.hartwig.hmftools.sage.sync.FragmentData;
 
 import org.jetbrains.annotations.Nullable;
@@ -14,13 +14,14 @@ public class ReadEvidenceRecord implements Comparable<ReadEvidenceRecord>
 {
     public final SAMRecord Read;
     public final FragmentData Fragment;
-    public final ReadContextCounter.MatchType MatchType;
-    public final QualityCalculator.QualityScores Qualities;
+    public final ReadContextMatch MatchType;
+    public final QualityScores Qualities;
 
     private final int mVariantPosition;
 
-    public ReadEvidenceRecord(final SAMRecord read, @Nullable final FragmentData fragment, final ReadContextCounter.MatchType matchType,
-            final QualityCalculator.QualityScores qualities, int variantPosition)
+    public ReadEvidenceRecord(
+            final SAMRecord read, @Nullable final FragmentData fragment, final ReadContextMatch matchType,
+            final QualityScores qualities, int variantPosition)
     {
         Read = read;
         Fragment = fragment;

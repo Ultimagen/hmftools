@@ -5,7 +5,7 @@ import static com.hartwig.hmftools.common.variant.PurpleVcfTags.SUBCLONAL_LIKELI
 
 import java.util.List;
 
-import com.hartwig.hmftools.purple.fitting.PeakModelData;
+import com.hartwig.hmftools.purple.fittingsnv.PeakModelData;
 
 import htsjdk.variant.vcf.VCFHeader;
 import htsjdk.variant.vcf.VCFHeaderLineType;
@@ -27,11 +27,9 @@ public class SubclonalLikelihoodEnrichment
         variant.context().getCommonInfo().putAttribute(SUBCLONAL_LIKELIHOOD_FLAG, subclonalLikelihood);
     }
 
-    public static VCFHeader enrichHeader(final VCFHeader template)
+    public static void enrichHeader(final VCFHeader header)
     {
-        template.addMetaDataLine(
+        header.addMetaDataLine(
                 new VCFInfoHeaderLine(SUBCLONAL_LIKELIHOOD_FLAG,1, VCFHeaderLineType.Float, SUBCLONAL_LIKELIHOOD_FLAG_DESCRIPTION));
-
-        return template;
     }
 }

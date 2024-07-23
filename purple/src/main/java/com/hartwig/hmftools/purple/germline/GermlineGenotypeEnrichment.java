@@ -7,7 +7,7 @@ import java.util.List;
 import com.hartwig.hmftools.common.utils.Doubles;
 import com.hartwig.hmftools.common.variant.AllelicDepth;
 
-import org.apache.commons.compress.utils.Lists;
+import com.google.common.collect.Lists;
 import org.apache.commons.math3.distribution.PoissonDistribution;
 
 import htsjdk.variant.variantcontext.Allele;
@@ -40,18 +40,18 @@ public class GermlineGenotypeEnrichment
 
     public static GermlineGenotypeStatus status(AllelicDepth depth)
     {
-        if(depth.alleleReadCount() == depth.totalReadCount())
+        if(depth.AlleleReadCount == depth.TotalReadCount)
         {
             return GermlineGenotypeStatus.HOM_ALT;
         }
 
-        boolean isHighVaf = Doubles.greaterThan(depth.alleleReadCount(), 0.75 * depth.totalReadCount());
+        boolean isHighVaf = Doubles.greaterThan(depth.AlleleReadCount, 0.75 * depth.TotalReadCount);
         if(isHighVaf)
         {
             return Doubles.lessThan(homPoisson(depth), 0.005) ? GermlineGenotypeStatus.HOM_ALT : GermlineGenotypeStatus.HET;
         }
 
-        boolean isLowVaf = Doubles.lessThan(depth.alleleReadCount(), 0.3 * depth.totalReadCount());
+        boolean isLowVaf = Doubles.lessThan(depth.AlleleReadCount, 0.3 * depth.TotalReadCount);
         if(isLowVaf)
         {
             return Doubles.lessThan(lowVafPoisson(depth), 0.002) ? GermlineGenotypeStatus.LOW_VAF : GermlineGenotypeStatus.HET;
@@ -120,11 +120,11 @@ public class GermlineGenotypeEnrichment
 
     private static double homPoisson(AllelicDepth depth)
     {
-        return new PoissonDistribution(depth.totalReadCount() / 2d).cumulativeProbability(depth.totalReadCount() - depth.alleleReadCount());
+        return new PoissonDistribution(depth.TotalReadCount / 2d).cumulativeProbability(depth.TotalReadCount - depth.AlleleReadCount);
     }
 
     private static double lowVafPoisson(AllelicDepth depth)
     {
-        return new PoissonDistribution(depth.totalReadCount() / 2d).cumulativeProbability(depth.alleleReadCount());
+        return new PoissonDistribution(depth.TotalReadCount / 2d).cumulativeProbability(depth.AlleleReadCount);
     }
 }

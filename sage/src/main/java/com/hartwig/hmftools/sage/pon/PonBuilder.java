@@ -9,7 +9,6 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.variant.hotspot.ImmutableVariantHotspotImpl;
 import com.hartwig.hmftools.common.variant.hotspot.VariantHotspot;
-import com.hartwig.hmftools.sage.vcf.VariantVCF;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -28,12 +27,17 @@ public class PonBuilder
     public void add(@NotNull final VariantContext context)
     {
         final VariantHotspot hotspot = hotspot(context);
+
+        if(hotspot.ref().contains("N"))
+            return;
+
         final Counter counter = mMap.computeIfAbsent(hotspot, Counter::new);
         final Genotype genotype = context.getGenotype(0);
-        if(!hotspot.ref().contains("N") && genotype.hasExtendedAttribute(VariantVCF.RAW_ALLELIC_DEPTH))
+
+        if(genotype.hasDP() && genotype.hasAD())
         {
-            String rawDepth = (String) genotype.getExtendedAttribute(VariantVCF.RAW_ALLELIC_DEPTH);
-            int allelicDepth = Integer.parseInt(rawDepth.split(",")[1]);
+            int[] adFields = genotype.getAD();
+            int allelicDepth = adFields[1];
             if(allelicDepth >= MIN_INPUT_ALLELIC_DEPTH)
             {
                 counter.increment(allelicDepth);

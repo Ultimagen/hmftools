@@ -1,8 +1,13 @@
 package com.hartwig.hmftools.wisp.purity.variant;
 
 import static java.lang.String.format;
+import static java.lang.String.valueOf;
 
 import static com.hartwig.hmftools.common.genome.gc.GcCalcs.calcGcPercent;
+import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_ALT;
+import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_CHROMOSOME;
+import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_POSITION;
+import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_REF;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.filenamePart;
@@ -24,6 +29,7 @@ import static com.hartwig.hmftools.wisp.purity.PurityConstants.MAX_SUBCLONAL_LIK
 import static com.hartwig.hmftools.wisp.purity.PurityConstants.SUBCLONAL_VCN_THRESHOLD;
 import static com.hartwig.hmftools.wisp.purity.ResultsWriter.addCommonFields;
 import static com.hartwig.hmftools.wisp.purity.ResultsWriter.addCommonHeaderFields;
+import static com.hartwig.hmftools.wisp.purity.WriteType.FRAG_LENGTHS;
 import static com.hartwig.hmftools.wisp.purity.variant.FilterReason.CHIP;
 import static com.hartwig.hmftools.wisp.purity.variant.FilterReason.GC_RATIO;
 import static com.hartwig.hmftools.wisp.purity.variant.FilterReason.LOW_CONFIDENCE;
@@ -41,10 +47,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Map;
 import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.purple.PurityContext;
 import com.hartwig.hmftools.common.utils.r.RExecutor;
 import com.hartwig.hmftools.common.variant.Hotspot;
@@ -74,6 +82,7 @@ public class SomaticVariants
     private final List<ProbeVariant> mProbeVariants;
     private final SomaticPurityEstimator mEstimator;
     private final BufferedWriter mSomaticWriter;
+    private final SampleFragmentLengths mFragmentLengths;
 
     public SomaticVariants(final PurityConfig config, final ResultsWriter resultsWriter, final SampleData sample)
     {
@@ -82,6 +91,7 @@ public class SomaticVariants
         mSample = sample;
         mEstimator = new SomaticPurityEstimator(mConfig, resultsWriter, sample);
         mSomaticWriter = mResultsWriter.getSomaticWriter();
+        mFragmentLengths = new SampleFragmentLengths(config, resultsWriter, sample);
 
         mVariants = Lists.newArrayList();
 
@@ -94,12 +104,17 @@ public class SomaticVariants
 
         if(mConfig.SomaticVcf.isEmpty())
         {
-            somaticVcf = mConfig.SomaticDir + mSample.TumorId + PurityConstants.PURPLE_CTDNA_SOMATIC_VCF_ID;
+            String vcfFilename = mConfig.SomaticDir + mSample.TumorId + PurityConstants.PURPLE_APPENDED_SOMATIC_VCF_ID;
 
             if(!mSample.VcfTag.isEmpty())
-                somaticVcf += mSample.VcfTag + ".";
+                vcfFilename += mSample.VcfTag + ".";
 
-            somaticVcf += "vcf.gz";
+            vcfFilename += "vcf.gz";
+
+            if(Files.exists(Paths.get(vcfFilename)))
+                somaticVcf = vcfFilename;
+            else
+                somaticVcf = mConfig.SomaticDir + mSample.TumorId + PurityConstants.PURPLE_APPENDED_SOMATIC_VCF_ID + "vcf.gz";
         }
         else
         {
@@ -112,7 +127,7 @@ public class SomaticVariants
         CT_LOGGER.debug("loading somatic variant VCF: {}", somaticVcf);
 
         List<String> targetSampleIds = Lists.newArrayList(mSample.TumorId);
-        mSample.CtDnaSamples.forEach(x -> targetSampleIds.add(x));
+        mSample.SampleIds.forEach(x -> targetSampleIds.add(x));
 
         VcfFileReader vcfFileReader = new VcfFileReader(somaticVcf);
 
@@ -159,7 +174,7 @@ public class SomaticVariants
 
             if(variantCount > 0 && (variantCount % 100000) == 0)
             {
-                CT_LOGGER.info("processed {} variants", variantCount);
+                CT_LOGGER.info("loaded {} variants", variantCount);
             }
         }
 
@@ -179,6 +194,9 @@ public class SomaticVariants
         CT_LOGGER.info("processed {} somatic variants from VCF({}), filtered({}) probeMatched({})",
                 variantCount, filenamePart(somaticVcf), filteredCount, matchedProbeCount);
 
+        if(mConfig.writeType(FRAG_LENGTHS))
+            mFragmentLengths.processSample(somaticVcf, mVariants);
+
         return true;
     }
 
@@ -189,9 +207,10 @@ public class SomaticVariants
         VariantContextDecorator variant = new VariantContextDecorator(variantContext);
 
         double subclonalLikelihood = variant.context().getAttributeAsDouble(SUBCLONAL_LIKELIHOOD_FLAG, 0);
+        boolean hasSyntheticTumor = mConfig.hasSyntheticTumor();
         double sequenceGcRatio = NO_GC_RATIO;
 
-        if(mConfig.RefGenome != null && mSample.ApplyGcRatioLimits)
+        if(mConfig.RefGenome != null && mSample.IsPanel)
         {
             String variantRefContext = generateMutationSequence(
                     mConfig.RefGenome, DEFAULT_PROBE_LENGTH, variant.chromosome(), variant.position(), variant.ref(), variant.alt());
@@ -209,7 +228,7 @@ public class SomaticVariants
 
             if(somaticVariant == null)
             {
-                somaticVariant = new SomaticVariant(variant, subclonalLikelihood, filterReasons);
+                somaticVariant = new SomaticVariant(variant, subclonalLikelihood, filterReasons, hasSyntheticTumor);
 
                 somaticVariant.setSequenceGcRatio(sequenceGcRatio);
                 mVariants.add(somaticVariant);
@@ -237,9 +256,21 @@ public class SomaticVariants
 
             if(umiTypeCounts != NO_UMI_COUNTS)
             {
-                // override basic AD and DP if umit totals are set
+                // override basic AD and DP if UMI counts are set
                 depth = umiTypeCounts.totalCount();
                 alleleCount = umiTypeCounts.alleleCount();
+
+                if(mConfig.DisableDualFragments) // convert to single (ie fragments withi duplicate evidence)
+                {
+                    umiTypeCounts.AlleleSingle += umiTypeCounts.AlleleDual;
+                    umiTypeCounts.AlleleDual = 0;
+
+                    umiTypeCounts.TotalSingle += umiTypeCounts.TotalDual;
+                    umiTypeCounts.TotalDual = 0;
+                }
+            }
+            else
+            {
                 umiTypeCounts = new UmiTypeCounts(depth, 0, 0, alleleCount, 0, 0);
             }
 
@@ -261,29 +292,8 @@ public class SomaticVariants
             if(sampleFragData == null || tumorFragData == null)
                 continue;
 
-            List<FilterReason> filterReasons = Lists.newArrayList(variant.filterReasons());
-
-            boolean useForTotals = false;
-
-            if(filterReasons.isEmpty())
-            {
-                // only include variants which satisfy the min avg qual check in the ctDNA sample
-                if(sampleFragData.isLowQual())
-                {
-                    filterReasons.add(LOW_QUAL_PER_AD);
-                }
-                else
-                {
-                    useForTotals = true;
-                }
-            }
-
-            if(mConfig.writeType(WriteType.SOMATIC_DATA))
-            {
-                writeVariant(mSomaticWriter, mConfig, mSample, sampleId, variant, sampleFragData, tumorFragData, filterReasons);
-            }
-
-            if(!useForTotals)
+            // only include unfiltered variants which satisfy the min avg qual check in the sample
+            if(!variant.filterReasons().isEmpty() || sampleFragData.isLowQual())
                 continue;
 
             filteredVariants.add(variant);
@@ -303,13 +313,30 @@ public class SomaticVariants
         for(SomaticVariant variant : chipVariants)
         {
             CT_LOGGER.debug("sample({}) chip variant({}) ad({}) vs sampleTotal({})",
-                    variant, variant.findGenotypeData(sampleId).AlleleCount, sampleTotalAD);
+                    sampleId,   variant, variant.findGenotypeData(sampleId).AlleleCount, sampleTotalAD);
 
             filteredVariants.remove(variant);
             variant.addFilterReason(CHIP);
         }
 
-        return mEstimator.calculatePurity(sampleId, purityContext, filteredVariants, mVariants.size(), chipVariants.size());
+        SomaticPurityResult purityResult = mEstimator.calculatePurity(
+                sampleId, purityContext, filteredVariants, mVariants.size(), chipVariants.size());
+
+        if(mConfig.writeType(WriteType.SOMATIC_DATA))
+        {
+            for(SomaticVariant variant : mVariants)
+            {
+                GenotypeFragments sampleFragData = variant.findGenotypeData(sampleId);
+                GenotypeFragments tumorFragData = variant.findGenotypeData(mSample.TumorId);
+
+                if(sampleFragData != null && tumorFragData != null)
+                {
+                    writeVariant(mSomaticWriter, mConfig, mSample, sampleId, variant, sampleFragData, tumorFragData);
+                }
+            }
+        }
+
+        return purityResult;
     }
 
     private List<FilterReason> checkFilters(final VariantContextDecorator variant, double subclonalLikelihood, double sequenceGcRatio)
@@ -331,8 +358,11 @@ public class SomaticVariants
         if(variant.tier() == VariantTier.LOW_CONFIDENCE)
             filters.add(LOW_CONFIDENCE);
 
-        if(subclonalLikelihood > MAX_SUBCLONAL_LIKELIHOOD && variant.variantCopyNumber() < SUBCLONAL_VCN_THRESHOLD)
-            filters.add(SUBCLONAL);
+        if(!mConfig.SkipSubclonalFilter)
+        {
+            if(subclonalLikelihood > MAX_SUBCLONAL_LIKELIHOOD && variant.variantCopyNumber() < SUBCLONAL_VCN_THRESHOLD)
+                filters.add(SUBCLONAL);
+        }
 
         // check GC content
         if(sequenceGcRatio != NO_GC_RATIO && mConfig.GcRatioMin > 0 && sequenceGcRatio < mConfig.GcRatioMin)
@@ -360,11 +390,14 @@ public class SomaticVariants
 
             addCommonHeaderFields(sj, config);
 
-            sj.add("Chromosome").add("Position").add("Ref").add("Alt").add("IsProbe");
-            sj.add("Filter").add("Tier").add("Type").add("RepeatCount").add("Mappability").add("SubclonalPerc");
-            sj.add("Gene").add("CodingEffect").add("Hotspot").add("Reported").add("VCN").add("CopyNumber");
+            sj.add(FLD_CHROMOSOME).add(FLD_POSITION).add(FLD_REF).add(FLD_ALT).add("IsProbe");
+            sj.add("Filter").add("Tier").add("Type").add("TNC");
+            sj.add("Mappability").add("SubclonalPerc").add("RepeatCount");
+            sj.add("Gene").add("CodingEffect").add("Hotspot").add("Reported");
+            sj.add("VCN").add("CopyNumber");
             sj.add("TumorDP").add("TumorAD");
-            sj.add("SampleDP").add("SampleAD").add("SampleDualDP").add("SampleDualAD").add("SampleQualPerAD").add("SeqGcRatio");
+            sj.add("SampleDP").add("SampleAD").add("SampleDualDP").add("SampleDualAD").add("SampleQualPerAD");
+            sj.add("SeqGcRatio").add("BqrErrorRate");
 
             writer.write(sj.toString());
             writer.newLine();
@@ -381,40 +414,39 @@ public class SomaticVariants
     private static synchronized void writeVariant(
             final BufferedWriter writer, final PurityConfig config,
             final SampleData sampleData, final String sampleId, final SomaticVariant variant,
-            final GenotypeFragments sampleFragData, final GenotypeFragments tumorData, final List<FilterReason> filterReasons)
+            final GenotypeFragments sampleFragData, final GenotypeFragments tumorData)
     {
         if(writer == null)
             return;
 
         try
         {
-            VariantContextDecorator decorator = variant.decorator();
-            VariantImpact variantImpact = decorator.variantImpact();
-
             StringJoiner sj = new StringJoiner(TSV_DELIM);
 
             addCommonFields(sj, config, sampleData, sampleId);
 
-            sj.add(variant.Chromosome).add(String.valueOf(variant.Position)).add(variant.Ref).add(variant.Alt);
-            sj.add(String.valueOf(variant.isProbeVariant()));
+            sj.add(variant.Chromosome).add(valueOf(variant.Position)).add(variant.Ref).add(variant.Alt);
+            sj.add(valueOf(variant.isProbeVariant()));
 
-            String filtersStr = filterReasons.stream().map(x -> x.toString()).collect(Collectors.joining(";"));
+            String filtersStr = variant.filterReasons().stream().map(x -> x.toString()).collect(Collectors.joining(";"));
+
+            if(filtersStr.isEmpty() && sampleFragData.isLowQual())
+                filtersStr = LOW_QUAL_PER_AD.toString();
 
             if(filtersStr.isEmpty())
                 filtersStr = PASS;
 
-            sj.add(filtersStr).add(decorator.tier().toString()).add(variant.Type.toString()).add(String.valueOf(decorator.repeatCount()))
-                    .add(format("%.2f", decorator.mappability())).add(format("%.2f", variant.SubclonalPerc));
+            sj.add(filtersStr).add(variant.Tier.toString()).add(variant.Type.toString()).add(variant.TriNucContext);
+            sj.add(format("%.2f", variant.Mappability)).add(format("%.2f", variant.SubclonalPerc)).add(valueOf(variant.RepeatCount));
+            sj.add(variant.CanonicalGeneName).add(variant.CanonicalCodingEffect).add(valueOf(variant.Hotspot)).add(valueOf(variant.Reported));
+            sj.add(format("%.2f", variant.VariantCopyNumber)).add(format("%.2f", variant.CopyNumber));
 
-            sj.add(variantImpact.CanonicalGeneName).add(variantImpact.CanonicalCodingEffect.toString())
-                    .add(Hotspot.fromVariant(decorator.context()).toString()).add(String.valueOf(decorator.reported()))
-                    .add(format("%.2f", decorator.variantCopyNumber())).add(format("%.2f", decorator.adjustedCopyNumber()));
-
-            sj.add(String.valueOf(tumorData.Depth)).add(String.valueOf(tumorData.AlleleCount));
-            sj.add(String.valueOf(sampleFragData.Depth)).add(String.valueOf(sampleFragData.AlleleCount));
-            sj.add(String.valueOf(sampleFragData.UmiCounts.TotalDual)).add(String.valueOf(sampleFragData.UmiCounts.AlleleDual));
+            sj.add(valueOf(tumorData.Depth)).add(valueOf(tumorData.AlleleCount));
+            sj.add(valueOf(sampleFragData.Depth)).add(valueOf(sampleFragData.AlleleCount));
+            sj.add(valueOf(sampleFragData.UmiCounts.TotalDual)).add(valueOf(sampleFragData.UmiCounts.AlleleDual));
             sj.add(format("%.1f", sampleFragData.qualPerAlleleFragment()));
             sj.add(format("%.3f", variant.sequenceGcRatio()));
+            sj.add(format("%.6f", sampleFragData.bqrErrorRate()));
 
             writer.write(sj.toString());
 
@@ -441,7 +473,7 @@ public class SomaticVariants
             }
 
             int runCode = RExecutor.executeFromClasspath(
-                    "plots/SomaticVafPlot.R", true, patientId, sampleId, summaryFile, somaticPeaksFile, config.PlotDir);
+                    "plots/SomaticVafPlot.R", patientId, sampleId, summaryFile, somaticPeaksFile, config.PlotDir);
 
             return runCode == 0;
         }
@@ -451,5 +483,4 @@ public class SomaticVariants
             return false;
         }
     }
-
 }

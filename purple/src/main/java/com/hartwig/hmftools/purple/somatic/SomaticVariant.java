@@ -58,15 +58,15 @@ public class SomaticVariant implements GenomePosition
 
     public boolean isHotspot() { return mContext.hasAttribute(HOTSPOT_FLAG); }
     public boolean biallelic() { return mDecorator.biallelic(); }
-    public String gene() { return mDecorator.variantImpact().CanonicalGeneName; }
+    public String gene() { return mDecorator.variantImpact().GeneName; }
 
     public boolean hasTumorAlleleDepth() { return mTumorAllelicDepth != null; }
     public AllelicDepth tumorAlleleDepth() { return mTumorAllelicDepth; }
     public AllelicDepth referenceAlleleDepth() { return mReferenceAllelicDepth; }
     public double alleleFrequency() { return mTumorAllelicDepth != null ? mTumorAllelicDepth.alleleFrequency() : 0; }
-    public int totalReadCount() { return mTumorAllelicDepth != null ? mTumorAllelicDepth.totalReadCount() : 0; }
-    public int alleleReadCount() { return mTumorAllelicDepth != null ? mTumorAllelicDepth.alleleReadCount() : 0; }
-    public int referenceAlleleReadCount() { return mReferenceAllelicDepth != null ? mReferenceAllelicDepth.alleleReadCount() : 0; }
+    public int totalReadCount() { return mTumorAllelicDepth != null ? mTumorAllelicDepth.TotalReadCount : 0; }
+    public int alleleReadCount() { return mTumorAllelicDepth != null ? mTumorAllelicDepth.AlleleReadCount : 0; }
+    public int referenceAlleleReadCount() { return mReferenceAllelicDepth != null ? mReferenceAllelicDepth.AlleleReadCount : 0; }
 
     public String toString()
     {

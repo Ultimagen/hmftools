@@ -4,12 +4,15 @@ import static java.lang.Math.abs;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.readToString;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
+import static com.hartwig.hmftools.common.region.BaseRegion.positionsOverlap;
+import static com.hartwig.hmftools.common.region.BaseRegion.positionsWithin;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
 import static com.hartwig.hmftools.sage.evidence.ReadMatchType.REF_SUPPORT;
 import static com.hartwig.hmftools.sage.evidence.ReadMatchType.ALT_SUPPORT;
 
-import static htsjdk.samtools.CigarOperator.S;
+import static htsjdk.samtools.CigarOperator.N;
 
 import java.util.Collections;
 import java.util.List;
@@ -19,6 +22,7 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.bam.CigarUtils;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.sage.candidate.Candidate;
@@ -26,10 +30,11 @@ import com.hartwig.hmftools.sage.SageConfig;
 import com.hartwig.hmftools.sage.common.SamSlicerFactory;
 import com.hartwig.hmftools.sage.common.SamSlicerInterface;
 import com.hartwig.hmftools.sage.phase.VariantPhaser;
+import com.hartwig.hmftools.sage.quality.MsiJitterCalcs;
 import com.hartwig.hmftools.sage.quality.QualityCalculator;
 import com.hartwig.hmftools.sage.bqr.BqrRecordMap;
 import com.hartwig.hmftools.sage.common.RefSequence;
-import com.hartwig.hmftools.sage.read.NumberEvents;
+import com.hartwig.hmftools.sage.common.NumberEvents;
 import com.hartwig.hmftools.sage.sync.FragmentData;
 import com.hartwig.hmftools.sage.sync.FragmentSync;
 import com.hartwig.hmftools.sage.sync.FragmentSyncReadHandler;
@@ -41,7 +46,8 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
     private final SageConfig mConfig;
     private final RefGenomeInterface mRefGenome;
     private final ReadContextCounterFactory mFactory;
-    private final Map<String, BqrRecordMap> mQualityRecalibrationMap;
+    private final Map<String,BqrRecordMap> mQualityRecalibrationMap;
+    private final MsiJitterCalcs mMsiJitterCalcs;
 
     // state per slice region
     private RefSequence mRefSequence;
@@ -54,13 +60,15 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
     private final EvidenceStats mStats;
 
     public ReadContextEvidence(
-            final SageConfig config, final RefGenomeInterface refGenome, final Map<String, BqrRecordMap> qualityRecalibrationMap)
+            final SageConfig config, final RefGenomeInterface refGenome, final Map<String, BqrRecordMap> qualityRecalibrationMap,
+            final MsiJitterCalcs msiJitterCalcs)
     {
         mConfig = config;
         mRefGenome = refGenome;
         mFactory = new ReadContextCounterFactory(config);
         mQualityRecalibrationMap = qualityRecalibrationMap;
-        mFragmentSync = new FragmentSync(this);
+        mMsiJitterCalcs = msiJitterCalcs;
+        mFragmentSync = new FragmentSync(this, refGenome);
 
         mRefSequence = null;
         mReadCounters = null;
@@ -103,7 +111,7 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
         mRefSequence = new RefSequence(regionBounds, mRefGenome);
 
         BqrRecordMap qrMap = mQualityRecalibrationMap.get(sample);
-        QualityCalculator qualityCalculator = new QualityCalculator(mConfig.Quality, qrMap, mRefSequence.IndexedBases);
+        QualityCalculator qualityCalculator = new QualityCalculator(mConfig, qrMap, mRefSequence, mRefGenome, mMsiJitterCalcs);
 
         mReadCounters = mFactory.create(candidates, mConfig, qualityCalculator, sample);
         mLastCandidateIndex = 0;
@@ -137,6 +145,8 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
             mReadCounters.forEach(x -> x.applyMapQualityRatio());
         }
 
+        mReadCounters.forEach(x -> x.jitter().setJitterQualFilterState(mMsiJitterCalcs, x));
+
         return mReadCounters;
     }
 
@@ -169,13 +179,13 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
 
         Collections.sort(gapDistances, Collections.reverseOrder());
 
-        int gapCount = gapDistances.size();
         int nth = min(mConfig.MaxPartitionSlices, gapDistances.size());
         int nthGap = gapDistances.get(nth - 1);
 
+        /*
+        int gapCount = gapDistances.size();
         int medianGap = gapDistances.get(gapCount / 2);
 
-        /*
         SG_LOGGER.debug("region({}:{}-{} len={}) candidates({}) gap(n={} nth={}, max={} avg={} median={})",
                 firstCandidate.chromosome(), firstCandidate.position(), lastCandidate.position(), sliceLength,
                 candidates.size(), nth, nthGap, gapDistances.get(0), averageGap, medianGap);
@@ -229,18 +239,8 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
         mSelectedReadCounters.clear();
 
         // find any candidate potentially interested in this record
-        int readStart = record.getAlignmentStart();
-        int readEnd = record.getAlignmentEnd();
-
-        if(record.getCigar().getFirstCigarElement().getOperator() == S)
-        {
-            readStart -= record.getCigar().getFirstCigarElement().getLength();
-        }
-
-        if(record.getCigar().getLastCigarElement().getOperator() == S)
-        {
-            readEnd += record.getCigar().getLastCigarElement().getLength();
-        }
+        int readStart = record.getAlignmentStart() - CigarUtils.leftSoftClipLength(record);
+        int readEnd = record.getAlignmentEnd() + CigarUtils.rightSoftClipLength(record);
 
         // first check previous candidates starting with the current
         int nextIndex = mLastCandidateIndex + 1;
@@ -250,7 +250,7 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
         {
             ReadContextCounter readCounter = mReadCounters.get(prevIndex);
 
-            if(positionWithin(readCounter.position(), readStart, readEnd) && !readCounter.exceedsMaxCoverage())
+            if(considerRead(readCounter, readStart, readEnd))
             {
                 mLastCandidateIndex = prevIndex;
                 mSelectedReadCounters.add(0, readCounter);
@@ -270,7 +270,7 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
         {
             ReadContextCounter readCounter = mReadCounters.get(nextIndex);
 
-            if(positionWithin(readCounter.position(), readStart, readEnd) && !readCounter.exceedsMaxCoverage())
+            if(considerRead(readCounter, readStart, readEnd))
             {
                 mSelectedReadCounters.add(readCounter);
             }
@@ -299,7 +299,18 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
 
         for(ReadContextCounter readCounter : mSelectedReadCounters)
         {
-            ReadMatchType matchType = readCounter.processRead(record, numberOfEvents, fragmentData);
+            ReadMatchType matchType = null;
+
+            try
+            {
+                matchType = readCounter.processRead(record, numberOfEvents, fragmentData);
+            }
+            catch(Exception e)
+            {
+                SG_LOGGER.error("var({}) read({}) error: {}", readCounter.readContext(), readToString(record), e.toString());
+                e.printStackTrace();
+                System.exit(1);
+            }
 
             ++mStats.SupportCounts[matchType.ordinal()];
 
@@ -316,5 +327,18 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
         {
             mVariantPhaser.registeredPhasedVariants(posPhasedCounters, negPhasedCounters);
         }
+    }
+
+    private boolean considerRead(final ReadContextCounter readCounter, final int unclippedStart, final int unclippedEnd)
+    {
+        if(readCounter.exceedsMaxCoverage())
+            return false;
+
+        if(readCounter.variant().isDelete())
+        {
+            return positionsOverlap(readCounter.position(), readCounter.maxPositionVsReadStart(), unclippedStart, unclippedEnd);
+        }
+
+        return positionWithin(readCounter.position(), unclippedStart, unclippedEnd);
     }
 }

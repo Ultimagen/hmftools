@@ -11,6 +11,7 @@ import static com.hartwig.hmftools.common.utils.config.ConfigItemType.FLAG;
 import static com.hartwig.hmftools.common.utils.config.ConfigItemType.INTEGER;
 import static com.hartwig.hmftools.common.utils.config.ConfigItemType.PATH;
 import static com.hartwig.hmftools.common.utils.config.ConfigItemType.STRING;
+import static com.hartwig.hmftools.common.utils.version.VersionInfo.fromAppName;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.utils.version.VersionInfo;
@@ -391,7 +393,7 @@ public class ConfigBuilder
 
     private void printAppVersion(boolean asLog)
     {
-        VersionInfo versionInfo = mAppName != null ? new VersionInfo(format("%s.version", mAppName.toLowerCase())) : null;
+        VersionInfo versionInfo = mAppName != null ? fromAppName(mAppName) : null;
 
         if(versionInfo != null)
         {
@@ -427,4 +429,10 @@ public class ConfigBuilder
 
         return false;
     }
+
+    @VisibleForTesting
+    public void setValue(final String name, final String value) { getItem(name, false).setValue(value); }
+    public void setValue(final String name, final boolean value) { getItem(name, false).setValue(String.valueOf(value)); }
+    public void setValue(final String name, final int value) { getItem(name, false).setValue(String.valueOf(value)); }
+    public void setValue(final String name, final double value) { getItem(name, false).setValue(String.valueOf(value)); }
 }

@@ -10,6 +10,8 @@ import static com.hartwig.hmftools.common.utils.config.CommonConfig.PURPLE_DIR_C
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.PURPLE_DIR_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.REFERENCE_BAM;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.REFERENCE_BAM_DESC;
+import static com.hartwig.hmftools.common.utils.config.CommonConfig.RNA_BAM;
+import static com.hartwig.hmftools.common.utils.config.CommonConfig.RNA_BAM_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE_DATA_DIR_CFG;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE_DATA_DIR_DESC;
@@ -35,6 +37,7 @@ import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_FATAL_LOW_COVERA
 import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_HLA_Y_FRAGMENT_THRESHOLD;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.bam.BamUtils;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.purple.PurpleCommon;
 import com.hartwig.hmftools.common.purple.GeneCopyNumberFile;
@@ -49,6 +52,8 @@ import java.util.stream.Collectors;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import htsjdk.samtools.ValidationStringency;
 
 public class LilacConfig
 {
@@ -73,6 +78,7 @@ public class LilacConfig
     public final int MinFragmentsToRemoveSingle;
     public final int Threads;
     public final double TopScoreThreshold;
+    public final ValidationStringency BamStringency;
 
     public final String CopyNumberFile;
     public final String SomaticVariantsFile;
@@ -92,8 +98,6 @@ public class LilacConfig
     // config strings
     public static final String RESOURCE_DIR = "resource_dir";
     public static final String RESOURCE_DIR_DESC = "Path to resource files";
-
-    private static final String RNA_BAM = "rna_bam";
 
     private static final String SOMATIC_VCF = "somatic_vcf";
     private static final String GENE_COPY_NUMBER = "gene_copy_number";
@@ -193,6 +197,7 @@ public class LilacConfig
         MaxEliminationCandidates = configBuilder.getInteger(MAX_ELIM_CANDIDATES);
 
         Threads = parseThreads(configBuilder);
+        BamStringency = BamUtils.validationStringency(configBuilder);
 
         DebugPhasing = configBuilder.hasFlag(DEBUG_PHASING);
         RunValidation = configBuilder.hasFlag(RUN_VALIDATION);
@@ -274,6 +279,7 @@ public class LilacConfig
         RestrictedAlleles = Lists.newArrayList();
         MaxEliminationCandidates = 0;
 
+        BamStringency = ValidationStringency.STRICT;
         Threads = 0;
         DebugPhasing = false;
         RunValidation = true;
@@ -285,9 +291,9 @@ public class LilacConfig
         configBuilder.addRequiredConfigItem(SAMPLE, "Name of sample");
         configBuilder.addPath(SAMPLE_DATA_DIR_CFG, false, SAMPLE_DATA_DIR_DESC);
 
-        configBuilder.addPath(REFERENCE_BAM, false,REFERENCE_BAM_DESC);
-        configBuilder.addPath(TUMOR_BAM, false,TUMOR_BAM_DESC);
-        configBuilder.addPath(RNA_BAM, false,"Analyse tumor BAM only");
+        configBuilder.addPath(REFERENCE_BAM, false, REFERENCE_BAM_DESC);
+        configBuilder.addPath(TUMOR_BAM, false, TUMOR_BAM_DESC);
+        configBuilder.addPath(RNA_BAM, false, RNA_BAM_DESC);
 
         configBuilder.addPath(RESOURCE_DIR, true, RESOURCE_DIR_DESC);
 
@@ -316,6 +322,8 @@ public class LilacConfig
         configBuilder.addFlag(RUN_VALIDATION, "Run validation checks");
         configBuilder.addFlag(LOG_PERF_CALCS,"Log performance metrics");
         ResultsWriter.registerConfig(configBuilder);
+
+        BamUtils.addValidationStringencyOption(configBuilder);
 
         addRefGenomeConfig(configBuilder, true);
         addOutputDir(configBuilder);

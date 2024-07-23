@@ -3,11 +3,12 @@ package com.hartwig.hmftools.gripss;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.REF_GENOME;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.loadRefGenome;
 import static com.hartwig.hmftools.common.gripss.RepeatMaskAnnotations.REPEAT_MASK_FILE;
-import static com.hartwig.hmftools.common.sv.SvVcfTags.BEALN;
+import static com.hartwig.hmftools.common.sv.gridss.GridssVcfTags.BEALN;
 import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
 import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
 import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
 import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.switchIndex;
+import static com.hartwig.hmftools.gripss.GripssConfig.APP_NAME;
 import static com.hartwig.hmftools.gripss.GripssConfig.GR_LOGGER;
 import static com.hartwig.hmftools.common.variant.GenotypeIds.fromVcfHeader;
 import static com.hartwig.hmftools.gripss.GripssConfig.addConfig;
@@ -363,7 +364,7 @@ public class GripssApplication
 
     public static void main(@NotNull final String[] args)
     {
-        ConfigBuilder configBuilder = new ConfigBuilder("Gripss");
+        ConfigBuilder configBuilder = new ConfigBuilder(APP_NAME);
         addConfig(configBuilder);
 
         configBuilder.checkAndParseCommandLine(args);

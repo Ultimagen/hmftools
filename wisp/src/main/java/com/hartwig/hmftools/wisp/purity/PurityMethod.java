@@ -2,7 +2,8 @@ package com.hartwig.hmftools.wisp.purity;
 
 public enum PurityMethod
 {
-    SOMATIC,
+    SOMATIC_VARIANT,
     COPY_NUMBER,
-    SV;
+    SV,
+    AMBER_LOH;
 }

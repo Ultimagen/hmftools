@@ -1,8 +1,10 @@
 package com.hartwig.hmftools.sage.append;
 
+import static java.lang.Math.max;
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
+import static com.hartwig.hmftools.sage.vcf.CandidateSerialisation.PRE_v3_5_FLANK_EXTENSION_LENGTH;
 import static com.hartwig.hmftools.sage.vcf.VariantContextFactory.createGenotype;
 
 import java.util.Collections;
@@ -17,13 +19,15 @@ import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.sage.candidate.Candidate;
 import com.hartwig.hmftools.sage.common.RefSequence;
 import com.hartwig.hmftools.sage.common.SamSlicerFactory;
-import com.hartwig.hmftools.sage.evidence.FragmentLengthData;
+import com.hartwig.hmftools.common.sage.FragmentLengthCounts;
 import com.hartwig.hmftools.sage.evidence.FragmentLengths;
 import com.hartwig.hmftools.sage.evidence.ReadContextCounter;
 import com.hartwig.hmftools.sage.evidence.ReadContextCounters;
 import com.hartwig.hmftools.sage.phase.PhaseSetCounter;
 import com.hartwig.hmftools.sage.pipeline.EvidenceStage;
 import com.hartwig.hmftools.sage.bqr.BqrRecordMap;
+import com.hartwig.hmftools.sage.quality.MsiJitterCalcs;
+import com.hartwig.hmftools.sage.vcf.CandidateSerialisation;
 
 import htsjdk.samtools.reference.IndexedFastaSequenceFile;
 import htsjdk.variant.variantcontext.Genotype;
@@ -63,7 +67,10 @@ public class RegionAppendTask implements Callable
         SamSlicerFactory samSlicerFactory = new SamSlicerFactory();
         samSlicerFactory.buildBamReaders(Collections.emptyList(), Collections.emptyList(), mConfig.Common, mRefGenomeFile);
 
-        mEvidenceStage = new EvidenceStage(config.Common, mRefGenome, qualityRecalibrationMap, new PhaseSetCounter(), samSlicerFactory);
+        MsiJitterCalcs msiJitterCalcs = MsiJitterCalcs.build(config.Common.ReferenceIds, config.Common.JitterParamsDir);
+
+        mEvidenceStage = new EvidenceStage(
+                config.Common, mRefGenome, qualityRecalibrationMap, msiJitterCalcs, new PhaseSetCounter(), samSlicerFactory);
     }
 
     public List<VariantContext> finalVariants() { return mFinalVariants; }
@@ -73,10 +80,24 @@ public class RegionAppendTask implements Callable
     {
         SG_LOGGER.trace("{}: region({}) finding evidence", mTaskId, mRegion);
 
-        RefSequence refSequence = new RefSequence(mRegion, mRefGenomeFile);
+        ChrBaseRegion extendedRegion = new ChrBaseRegion(
+                mRegion.Chromosome,
+                max(1, mRegion.start() - PRE_v3_5_FLANK_EXTENSION_LENGTH),
+                mRegion.end() + PRE_v3_5_FLANK_EXTENSION_LENGTH);
+
+        RefSequence refSequence = new RefSequence(extendedRegion, mRefGenome);
 
         List<Candidate> candidates = mOriginalVariants.stream()
-                .map(x -> CandidateSerialization.toCandidate(x, refSequence)).collect(Collectors.toList());
+                .map(x -> CandidateSerialisation.toCandidate(x, refSequence))
+                .filter(x -> x != null)
+                .collect(Collectors.toList());
+
+        if(candidates.size() < mOriginalVariants.size())
+        {
+            SG_LOGGER.error("region({}) failed to recreate variant context for {} variants",
+                    mRegion, mOriginalVariants.size() - candidates.size());
+            System.exit(1);
+        }
 
         ReadContextCounters readContextCounters = mEvidenceStage.findEvidence
                 (mRegion, "reference", mConfig.Common.ReferenceIds, candidates, false);
@@ -97,7 +118,7 @@ public class RegionAppendTask implements Callable
                 for(int s = 0; s < mConfig.Common.ReferenceIds.size(); ++s)
                 {
                     String sampleId = mConfig.Common.ReferenceIds.get(s);
-                    FragmentLengthData fragmentLengthData = sampleCounters.get(s).fragmentLengths();
+                    FragmentLengthCounts fragmentLengthData = sampleCounters.get(s).fragmentLengths();
                     mFragmentLengths.writeVariantFragmentLength(variantInfo, sampleId, fragmentLengthData);
                 }
             }

@@ -4,15 +4,13 @@ import static java.lang.Math.round;
 
 import static com.hartwig.hmftools.common.variant.CodingEffect.hasProteinImpact;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.REPORTED_FLAG;
-import static com.hartwig.hmftools.common.variant.Hotspot.HOTSPOT_FLAG;
-import static com.hartwig.hmftools.common.variant.Hotspot.NEAR_HOTSPOT_FLAG;
 import static com.hartwig.hmftools.common.variant.SageVcfTags.LOCAL_PHASE_SET;
 import static com.hartwig.hmftools.common.variant.impact.VariantEffect.PHASED_INFRAME_DELETION;
 import static com.hartwig.hmftools.common.variant.impact.VariantEffect.PHASED_INFRAME_INSERTION;
 import static com.hartwig.hmftools.common.variant.impact.VariantEffect.PHASED_MISSENSE;
 import static com.hartwig.hmftools.purple.PurpleUtils.PPL_LOGGER;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.ASSUMED_BIALLELIC_FRACTION;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.MB_PER_GENOME;
+import static com.hartwig.hmftools.purple.PurpleConstants.ASSUMED_BIALLELIC_FRACTION;
+import static com.hartwig.hmftools.purple.PurpleConstants.MB_PER_GENOME;
 import static com.hartwig.hmftools.purple.drivers.SomaticVariantDrivers.addReportableTranscriptList;
 import static com.hartwig.hmftools.purple.somatic.SomaticVariantEnrichment.populateHeader;
 
@@ -33,15 +31,15 @@ import com.hartwig.hmftools.common.utils.TaskExecutor;
 import com.hartwig.hmftools.purple.drivers.SomaticVariantDrivers;
 import com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanel;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
-import com.hartwig.hmftools.purple.fitting.PeakModelData;
-import com.hartwig.hmftools.purple.purity.PurityAdjuster;
+import com.hartwig.hmftools.purple.fittingsnv.PeakModelData;
+import com.hartwig.hmftools.purple.fitting.PurityAdjuster;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
 import com.hartwig.hmftools.common.variant.VariantContextDecorator;
 import com.hartwig.hmftools.common.variant.VariantType;
-import com.hartwig.hmftools.purple.config.ReferenceData;
+import com.hartwig.hmftools.purple.ReferenceData;
 import com.hartwig.hmftools.common.variant.msi.MicrosatelliteStatus;
 import com.hartwig.hmftools.common.purple.TumorMutationalStatus;
-import com.hartwig.hmftools.purple.config.PurpleConfig;
+import com.hartwig.hmftools.purple.PurpleConfig;
 import com.hartwig.hmftools.purple.plot.RChartData;
 
 import htsjdk.variant.variantcontext.writer.VariantContextWriter;
@@ -62,7 +60,7 @@ public class SomaticStream
     private final SomaticVariantCache mSomaticVariants;
     private final RChartData mRChartData;
     private final DriverGenePanel mGenePanel;
-    private final List<PeakModelData> mPeakModel;
+    private final List<PeakModelData> mPeakModelData;
     private final Set<String> mReportedGenes;
 
     private final List<VariantContextDecorator> mDownsampledVariants; // cached for charting
@@ -81,21 +79,20 @@ public class SomaticStream
     private static final int CHART_DOWNSAMPLE_FACTOR = 25000; // eg for 50K variants, only every second will be kept for plotting
 
     public SomaticStream(
-            final PurpleConfig config, final ReferenceData referenceData, final SomaticVariantCache somaticVariantCache,
-            final List<PeakModelData> peakModel)
+            final PurpleConfig config, final ReferenceData referenceData, final SomaticVariantCache somaticVariantCache)
     {
         mReferenceData = referenceData;
         mConfig = config;
 
         mGenePanel = referenceData.DriverGenes;
-        mPeakModel = peakModel;
+        mSomaticVariants = somaticVariantCache;
+        mPeakModelData = Lists.newArrayList();
         mOutputVCF = PurpleCommon.purpleSomaticVcfFile(config.OutputDir, config.TumorId);
         mEnabled = somaticVariantCache.hasData();
         mTumorMutationalLoad = new TumorMutationalLoad(mReferenceData.TargetRegions);
         mSomaticGermlineLikelihood = new SomaticGermlineLikelihood(mConfig, somaticVariantCache.genotypeIds());
         mMicrosatelliteIndels = new MicrosatelliteIndels(mReferenceData.TargetRegions);
         mDrivers = new SomaticVariantDrivers(mGenePanel);
-        mSomaticVariants = somaticVariantCache;
         mRChartData = new RChartData(config, config.TumorId);
 
         mReportedGenes = Sets.newHashSet();
@@ -155,28 +152,33 @@ public class SomaticStream
     }
 
     public Set<String> reportedGenes() { return mReportedGenes; }
-
     public List<VariantContextDecorator> downsampledVariants() { return mDownsampledVariants; }
+    public List<PeakModelData> peakModelData() { return mPeakModelData; }
 
     public void processAndWrite(final PurityAdjuster purityAdjuster)
     {
-        if(!mEnabled || mPeakModel == null)
+        if(!mEnabled)
             return;
+
+        PPL_LOGGER.debug("modelling somatic peaks");
+        SomaticPeakStream somaticPeakStream = new SomaticPeakStream();
+
+        mPeakModelData.addAll(somaticPeakStream.generateModelPeaks(mSomaticVariants));
 
         try
         {
-            VCFHeader readHeader = mSomaticVariants.getVcfHeader();
+            VCFHeader vcfHeader = mSomaticVariants.getVcfHeader();
 
             mVcfWriter = new VariantContextWriterBuilder().setOutputFile(mOutputVCF)
                     .setOption(htsjdk.variant.variantcontext.writer.Options.ALLOW_MISSING_FIELDS_IN_HEADER)
                     .build();
 
-            final VCFHeader header = populateHeader(readHeader, mConfig.Version);
+            populateHeader(vcfHeader, mConfig.Version);
 
             if(mConfig.tumorOnlyMode())
-                SomaticGermlineLikelihood.enrichHeader(header);
+                SomaticGermlineLikelihood.enrichHeader(vcfHeader);
 
-            mVcfWriter.writeHeader(header);
+            mVcfWriter.writeHeader(vcfHeader);
 
             boolean tumorOnly = mConfig.tumorOnlyMode();
             AtomicInteger kataegisId = new AtomicInteger();
@@ -187,7 +189,7 @@ public class SomaticStream
 
                 for(int i = 0; i < mConfig.Threads; ++i)
                 {
-                    enrichers.add(new SomaticVariantEnrichment(i, mConfig, mReferenceData, mPeakModel, kataegisId));
+                    enrichers.add(new SomaticVariantEnrichment(i, mConfig, mReferenceData, mPeakModelData, kataegisId));
                 }
 
                 int taskIndex = 0;
@@ -212,7 +214,7 @@ public class SomaticStream
             }
             else
             {
-                SomaticVariantEnrichment enricher = new SomaticVariantEnrichment(0, mConfig, mReferenceData, mPeakModel, kataegisId);
+                SomaticVariantEnrichment enricher = new SomaticVariantEnrichment(0, mConfig, mReferenceData, mPeakModelData, kataegisId);
                 mSomaticVariants.variants().forEach(x -> enricher.addVariant(x));
                 enricher.call();
             }

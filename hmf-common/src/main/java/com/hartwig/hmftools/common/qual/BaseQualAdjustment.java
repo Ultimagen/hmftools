@@ -1,13 +1,15 @@
 package com.hartwig.hmftools.common.qual;
 
+import static java.lang.Math.log10;
+import static java.lang.Math.pow;
+import static java.lang.Math.round;
+
 public class BaseQualAdjustment
 {
-    public static final int[] STANDARD_BASE_QUALS = { 0, 11, 25, 37 };
+    public static final byte BASE_QUAL_MINIMUM = 1; // zero is not handled by some downstream tools
+    public static final int[] STANDARD_BASE_QUALS = { BASE_QUAL_MINIMUM, 11, 25, 37 };
 
-    public static final double BASE_QUAL_PERMITTED_DIFF_MAX = 2;
-
-    // public static final double BASE_QUAL_PERMITTED_DIFF_MIN = 0.1;
-    // public static final int BASE_QUAL_LOWER_STEP = 1; // step down from the standard value if difference is within bounds
+    public static final double BASE_QUAL_PERMITTED_DIFF_MAX = 1.5;
 
     public static byte adjustBaseQual(final double baseQual) { return adjustBaseQual(STANDARD_BASE_QUALS, baseQual); }
 
@@ -32,4 +34,16 @@ public class BaseQualAdjustment
 
         return (byte)STANDARD_BASE_QUALS[0];
     }
+
+    public static double phredQualToProbability(byte quality)
+    {
+        return pow(10, -quality / 10.0);
+    }
+
+    public static byte probabilityToPhredQualInt(double probability)
+    {
+        return (byte)round(probabilityToPhredQual(probability));
+    }
+
+    public static double probabilityToPhredQual(double probability) { return -10 * log10(probability); }
 }

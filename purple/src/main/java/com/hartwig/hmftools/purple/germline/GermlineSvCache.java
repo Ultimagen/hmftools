@@ -14,8 +14,7 @@ import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.ALLELE_FRACTION;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH_PAIR;
-import static com.hartwig.hmftools.common.sv.SvVcfTags.SGL_FRAG_COUNT;
-import static com.hartwig.hmftools.common.sv.SvVcfTags.SV_FRAG_COUNT;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.TOTAL_FRAGS;
 import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
 import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_PAIR;
 import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
@@ -24,10 +23,9 @@ import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.POS_ORIENT;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.getGenotypeAttributeAsDouble;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.getGenotypeAttributeAsInt;
 import static com.hartwig.hmftools.purple.PurpleUtils.PPL_LOGGER;
-import static com.hartwig.hmftools.purple.config.PurpleConstants.WINDOW_SIZE;
+import static com.hartwig.hmftools.purple.PurpleConstants.WINDOW_SIZE;
 import static com.hartwig.hmftools.purple.sv.SomaticSvCache.addEnrichedVariantContexts;
 
-import java.io.File;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
@@ -40,8 +38,9 @@ import com.hartwig.hmftools.common.sv.StructuralVariant;
 import com.hartwig.hmftools.common.sv.StructuralVariantHeader;
 import com.hartwig.hmftools.common.sv.StructuralVariantLeg;
 import com.hartwig.hmftools.common.variant.GenotypeIds;
-import com.hartwig.hmftools.purple.config.PurpleConfig;
-import com.hartwig.hmftools.purple.config.ReferenceData;
+import com.hartwig.hmftools.common.variant.VcfFileReader;
+import com.hartwig.hmftools.purple.PurpleConfig;
+import com.hartwig.hmftools.purple.ReferenceData;
 import com.hartwig.hmftools.purple.region.ObservedRegion;
 import com.hartwig.hmftools.purple.sv.StructuralRefContextEnrichment;
 import com.hartwig.hmftools.purple.sv.VariantContextCollection;
@@ -54,7 +53,6 @@ import htsjdk.variant.variantcontext.VariantContext;
 import htsjdk.variant.variantcontext.writer.Options;
 import htsjdk.variant.variantcontext.writer.VariantContextWriter;
 import htsjdk.variant.variantcontext.writer.VariantContextWriterBuilder;
-import htsjdk.variant.vcf.VCFFileReader;
 import htsjdk.variant.vcf.VCFHeader;
 
 public class GermlineSvCache
@@ -71,7 +69,7 @@ public class GermlineSvCache
     public GermlineSvCache()
     {
         mVcfHeader = Optional.empty();
-        mVariantCollection = new VariantContextCollection(null);
+        mVariantCollection = new VariantContextCollection(null, false);
         mRefGenomeFile = null;
         mPurityContext = null;
         mFittedRegions = null;
@@ -87,15 +85,15 @@ public class GermlineSvCache
         mFittedRegions = fittedRegions;
         mCopyNumbers = copyNumbers;
 
-        final VCFFileReader vcfReader = new VCFFileReader(new File(inputVcf), false);
-        mVcfHeader = Optional.of(generateOutputHeader(version, vcfReader.getFileHeader()));
+        VcfFileReader vcfReader = new VcfFileReader(inputVcf);
+        mVcfHeader = Optional.of(generateOutputHeader(version, vcfReader.vcfHeader()));
 
         mGenotypeIds = mVcfHeader.isPresent() ? GenotypeIds.fromVcfHeader(mVcfHeader.get(), config.ReferenceId, config.TumorId) : null;
 
-        mVariantCollection = new VariantContextCollection(mVcfHeader.get());
+        mVariantCollection = new VariantContextCollection(mVcfHeader.get(), config.UseGridssSVs);
         mRefGenomeFile = referenceData.RefGenome;
 
-        for(VariantContext context : vcfReader)
+        for(VariantContext context : vcfReader.iterator())
         {
             mVariantCollection.add(context);
         }
@@ -124,7 +122,9 @@ public class GermlineSvCache
 
             final StructuralRefContextEnrichment refEnricher = new StructuralRefContextEnrichment(mRefGenomeFile, writer::add);
 
-            writer.writeHeader(refEnricher.enrichHeader(mVcfHeader.get()));
+            VCFHeader header = mVcfHeader.get();
+            refEnricher.enrichHeader(header);
+            writer.writeHeader(header);
 
             // may be no reason to use the enriched collection, unsure if it adds any value
             for(StructuralVariant variant : mVariantCollection.variants())
@@ -144,8 +144,6 @@ public class GermlineSvCache
 
                 refEnricher.accept(variant);
             }
-
-            refEnricher.flush();
 
             writer.close();
         }
@@ -174,6 +172,10 @@ public class GermlineSvCache
         double junctionCopyNumberTotal = 0;
         int legCount = 0;
 
+        ImmutableEnrichedStructuralVariantLeg.Builder legBuilderStart = null;
+        ImmutableEnrichedStructuralVariantLeg.Builder legBuilderEnd = null;
+        boolean[] adjustedCnChangeSet = new boolean[] {false, false};
+
         for(int se = SE_START; se <= SE_END; ++se)
         {
             StructuralVariantLeg leg = se == SE_START ? variant.start() : variant.end();
@@ -184,6 +186,11 @@ public class GermlineSvCache
             VariantContext context = se == SE_START ? variant.startContext() : variant.endContext();
 
             ImmutableEnrichedStructuralVariantLeg.Builder legBuilder = ImmutableEnrichedStructuralVariantLeg.builder().from(leg);
+
+            if(se == SE_START)
+                legBuilderStart = legBuilder;
+            else
+                legBuilderEnd = legBuilder;
 
             ObservedRegion fittedRegion = fittedRegions[se] != null ? fittedRegions[se].Region : null;
             PurpleCopyNumber copyNumber = copyNumbers[se];
@@ -202,6 +209,7 @@ public class GermlineSvCache
                     double cnChange = abs(fittedRegions[se].CopyNumberChange);
 
                     legBuilder.adjustedCopyNumberChange(cnChange);
+                    adjustedCnChangeSet[se] = true;
 
                     // take the higher of the ref CN regions
                     if(fittedRegion.germlineStatus() == AMPLIFICATION)
@@ -233,15 +241,25 @@ public class GermlineSvCache
                     junctionCopyNumberTotal += adjustedAF * adjustedCN;
                 }
             }
-
-            if(se == SE_START)
-                builder.start(legBuilder.build());
-            else
-                builder.end(legBuilder.build());
         }
+
 
         double junctionCopyNumber = legCount > 0 ? junctionCopyNumberTotal / legCount : 0;
         builder.junctionCopyNumber(junctionCopyNumber);
+
+        // revert to using simple JCN where the variant didn't match a fitted region (eg from being too short)
+        if(!adjustedCnChangeSet[SE_START])
+            legBuilderStart.adjustedCopyNumberChange(junctionCopyNumber);
+
+        builder.start(legBuilderStart.build());
+
+        if(legBuilderEnd != null)
+        {
+            if(!adjustedCnChangeSet[SE_END])
+                legBuilderEnd.adjustedCopyNumberChange(junctionCopyNumber);
+
+            builder.end(legBuilderEnd.build());
+        }
 
         addEnrichedVariantContexts(mVariantCollection, builder.build());
     }
@@ -254,8 +272,7 @@ public class GermlineSvCache
         int totalReadCoverage = getGenotypeAttributeAsInt(genotype, REF_DEPTH, 0)
                 + getGenotypeAttributeAsInt(genotype, REF_DEPTH_PAIR, 0);
 
-        int variantFrags = getGenotypeAttributeAsInt(genotype, SV_FRAG_COUNT, 0) +
-                getGenotypeAttributeAsInt(genotype, SGL_FRAG_COUNT, 0);
+        int variantFrags = getGenotypeAttributeAsInt(genotype, TOTAL_FRAGS, 0);
 
         double total = variantFrags + totalReadCoverage;
         return variantFrags / total;

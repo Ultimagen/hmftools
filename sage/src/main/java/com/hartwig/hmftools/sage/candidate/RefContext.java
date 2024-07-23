@@ -5,20 +5,19 @@ import java.util.Map;
 
 import com.google.common.collect.Maps;
 import com.google.common.primitives.Ints;
-import com.hartwig.hmftools.common.genome.position.GenomePosition;
-import com.hartwig.hmftools.sage.common.ReadContext;
+import com.hartwig.hmftools.common.region.BasePosition;
+import com.hartwig.hmftools.sage.common.RefSequence;
+import com.hartwig.hmftools.sage.common.VariantReadContextBuilder;
 
-public class RefContext implements GenomePosition
+import htsjdk.samtools.SAMRecord;
+
+public class RefContext extends BasePosition
 {
-    public final String Chromosome;
-    public final int Position;
-    
     private Map<String,AltContext> mAlts;
 
     public RefContext(final String chromosome, int position)
     {
-        Chromosome = chromosome;
-        Position = position;
+        super(chromosome, position);
         mAlts = null;
     }
 
@@ -27,24 +26,20 @@ public class RefContext implements GenomePosition
         return mAlts != null ? mAlts.values() : null;
     }
 
-    public void processAltRead(final String ref, final String alt, int baseQuality, int numberOfEvents, final ReadContext readContext)
+    public void processAltRead(
+            final String ref, final String alt, int numberOfEvents, final SAMRecord read, final int variantReadIndex,
+            final VariantReadContextBuilder readContextBuilder, final RefSequence refSequence)
     {
         final AltContext altContext = getOrCreateAltContext(ref, alt);
-        altContext.incrementAltRead(baseQuality);
+        altContext.incrementAltRead();
 
-        if(readContext != null && !readContext.hasIncompleteCore())
-        {
-            altContext.addReadContext(numberOfEvents, readContext);
-        }
+        altContext.addReadContext(numberOfEvents, read, variantReadIndex, readContextBuilder, refSequence);
     }
 
-    @Override
     public String chromosome()
     {
         return Chromosome;
     }
-
-    @Override
     public int position()
     {
         return Position;
@@ -59,10 +54,7 @@ public class RefContext implements GenomePosition
         return another instanceof RefContext && equalTo((RefContext) another);
     }
 
-    private boolean equalTo(RefContext another)
-    {
-        return Chromosome.equals(another.Chromosome) && Position == another.Position;
-    }
+    private boolean equalTo(final RefContext another) { return matches(another); }
 
     @Override
     public int hashCode()

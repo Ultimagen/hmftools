@@ -2,8 +2,8 @@ package com.hartwig.hmftools.sage.vis;
 
 import static java.lang.Math.abs;
 
-import static com.hartwig.hmftools.common.samtools.SamRecordUtils.getMateAlignmentEnd;
-import static com.hartwig.hmftools.common.samtools.SamRecordUtils.NO_POSITION;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.getMateAlignmentEnd;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_POSITION;
 import static com.hartwig.hmftools.sage.vis.ColorUtil.DARK_GREEN;
 import static com.hartwig.hmftools.sage.vis.ColorUtil.PURPLE;
 import static com.hartwig.hmftools.sage.vis.ColorUtil.interpolateColors;
@@ -88,7 +88,7 @@ public class ReadTableColumn
     });
     public static final ReadTableColumn RAW_BASE_QUAL_COL = intValueColumn("rawBQ", (final ReadEvidenceRecord record) ->
     {
-        return record.Qualities == null ? null : (int) Math.round(record.Qualities.RawBaseQuality);
+        return record.Qualities == null ? null : (int) Math.round(record.Qualities.CalcBaseQuality);
     });
     public static final ReadTableColumn ORIENTATION_COL = new ReadTableColumn("Orientation", (final ReadEvidenceRecord record) ->
     {

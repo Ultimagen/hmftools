@@ -8,13 +8,11 @@ import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_CHROMOSOME
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.inferFileDelimiter;
 import static com.hartwig.hmftools.common.utils.file.FileReaderUtils.createFieldsIndexMap;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedReader;
-import static com.hartwig.hmftools.cup.CuppaConfig.CUP_LOGGER;
+import static com.hartwig.hmftools.cup.common.CupConstants.CUP_LOGGER;
 import static com.hartwig.hmftools.cup.prep.DataSource.RNA;
-import static com.hartwig.hmftools.cup.rna.RefAltSpliceJunctions.FLD_POS_END;
-import static com.hartwig.hmftools.cup.rna.RefAltSpliceJunctions.FLD_POS_START;
+import static com.hartwig.hmftools.cup.prep.PrepConfig.REF_ALT_SJ_SITES;
 
 import java.io.BufferedReader;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
@@ -22,8 +20,7 @@ import java.util.Map;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.hartwig.hmftools.common.cuppa.CategoryType;
-import com.hartwig.hmftools.common.rna.AltSpliceJunctionFile;
+import com.hartwig.hmftools.cup.prep.CategoryType;
 import com.hartwig.hmftools.cup.prep.CategoryPrep;
 import com.hartwig.hmftools.cup.prep.DataItem;
 import com.hartwig.hmftools.cup.prep.ItemType;
@@ -55,7 +52,7 @@ public class AltSpliceJunctionPrep implements CategoryPrep
 
         List<DataItem> dataItems = Lists.newArrayList();
 
-        final String filename = AltSpliceJunctionFile.generateFilename(mConfig.getIsofoxDataDir(sampleId), sampleId);
+        final String filename = mConfig.altSpliceJunctionFile(sampleId);
 
         if(!Files.exists(Paths.get(filename)))
             return dataItems;
@@ -90,19 +87,26 @@ public class AltSpliceJunctionPrep implements CategoryPrep
 
                 int fragCount = Integer.parseInt(items[fragCountIndex]);
 
-                dataItems.add(new DataItem(RNA, ItemType.ALT_SJ, asjKey, String.valueOf(fragCount)));
+                dataItems.add(new DataItem(RNA, ItemType.ALT_SJ, asjKey, fragCount));
             }
 
-            // CUP_LOGGER.info("loaded {} matching alt-SJs from file({})", matchedRefAltSJs, filename);
-            return dataItems;
-
+            if(dataItems.isEmpty())
+            {
+                CUP_LOGGER.warn("sample({}) had no matching alt-SJs of the {} provided in configItem(-{})", sampleId, mRefAsjIndexMap.size(), REF_ALT_SJ_SITES);
+            }
         }
-        catch(IOException e)
+        catch(Exception e)
         {
-            CUP_LOGGER.error("failed to load alt splice junction file({}): {}", filename, e.toString());
-            return null;
+            CUP_LOGGER.error("sample({}) failed to extract category({}):", sampleId, categoryType());
+            e.printStackTrace();
+            System.exit(1);
         }
+
+        return dataItems;
     }
+
+    public static final String FLD_POS_START = "PosStart";
+    public static final String FLD_POS_END = "PosEnd";
 
     protected static boolean loadRefAltSjIndices(final String filename, final Map<String,Integer> refAsjIndexMap)
     {
@@ -133,10 +137,10 @@ public class AltSpliceJunctionPrep implements CategoryPrep
                 line = fileReader.readLine();
             }
         }
-        catch (IOException e)
+        catch (Exception e)
         {
-            CUP_LOGGER.error("failed to read RNA ref alt-SJs from file({}): {}", filename, e.toString());
-            return false;
+            CUP_LOGGER.error("Failed to read {} file({}): {}", REF_ALT_SJ_SITES, filename, e.toString());
+            System.exit(1);
         }
 
         return true;

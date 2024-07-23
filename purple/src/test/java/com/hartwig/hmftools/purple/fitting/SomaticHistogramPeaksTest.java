@@ -8,6 +8,9 @@ import static junit.framework.TestCase.assertEquals;
 
 import java.util.List;
 
+import com.hartwig.hmftools.purple.fittingsnv.SomaticHistogramPeaks;
+import com.hartwig.hmftools.purple.fittingsnv.WeightedPloidy;
+
 import org.junit.Test;
 
 public class SomaticHistogramPeaksTest
@@ -53,11 +56,7 @@ public class SomaticHistogramPeaksTest
 
         for(int i = 0; i < multiples; ++i)
         {
-            weightedPloidies.add(ModifiableWeightedPloidy.create()
-                    .setPloidy(vaf)
-                    .setWeight(weight)
-                    .setAlleleReadCount(alleleReadCount)
-                    .setTotalReadCount(totalReadCount));
+            weightedPloidies.add(new WeightedPloidy(totalReadCount, alleleReadCount, vaf, weight));
         }
     }
 }

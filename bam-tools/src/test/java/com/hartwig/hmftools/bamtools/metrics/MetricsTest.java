@@ -2,13 +2,13 @@ package com.hartwig.hmftools.bamtools.metrics;
 
 import static com.hartwig.hmftools.bamtools.metrics.CoverageTest.TEST_CIGAR;
 import static com.hartwig.hmftools.bamtools.metrics.CoverageTest.TEST_READ_BASES;
-import static com.hartwig.hmftools.common.samtools.SamRecordUtils.addConsensusReadAttribute;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.addConsensusReadAttribute;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_1;
 
 import static org.junit.Assert.assertEquals;
 
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
-import com.hartwig.hmftools.common.samtools.UmiReadType;
+import com.hartwig.hmftools.common.bam.UmiReadType;
 import com.hartwig.hmftools.common.test.ReadIdGenerator;
 import com.hartwig.hmftools.common.test.SamRecordTestUtils;
 
@@ -35,6 +35,7 @@ public class MetricsTest
         BamReader bamReader = new BamReader(new ChrBaseRegion(
                 CHR_1, 1, 1000), mConfig, null, null, combinedStats);
 
+        // a primary, non-consensus
         SAMRecord read = SamRecordTestUtils.createSamRecord(
                 mReadIdGen.nextId(), CHR_1, 20, TEST_READ_BASES, TEST_CIGAR, CHR_1, 100,
                 false, false, null);
@@ -42,7 +43,6 @@ public class MetricsTest
         bamReader.processRead(read);
 
         // 2x duplicates and consensus
-
         read = SamRecordTestUtils.createSamRecord(
                 mReadIdGen.nextId(), CHR_1, 20, TEST_READ_BASES, TEST_CIGAR, CHR_1, 100,
                 false, false, null);
@@ -68,7 +68,7 @@ public class MetricsTest
         bamReader.processRead(read);
 
         bamReader.postSliceProcess();
-        assertEquals(3, combinedStats.readCounts().TotalReads);
+        assertEquals(3, combinedStats.readCounts().Total);
         assertEquals(1, combinedStats.readCounts().Duplicates);
         assertEquals(3, combinedStats.flagStats().passCount(FlagStatType.PRIMARY));
         assertEquals(1, combinedStats.flagStats().passCount(FlagStatType.DUPLICATE));
@@ -109,7 +109,7 @@ public class MetricsTest
         bamReader.processRead(read);
 
         bamReader.postSliceProcess();
-        assertEquals(2, combinedStats.readCounts().TotalReads);
+        assertEquals(2, combinedStats.readCounts().Total);
         assertEquals(1, combinedStats.readCounts().Duplicates);
         assertEquals(1, combinedStats.readCounts().DualStrand);
         assertEquals(0, combinedStats.flagStats().passCount(FlagStatType.PRIMARY));

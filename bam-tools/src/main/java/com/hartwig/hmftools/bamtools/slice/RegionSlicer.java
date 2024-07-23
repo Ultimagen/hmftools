@@ -1,16 +1,20 @@
 package com.hartwig.hmftools.bamtools.slice;
 
+import static java.lang.Math.min;
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.APP_NAME;
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.BT_LOGGER;
 import static com.hartwig.hmftools.common.genome.chromosome.HumanChromosome.lowerChromosome;
 import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
+import static com.hartwig.hmftools.common.utils.TaskExecutor.runThreadTasks;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
@@ -43,18 +47,22 @@ public class RegionSlicer
         SliceWriter sliceWriter = new SliceWriter(mConfig);
         ReadCache readCache = new ReadCache(mConfig);
 
+        Queue<ChrBaseRegion> regionsQueue = new ConcurrentLinkedQueue<>();
+        regionsQueue.addAll(mConfig.SpecificChrRegions.Regions);
+
+        List<Thread> threadTasks = Lists.newArrayList();
         List<RegionBamSlicer> regionBamSlicers = Lists.newArrayList();
 
-        for(ChrBaseRegion region : mConfig.SpecificChrRegions.Regions)
+        for(int i = 0; i < min(mConfig.SpecificChrRegions.Regions.size(), mConfig.Threads); ++i)
         {
-            regionBamSlicers.add(new RegionBamSlicer(region, mConfig, readCache, sliceWriter));
+            RegionBamSlicer regionSlicer = new RegionBamSlicer(regionsQueue, mConfig, readCache, sliceWriter);
+            regionBamSlicers.add(regionSlicer);
+            threadTasks.add(regionSlicer);
         }
 
-        BT_LOGGER.info("splitting {} regions across {} threads", regionBamSlicers.size(), mConfig.Threads);
+        BT_LOGGER.info("splitting {} regions across {} threads", regionsQueue.size(), mConfig.Threads);
 
-        List<Callable> callableTasks = regionBamSlicers.stream().collect(Collectors.toList());
-
-        if(!TaskExecutor.executeTasks(callableTasks, mConfig.Threads))
+        if(!runThreadTasks(threadTasks))
             System.exit(1);
 
         BT_LOGGER.info("initial slice complete");
@@ -75,7 +83,7 @@ public class RegionSlicer
         List<RemoteReadSlicer> remoteReadSlicers = remoteChrPositions.stream()
                 .map(x -> new RemoteReadSlicer(x.Chromosome, x.Positions, mConfig, sliceWriter)).collect(Collectors.toList());
 
-        callableTasks = remoteReadSlicers.stream().collect(Collectors.toList());
+        List<Callable> callableTasks = remoteReadSlicers.stream().collect(Collectors.toList());
 
         if(!TaskExecutor.executeTasks(callableTasks, mConfig.Threads))
             System.exit(1);
@@ -104,22 +112,13 @@ public class RegionSlicer
         public int compareTo(final RemotePositions other)
         {
             if(!Chromosome.equals(other.Chromosome))
-            {
-                if(isChromosome2())
-                    return -1;
-                else if(other.isChromosome2())
-                    return -1;
-
-                return lowerChromosome(Chromosome, other.Chromosome) ? -1 : 1;
-            }
+                return Chromosome.compareTo(other.Chromosome);
 
             if(Positions.size() != other.Positions.size())
                 return Positions.size() > other.Positions.size() ? -1 : 1;
 
             return 0;
         }
-
-        public boolean isChromosome2() { return HumanChromosome._2.matches(Chromosome); }
     }
 
     public static void main(@NotNull final String[] args)

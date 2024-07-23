@@ -18,7 +18,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -79,6 +78,11 @@ public class ChrBaseRegion implements Cloneable, Comparable<ChrBaseRegion>
 
     public boolean isValid() { return HumanChromosome.contains(Chromosome) && hasValidPositions(); }
     public boolean hasValidPositions() { return mStart > 0 & mEnd >= mStart; }
+
+    public BaseRegion baseRegion()
+    {
+        return new BaseRegion(mStart, mEnd);
+    }
 
     public boolean overlaps(final ChrBaseRegion other)
     {
@@ -175,11 +179,20 @@ public class ChrBaseRegion implements Cloneable, Comparable<ChrBaseRegion>
             return 1;
         }
 
-        int rank1 = HumanChromosome.chromosomeRank(Chromosome);
-        int rank2 = HumanChromosome.chromosomeRank(other.Chromosome);
+        return compareChromosomes(Chromosome, other.Chromosome);
+    }
+
+    public static int compareChromosomes(final String chr1, final String chr2)
+    {
+        // we use chromosome rank such that chr1 is sorted before chr2
+        int rank1 = HumanChromosome.chromosomeRank(chr1);
+        int rank2 = HumanChromosome.chromosomeRank(chr2);
 
         if(rank1 == rank2)
-            return 0;
+        {
+            // will occur for non-standard contigs, in which case revert to standard string comparison
+            return chr1.compareTo(chr2);
+        }
 
         return rank1 < rank2 ? -1 : 1;
     }
@@ -194,6 +207,8 @@ public class ChrBaseRegion implements Cloneable, Comparable<ChrBaseRegion>
         {
             entry.getValue().forEach(x -> regions.add(new ChrBaseRegion(entry.getKey(), x.start(), x.end())));
         }
+
+        checkMergeOverlaps(regions, true);
 
         return regions;
     }
@@ -214,11 +229,9 @@ public class ChrBaseRegion implements Cloneable, Comparable<ChrBaseRegion>
         if(filename == null)
             return chrRegionsMap;
 
-        try
+        // accepts zipped / non-zipped, with and without headers, Chromosome/chromosome,PosStart/PositionStart etc
+        try(BufferedReader fileReader = createBufferedReader(filename))
         {
-            // accepts zipped / non-zipped, with and without headers, Chromosome/chromosome,PosStart/PositionStart etc
-            BufferedReader fileReader = createBufferedReader(filename);
-
             String delim = FileDelimiters.inferFileDelimiter(filename);
 
             int chrIndex = 0;
@@ -274,7 +287,6 @@ public class ChrBaseRegion implements Cloneable, Comparable<ChrBaseRegion>
             return null;
         }
     }
-
 
     public static void checkMergeOverlaps(final List<ChrBaseRegion> regions, boolean checkSorted)
     {

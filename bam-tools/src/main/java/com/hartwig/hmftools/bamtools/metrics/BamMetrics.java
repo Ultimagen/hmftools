@@ -70,7 +70,18 @@ public class BamMetrics
         {
             for(Map.Entry<String,List<BaseRegion>> entry : mConfig.TargetRegions.entrySet())
             {
-                entry.getValue().forEach(x -> allRegions.add(new ChrBaseRegion(entry.getKey(), x.start(), x.end())));
+                String chromosome = entry.getKey();
+
+                if(mConfig.SpecificChrRegions.excludeChromosome(chromosome))
+                    continue;
+
+                List<BaseRegion> regions = entry.getValue();
+
+                for(BaseRegion region : regions)
+                {
+                    if(mConfig.SpecificChrRegions.includeRegion(region.start(), region.end()))
+                        allRegions.add(new ChrBaseRegion(chromosome, region.start(), region.end()));
+                }
             }
 
             Collections.sort(allRegions);
@@ -86,9 +97,11 @@ public class BamMetrics
 
         CombinedStats combinedStats = new CombinedStats(mConfig.MaxCoverage);
 
+        MetricsWriter metricsWriter = new MetricsWriter(mConfig);
+
         if(allRegions.size() == 1 || mConfig.Threads <= 1)
         {
-            PartitionThread partitionThread = new PartitionThread(mConfig, partitions, combinedStats);
+            PartitionThread partitionThread = new PartitionThread(mConfig, partitions, combinedStats, metricsWriter);
             partitionThread.run();
         }
         else
@@ -99,7 +112,9 @@ public class BamMetrics
 
             for(int i = 0; i < min(allRegions.size(), mConfig.Threads); ++i)
             {
-                workers.add(new PartitionThread(mConfig, partitions, combinedStats));
+                PartitionThread partitionThread = new PartitionThread(mConfig, partitions, combinedStats, metricsWriter);
+                partitionThread.start();
+                workers.add(partitionThread);
             }
 
             if(!runThreadTasks(workers))
@@ -108,10 +123,12 @@ public class BamMetrics
 
         BT_LOGGER.info("all regions complete");
 
+        metricsWriter.close();
+
         combinedStats.coverageMetrics().finalise(mConfig.ExcludeZeroCoverage);
         MetricsWriter.writeResults(combinedStats, mConfig);
 
-        BT_LOGGER.info("totalReads({}) stats: {}", combinedStats.readCounts().TotalReads, combinedStats.coverageMetrics());
+        BT_LOGGER.info("totalReads({}) stats: {}", combinedStats.readCounts().Total, combinedStats.coverageMetrics());
 
         if(mConfig.PerfDebug)
         {

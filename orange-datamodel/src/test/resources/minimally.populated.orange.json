@@ -45,6 +45,7 @@
         "status": [
           "PASS"
         ],
+        "totalCopyNumberSegments": 100,
         "unsupportedCopyNumberSegments": 0,
         "deletedGenes": 4,
         "contamination": 0.0,
@@ -117,7 +118,8 @@
           "effects": [
             "MISSENSE"
           ],
-          "codingEffect": "MISSENSE"
+          "codingEffect": "MISSENSE",
+          "reported": true
         },
         "otherImpacts": [],
         "hotspot": "NON_HOTSPOT",
@@ -156,7 +158,8 @@
           "effects": [
             "MISSENSE"
           ],
-          "codingEffect": "MISSENSE"
+          "codingEffect": "MISSENSE",
+          "reported": true
         },
         "otherImpacts": [],
         "hotspot": "NON_HOTSPOT",
@@ -196,7 +199,8 @@
             "SPLICE_DONOR",
             "INTRONIC"
           ],
-          "codingEffect": "SPLICE"
+          "codingEffect": "SPLICE",
+          "reported": true
         },
         "otherImpacts": [],
         "hotspot": "HOTSPOT",
@@ -239,7 +243,8 @@
             "SPLICE_DONOR",
             "INTRONIC"
           ],
-          "codingEffect": "SPLICE"
+          "codingEffect": "SPLICE",
+          "reported": true
         },
         "otherImpacts": [],
         "hotspot": "HOTSPOT",
@@ -274,6 +279,7 @@
         "chromosome": "12",
         "chromosomeBand": "p13",
         "minCopyNumber": 1.2,
+        "maxCopyNumber": 1.2,
         "minMinorAlleleCopyNumber": 0.4
       }
     ],
@@ -307,6 +313,7 @@
         "chromosome": "12",
         "chromosomeBand": "p13",
         "minCopyNumber": 1.2,
+        "maxCopyNumber": 1.2,
         "minMinorAlleleCopyNumber": 0.4
       }
     ]
@@ -339,6 +346,9 @@
       {
         "reported": true,
         "reportedType": "KNOWN_PAIR",
+        "unreportedReasons": [
+          "NONE"
+        ],
         "driverLikelihood": "HIGH",
         "fusedExonUp": 1,
         "fusedExonDown": 2,
@@ -361,6 +371,9 @@
       {
         "reported": true,
         "reportedType": "KNOWN_PAIR",
+        "unreportedReasons": [
+          "NONE"
+        ],
         "driverLikelihood": "HIGH",
         "fusedExonUp": 1,
         "fusedExonDown": 2,
@@ -460,7 +473,8 @@
         "codingType": "UTR_3P"
       }
     ],
-    "additionalSuspectSomaticFusions": []
+    "additionalSuspectSomaticFusions": [],
+    "additionalViableSomaticFusions": []
   },
   "virusInterpreter": {
     "allViruses": [
@@ -470,6 +484,7 @@
         "integrations": 1,
         "interpretation": "HPV",
         "reported": true,
+        "blacklisted": false,
         "driverLikelihood": "HIGH",
         "percentageCovered": 0.9,
         "meanCoverage": 0
@@ -480,6 +495,7 @@
         "integrations": 0,
         "interpretation": null,
         "reported": false,
+        "blacklisted": false,
         "driverLikelihood": "LOW",
         "percentageCovered": 0.4,
         "meanCoverage": 0
@@ -492,6 +508,7 @@
         "integrations": 1,
         "interpretation": "HPV",
         "reported": true,
+        "blacklisted": false,
         "driverLikelihood": "HIGH",
         "percentageCovered": 0.9,
         "meanCoverage": 0
@@ -508,6 +525,8 @@
   "peach": [
     {
       "gene": "DPYD",
+      "allele": "*1",
+      "alleleCount": 2,
       "haplotype": "*1_HOM",
       "function": "Normal Function",
       "linkedDrugs": "5-Fluorouracil",
@@ -558,6 +577,14 @@
         "rnaFragments": 0
       }
     ]
+  },
+  "immuneEscape": {
+    "hasHlaEscape": true,
+    "hasAntigenPresentationPathwayEscape": false,
+    "hasIFNGammaPathwayEscape": false,
+    "hasPDL1OverexpressionEscape": false,
+    "hasCD58InactivationEscape": false,
+    "hasEpigeneticSETDB1Escape": false
   },
   "plots": {
     "purpleFinalCircosPlot": "plot/empty.circos.png",
