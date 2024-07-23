@@ -1,7 +1,7 @@
 # Base image with Maven and JDK
 FROM maven:3.8.4-jdk-11
 
-ENV GRIPSS_VER="2.3.5"
+ENV GRIPSS_VER="2.4.0"
 ENV OPT /opt/wtsi-cgp
 ENV JAVA $OPT/java
 ENV CLASSPATH ${JAVA}/gripss.jar
