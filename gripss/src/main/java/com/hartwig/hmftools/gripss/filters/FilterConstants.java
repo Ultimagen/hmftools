@@ -17,6 +17,7 @@ import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 
+
 public class FilterConstants
 {
     public final int MinTumorQual;
@@ -146,7 +147,7 @@ public class FilterConstants
                 qualPerAD,
                 modifiedAf,
                 modifiedAfHotspot,
-                cmd.getOptionValue(EXCLUDE_FILTERS, ""));
+                configBuilder.getValue(EXCLUDE_FILTERS));
     }
 
     public FilterConstants(
@@ -229,6 +230,7 @@ public class FilterConstants
         configBuilder.addInteger(PON_DISTANCE, "PON permitted margin", DEFAULT_PON_DISTANCE);
 
         configBuilder.addFlag(FILTER_SGLS, "Filter SGLs from VCF, intended for tumor-only mode, default=true in target panel");
+        configBuilder.addConfigItem(EXCLUDE_FILTERS, true,"Filter names to exclude from output vcf, separated by ; options: " + Arrays.toString(Arrays.stream(FilterType.values()).filter(x -> x != FilterType.PASS).toArray()));
     }
 
     private static void addTargetedDecimal(
@@ -245,7 +247,6 @@ public class FilterConstants
         configBuilder.addConfigItem(
                 INTEGER, name, false,
                 format("%s, default=%d targeted default=%d", desc, defaultValue, targetedDefaultValue), String.valueOf(defaultValue));
-        options.addOption(EXCLUDE_FILTERS, true,"Filter names to exclude from output vcf, separated by ; options: " + Arrays.toString(Arrays.stream(FilterType.values()).filter(x -> x != FilterType.PASS).toArray()));
     }
 
 }
