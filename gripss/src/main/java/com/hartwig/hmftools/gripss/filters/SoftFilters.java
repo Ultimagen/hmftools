@@ -100,7 +100,7 @@ public class SoftFilters
             Breakend breakend = sv.breakends()[se];
 
             String [] exclude_filteres_parts;
-            if (mFilterConstants.ExcludeFilters.isEmpty()) {
+            if (mFilterConstants.ExcludeFilters == null || mFilterConstants.ExcludeFilters.isEmpty()) {
                 exclude_filteres_parts = new String[0];
             } else {
                 exclude_filteres_parts = mFilterConstants.ExcludeFilters.split(";");
