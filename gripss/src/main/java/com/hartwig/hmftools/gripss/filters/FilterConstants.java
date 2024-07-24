@@ -230,7 +230,7 @@ public class FilterConstants
         configBuilder.addInteger(PON_DISTANCE, "PON permitted margin", DEFAULT_PON_DISTANCE);
 
         configBuilder.addFlag(FILTER_SGLS, "Filter SGLs from VCF, intended for tumor-only mode, default=true in target panel");
-        configBuilder.addConfigItem(EXCLUDE_FILTERS, true,"Filter names to exclude from output vcf, separated by ; options: " + Arrays.toString(Arrays.stream(FilterType.values()).filter(x -> x != FilterType.PASS).toArray()));
+        configBuilder.addConfigItem(EXCLUDE_FILTERS, false,"Filter names to exclude from output vcf, separated by ; options: " + Arrays.toString(Arrays.stream(FilterType.values()).filter(x -> x != FilterType.PASS).toArray()));
     }
 
     private static void addTargetedDecimal(
