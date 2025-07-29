@@ -3,7 +3,7 @@ package com.hartwig.hmftools.cup.prep;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.REF_GENOME_VERSION;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.REF_GENOME_VERSION_CFG_DESC;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.V37;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.THREADS;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.THREADS;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.ISOFOX_DIR_CFG;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.ISOFOX_DIR_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.LINX_DIR_CFG;
@@ -28,7 +28,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.hartwig.hmftools.common.drivercatalog.DriverCatalogFile;
+import com.hartwig.hmftools.common.driver.DriverCatalogFile;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.linx.LinxCluster;
 import com.hartwig.hmftools.common.linx.LinxDriver;
@@ -36,7 +36,7 @@ import com.hartwig.hmftools.common.linx.LinxFusion;
 import com.hartwig.hmftools.common.purple.PurpleCommon;
 import com.hartwig.hmftools.common.rna.AltSpliceJunctionFile;
 import com.hartwig.hmftools.common.rna.GeneExpressionFile;
-import com.hartwig.hmftools.common.utils.TaskExecutor;
+import com.hartwig.hmftools.common.perf.TaskExecutor;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.common.utils.config.ConfigUtils;
 import com.hartwig.hmftools.common.utils.file.FileWriterUtils;
@@ -65,8 +65,6 @@ public class PrepConfig
     public final boolean WriteByCategory;
     public final int Threads;
 
-    public final int ProgressInterval;
-
     public static final String CATEGORIES = "categories";
     public static final String CATEGORIES_DESC = "Categories to build ref data for";
     public static final String ALL_CATEGORIES = "ALL";
@@ -80,9 +78,6 @@ public class PrepConfig
     public static final String WRITE_FILE_BY_CATEGORY_DESC = "Cohort mode - write files by category";
 
     public static final String THREADS_DESC = "Number of threads to use in multi sample mode";
-
-    public static final String  PROGRESS_INTERVAL = "progress_interval";
-    public static final String  PROGRESS_INTERVAL_DESC = "Print progress per this number of samples";
 
     public static final String SUBSET_DELIM = ";";
 
@@ -107,8 +102,6 @@ public class PrepConfig
         WriteByCategory = configBuilder.hasFlag(WRITE_FILE_BY_CATEGORY);
 
         Threads = TaskExecutor.parseThreads(configBuilder);
-
-        ProgressInterval = configBuilder.getInteger(PROGRESS_INTERVAL);
     }
 
     public static void registerConfig(final ConfigBuilder configBuilder)
@@ -132,8 +125,6 @@ public class PrepConfig
 
         configBuilder.addFlag(WRITE_FILE_BY_CATEGORY, WRITE_FILE_BY_CATEGORY_DESC);
         configBuilder.addConfigItem(THREADS, false, THREADS_DESC, "1");
-
-        configBuilder.addInteger(PROGRESS_INTERVAL, PROGRESS_INTERVAL_DESC, 100);
 
         ConfigUtils.addLoggingOptions(configBuilder);
     }
@@ -209,8 +200,7 @@ public class PrepConfig
             final String virusDir,
             final String isofoxDir,
             final String somaticVariantsDir,
-            final String altSpliceJunctionSites,
-            final int progressInterval
+            final String altSpliceJunctionSites
     )
     {
         SampleIds = sampleIds;
@@ -227,6 +217,5 @@ public class PrepConfig
         IsofoxDir = isofoxDir;
         SomaticVariantsDir = somaticVariantsDir;
         AltSpliceJunctionSites = altSpliceJunctionSites;
-        ProgressInterval = progressInterval;
     }
 }

@@ -8,13 +8,15 @@ import static com.hartwig.hmftools.sage.common.TestUtils.buildSamRecord;
 import static com.hartwig.hmftools.sage.common.VariantUtils.createReadContextMatcher;
 import static com.hartwig.hmftools.sage.common.VariantUtils.createReadCounter;
 import static com.hartwig.hmftools.sage.common.VariantUtils.createSimpleVariant;
+import static com.hartwig.hmftools.sage.evidence.Realignment.checkRealignment;
+import static com.hartwig.hmftools.common.test.SamRecordTestUtils.buildDefaultBaseQuals;
 
 import static org.junit.Assert.assertEquals;
 
 import com.hartwig.hmftools.sage.common.ReadContextMatch;
 import com.hartwig.hmftools.sage.common.ReadContextMatcher;
 import com.hartwig.hmftools.sage.common.RefSequence;
-import com.hartwig.hmftools.sage.common.SimpleVariant;
+import com.hartwig.hmftools.common.variant.SimpleVariant;
 import com.hartwig.hmftools.sage.common.VariantReadContext;
 import com.hartwig.hmftools.sage.common.VariantReadContextBuilder;
 
@@ -137,7 +139,7 @@ public class RealignmentTest
         // index   0123456789012345678901234567890123456789
         // pos     20        30        40
 
-        RefSequence refSequence = new RefSequence(0, refBases.getBytes());
+        RefSequence refSequence = new RefSequence(0, (refBases + REF_BASES_200.substring(50, 100)).getBytes());
 
         String insertedBases = "TTTCTTTC";
 
@@ -206,7 +208,7 @@ public class RealignmentTest
         // index   0123456789012345678901234567890123456789
         // pos     20        30        40
 
-        refSequence = new RefSequence(0, refBases.getBytes());
+        refSequence = new RefSequence(0, (refBases + REF_BASES_200.substring(60, 110)).getBytes());
 
         varPosition = 33;
         ref = refBases.substring(varPosition, varPosition + 1);
@@ -295,5 +297,65 @@ public class RealignmentTest
 
         readContextCounter.processRead(realignedRead, 0, null);
         assertEquals(1, readContextCounter.readCounts().Realigned);
+
+        // check low-qual base check has been shifted correctly
+        String readBasesWithError = readBases.substring(0, 2) + "A" + readBases.substring(3);
+        realignedRead = buildSamRecord(varPosition + deletedBases.length() + 1, readCigar, readBasesWithError);
+        realignedRead.getBaseQualities()[2] = 10;
+
+        // should fail since now a low-qual
+        readContextCounter.processRead(realignedRead, 0, null);
+        // assertEquals(2, readContextCounter.readCounts().Realigned);
+
+        readBasesWithError = readBases.substring(0, 1) + "A" + readBases.substring(2);
+        realignedRead = buildSamRecord(varPosition + deletedBases.length() + 1, readCigar, readBasesWithError);
+        realignedRead.getBaseQualities()[1] = 10;
+
+        // this one should be permitted as a low-qual pass
+        readContextCounter.processRead(realignedRead, 0, null);
+        // assertEquals(2, readContextCounter.readCounts().Realigned);
+    }
+
+    @Test
+    public void testRealignmentIndexOffset()
+    {
+        String refBases = "X" + REF_BASES_200.substring(0, 100)
+                // 0123456789012345678901234567890123456789
+                //             ->
+                + "GATTTTTTTTTTGA" + REF_BASES_200.substring(0, 100);
+
+        RefSequence refSequence = new RefSequence(0, refBases.getBytes());
+
+        String insertedBases = "C";
+
+        String varBuildReadBases = refBases.substring(91, 101) + refBases.substring(101, 105) + insertedBases + refBases.substring(105, 150);
+
+        String readCigar = "14M1I45M";
+
+        SAMRecord varBuildRead = buildSamRecord(91, readCigar, varBuildReadBases);
+        String ref = refBases.substring(104, 105);
+
+        VariantReadContextBuilder builder = new VariantReadContextBuilder(DEFAULT_FLANK_LENGTH);
+
+        SimpleVariant var = createSimpleVariant(104, ref, ref + insertedBases);
+        VariantReadContext readContext = builder.createContext(var, varBuildRead, 13, refSequence);
+
+        assertEquals(104, readContext.variant().position());
+        assertEquals(11, readContext.VarIndex);
+        assertEquals("TTCTTTTTTTTG", readContext.coreStr());
+
+        // read has an extra T at start of poly-T rather than C in middle of poly-T
+        String polyTVarBuildReadBases = refBases.substring(91, 101) + refBases.substring(101, 105) + "T" + refBases.substring(105, 150);
+        String polyTReadCigar = "12M1I47M";
+        byte[] baseQuals = buildDefaultBaseQuals(polyTVarBuildReadBases.length());
+        baseQuals[14] = 11;  // the base that was a C in the T>TC insert
+        SAMRecord polyTVarBuildRead = buildSamRecord(91, polyTReadCigar, polyTVarBuildReadBases, baseQuals);
+
+        ReadContextMatcher matcher = createReadContextMatcher(readContext);
+        int readVarIndex = RawContext.createFromRead(var, polyTVarBuildRead).ReadVariantIndex;
+        int realignedReadIndex = Realignment.realignedReadIndexPosition(readContext, polyTVarBuildRead);
+        RealignedType realignedType = checkRealignment(readContext, matcher, polyTVarBuildRead, readVarIndex, realignedReadIndex, null);
+
+        assertEquals(RealignedType.NONE, realignedType);
     }
 }

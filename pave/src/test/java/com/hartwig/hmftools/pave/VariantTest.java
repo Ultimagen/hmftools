@@ -1,17 +1,15 @@
 package com.hartwig.hmftools.pave;
 
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_1;
-import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_VARIANT_CN;
-import static com.hartwig.hmftools.common.variant.SageVcfTags.MICROHOMOLOGY;
 import static com.hartwig.hmftools.common.variant.SageVcfTags.REPEAT_COUNT;
 import static com.hartwig.hmftools.common.variant.SageVcfTags.REPEAT_SEQUENCE;
 import static com.hartwig.hmftools.common.variant.VariantTier.HOTSPOT;
 import static com.hartwig.hmftools.common.variant.VariantTier.PANEL;
 import static com.hartwig.hmftools.common.variant.VariantTier.TIER;
+import static com.hartwig.hmftools.common.variant.pon.GnomadCache.PON_GNOMAD_FILTER;
+import static com.hartwig.hmftools.common.variant.pon.PonCache.PON_FILTER;
 import static com.hartwig.hmftools.pave.ChromosomeTask.applyFilters;
-import static com.hartwig.hmftools.pave.annotation.GnomadAnnotation.PON_GNOMAD_FILTER;
 import static com.hartwig.hmftools.pave.annotation.PonAnnotation.PON_ARTEFACT_FILTER;
-import static com.hartwig.hmftools.pave.annotation.PonAnnotation.PON_FILTER;
 
 import static htsjdk.variant.vcf.VCFConstants.ALLELE_FREQUENCY_KEY;
 import static junit.framework.TestCase.assertEquals;
@@ -21,12 +19,11 @@ import static junit.framework.TestCase.assertTrue;
 import java.util.List;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.utils.StringCache;
+import com.hartwig.hmftools.common.perf.StringCache;
 import com.hartwig.hmftools.common.variant.VariantTier;
+import com.hartwig.hmftools.common.variant.pon.PonChrCache;
 import com.hartwig.hmftools.pave.annotation.PonAnnotation;
-import com.hartwig.hmftools.pave.annotation.PonChrCache;
 
-import org.apache.logging.log4j.util.Strings;
 import org.junit.Test;
 
 import htsjdk.variant.variantcontext.Allele;
@@ -146,27 +143,27 @@ public class VariantTest
         PonAnnotation standardPon = new PonAnnotation(null, false);
         PonChrCache artefactsPon = new PonChrCache(CHR_1, new StringCache());
 
-        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon);
+        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon, true);
         assertFilters(var, false, false, false);
 
         // Gnomad
         var.setGnomadFrequency(0.02);
-        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon);
+        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon, true);
         assertFilters(var, false, false, true);
 
         // standard PON
         var.setPonFrequency(11, 7, 100);
-        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon);
+        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon, true);
         assertFilters(var, true, false, true);
 
         // artefact PON
         artefactsPon.addEntry(var.Position, var.Ref, var.Alt, 11, 11, 100);
-        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon);
+        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon, true);
         assertFilters(var, true, true, true);
 
         artefactsPon.clear();
         artefactsPon.addEntry(var.Position, var.Ref, var.Alt, 5, 11, 20);
-        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon);
+        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon, true);
         assertFilters(var, true, false, true);
 
         // non-hotspot variant
@@ -174,7 +171,7 @@ public class VariantTest
         var.setContext(variantContext);
 
         var.setGnomadFrequency(0.001);
-        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon);
+        applyFilters(var, SAMPLE_ID, standardPon, artefactsPon, true);
         assertFilters(var, true, true, true);
     }
 

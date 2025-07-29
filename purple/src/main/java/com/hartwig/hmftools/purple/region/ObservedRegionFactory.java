@@ -33,19 +33,16 @@ import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.genome.chromosome.CobaltChromosome;
 import com.hartwig.hmftools.common.genome.chromosome.CobaltChromosomes;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
-import com.hartwig.hmftools.common.genome.gc.GCProfile;
 import com.hartwig.hmftools.common.genome.position.GenomePosition;
 import com.hartwig.hmftools.common.genome.position.GenomePositionSelector;
 import com.hartwig.hmftools.common.genome.position.GenomePositionSelectorFactory;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.genome.region.GenomeRegion;
-import com.hartwig.hmftools.common.genome.region.GenomeRegionSelector;
-import com.hartwig.hmftools.common.genome.region.GenomeRegionSelectorFactory;
 import com.hartwig.hmftools.common.genome.region.Window;
 import com.hartwig.hmftools.common.immune.ImmuneRegions;
 import com.hartwig.hmftools.common.purple.GermlineStatus;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
-import com.hartwig.hmftools.purple.segment.PurpleSegment;
+import com.hartwig.hmftools.purple.segment.PurpleSupportSegment;
 import com.hartwig.hmftools.common.purple.SegmentSupport;
 import com.hartwig.hmftools.common.utils.Doubles;
 
@@ -55,7 +52,7 @@ public class ObservedRegionFactory
     private final CobaltChromosomes mCobaltChromosomes;
     private final GermlineStatusCalcs mStatusFactory;
 
-    private static List<ChrBaseRegion> EXCLUDED_IMMUNE_REGIONS = Lists.newArrayList();
+    public static List<ChrBaseRegion> EXCLUDED_IMMUNE_REGIONS = Lists.newArrayList();
     private static List<ChrBaseRegion> CENTROMETRIC_REGIONS = Lists.newArrayList();
 
     private static List<ChrBaseRegion> GERMLINE_AMP_DEL_EXCLUSIONS = Lists.newArrayList();
@@ -73,6 +70,7 @@ public class ObservedRegionFactory
     {
         EXCLUDED_IMMUNE_REGIONS.addAll(ImmuneRegions.getIgRegions(refGenomeVersion));
         EXCLUDED_IMMUNE_REGIONS.addAll(ImmuneRegions.getTrRegions(refGenomeVersion));
+        EXCLUDED_IMMUNE_REGIONS.addAll(ImmuneRegions.getHlaRegions(refGenomeVersion));
 
         int halfWidth = CENTROMERIC_WIDTH / 2;
 
@@ -99,28 +97,26 @@ public class ObservedRegionFactory
     }
 
     public List<ObservedRegion> formObservedRegions(
-            final List<PurpleSegment> regions, final Multimap<Chromosome, AmberBAF> bafs,
-            final Map<Chromosome,List<CobaltRatio>> ratios, final Multimap<Chromosome,GCProfile> gcProfiles)
+            final List<PurpleSupportSegment> regions, final Multimap<Chromosome, AmberBAF> bafs,
+            final Map<Chromosome,List<CobaltRatio>> ratios)
     {
         List<ObservedRegion> observedRegions = Lists.newArrayList();
 
         GenomePositionSelector<CobaltRatio> cobaltSelector = GenomePositionSelectorFactory.create(ratios);
         GenomePositionSelector<AmberBAF> bafSelector = GenomePositionSelectorFactory.create(bafs);
-        GenomeRegionSelector<GCProfile> gcSelector = GenomeRegionSelectorFactory.createImproved(gcProfiles);
 
         List<Integer> candidateGermlineAmpDelRegions = Lists.newArrayList();
 
-        for(PurpleSegment region : regions)
+        for(PurpleSupportSegment region : regions)
         {
             final BAFAccumulator baf = new BAFAccumulator();
             final CobaltAccumulator cobalt = new CobaltAccumulator(mWindowSize, region);
-            final GCAccumulator gc = new GCAccumulator(region);
 
             bafSelector.select(region, baf);
             cobaltSelector.select(region, cobalt);
-            gcSelector.select(region, gc);
 
             double tumorRatio = cobalt.tumorMedianRatio();
+            double tumorMeanContent = cobalt.tumorMeanContent();
             double normalRatio = cobalt.referenceMeanRatio();
             int depthWindowCount = cobalt.tumorCount();
 
@@ -129,7 +125,7 @@ public class ObservedRegionFactory
             ObservedRegion observedRegion = new ObservedRegion(
                     region.chromosome(), region.start(), region.end(), region.RatioSupport, region.Support, baf.count(), baf.medianBaf(),
                     depthWindowCount, tumorRatio, normalRatio, cobalt.unnormalisedReferenceMeanRatio(), germlineStatus,
-                    region.SvCluster, gc.averageGCContent(), region.MinStart, region.MaxStart);
+                    region.SvCluster, tumorMeanContent, region.MinStart, region.MaxStart);
 
             if(observedRegion.start() > observedRegion.end()
             || !positionsWithin(region.MinStart, region.MaxStart, observedRegion.start(), observedRegion.end()))
@@ -154,7 +150,7 @@ public class ObservedRegionFactory
         return observedRegions;
     }
 
-    private GermlineStatus getGermlineStatus(final PurpleSegment region, double normalRatio, double tumorRatio, int depthWindowCount)
+    private GermlineStatus getGermlineStatus(final PurpleSupportSegment region, double normalRatio, double tumorRatio, int depthWindowCount)
     {
         if(EXCLUDED_IMMUNE_REGIONS.stream()
                 .anyMatch(x -> x.Chromosome.equals(region.Chromosome) && positionsWithin(region.start(), region.end(), x.start(), x.end())))
@@ -171,10 +167,10 @@ public class ObservedRegionFactory
         return mStatusFactory.calcStatus(region.chromosome(), normalRatio, tumorRatio, depthWindowCount);
     }
 
-    private boolean isGermlineAmpDelCandidate(
-            final PurpleSegment region, final GermlineStatus germlineStatus, double rawNormalRatio, double normalRatio)
+    private static boolean isGermlineAmpDelCandidate(
+            final PurpleSupportSegment region, final GermlineStatus germlineStatus, double rawNormalRatio, double normalRatio)
     {
-        if(germlineStatus != DIPLOID || normalRatio <= 0 || HumanChromosome.fromString(region.Chromosome).isAllosome())
+        if(germlineStatus != DIPLOID || normalRatio <= 0 || region.chr().isAllosome())
             return false;
 
         if(GERMLINE_AMP_DEL_EXCLUSIONS.stream()
@@ -275,7 +271,7 @@ public class ObservedRegionFactory
 
             if(candidateRangeMax - candidateRangeMin >= GERMLINE_DEL_MIN_LENGTH)
             {
-                PPL_LOGGER.info("germline event from region({}:{}-{}) normalRatio({}) range({}-{})",
+                PPL_LOGGER.trace("germline event from region({}:{}-{}) normalRatio({}) range({}-{})",
                         candidateRegion.chromosome(), candidateRegion.start(), candidateRegion.end(),
                         format("%.2f unnorm=%.2f", candidateRegion.observedNormalRatio(),
                                 candidateRegion.unnormalisedObservedNormalRatio()),
@@ -371,7 +367,8 @@ public class ObservedRegionFactory
 
         private final RatioAccumulator mReferenceAccumulator;
         private final RatioAccumulator mUnnormalisedReferenceAccumulator;
-        private final RatioAccumulator mTumorAccumulator;
+        private final RatioAccumulator mTumorGcRatioAccumulator;
+        private final RatioAccumulator mTumorGcContentAccumulator;
 
         public CobaltAccumulator(final int windowSize, final GenomeRegion region)
         {
@@ -380,7 +377,8 @@ public class ObservedRegionFactory
 
             mReferenceAccumulator = new RatioAccumulator();
             mUnnormalisedReferenceAccumulator = new RatioAccumulator();
-            mTumorAccumulator = new RatioAccumulator();
+            mTumorGcRatioAccumulator = new RatioAccumulator();
+            mTumorGcContentAccumulator = new RatioAccumulator();
         }
 
         double referenceMeanRatio()
@@ -393,10 +391,10 @@ public class ObservedRegionFactory
             return mUnnormalisedReferenceAccumulator.meanRatio();
         }
 
-        double tumorMeanRatio() { return mTumorAccumulator.meanRatio(); }
-        double tumorMedianRatio() { return mTumorAccumulator.medianRatio(); }
+        double tumorMedianRatio() { return mTumorGcRatioAccumulator.medianRatio(); }
+        double tumorMeanContent() { return mTumorGcContentAccumulator.meanRatio(); }
 
-        int tumorCount() { return mTumorAccumulator.count(); }
+        int tumorCount() { return mTumorGcRatioAccumulator.count(); }
 
         @Override
         public void accept(final CobaltRatio ratio)
@@ -408,7 +406,12 @@ public class ObservedRegionFactory
 
                 mReferenceAccumulator.add(ratio.referenceGCDiploidRatio());
                 mUnnormalisedReferenceAccumulator.add(ratio.referenceGCRatio());
-                mTumorAccumulator.add(ratio.tumorGCRatio(), true);
+                boolean includeRegionValue = mTumorGcRatioAccumulator.add(ratio.tumorGCRatio(), true);
+
+                if(includeRegionValue)
+                {
+                    mTumorGcContentAccumulator.add(ratio.tumorGcContent(), true);
+                }
             }
         }
     }
@@ -447,10 +450,10 @@ public class ObservedRegionFactory
             add(ratio, false);
         }
 
-        public void add(double ratio, boolean keepValues)
+        public boolean add(double ratio, boolean keepValues)
         {
             if(!Doubles.greaterThan(ratio, -1))
-                return;
+                return false;
 
             mCount++;
             mSumRatio += ratio;
@@ -469,6 +472,7 @@ public class ObservedRegionFactory
 
                 mRatios.add(index, ratio);
             }
+            return true;
         }
     }
 }

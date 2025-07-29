@@ -1,12 +1,14 @@
 package com.hartwig.hmftools.pave.annotation;
 
-import static com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL_OPTION;
+import static com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL;
 import static com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache.ENSEMBL_DATA_DIR;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.REF_GENOME;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.loadRefGenome;
+import static com.hartwig.hmftools.common.variant.PaveVcfTags.GNOMAD_FREQ;
+import static com.hartwig.hmftools.common.variant.pon.PonCache.PON_COUNT;
+import static com.hartwig.hmftools.common.variant.pon.PonCache.PON_FILE;
+import static com.hartwig.hmftools.common.variant.pon.PonCache.PON_FILTERS;
 import static com.hartwig.hmftools.pave.PaveConfig.PON_ARTEFACTS_FILE;
-import static com.hartwig.hmftools.pave.PaveConfig.PON_FILE;
-import static com.hartwig.hmftools.pave.PaveConfig.PON_FILTERS;
 import static com.hartwig.hmftools.pave.PaveConfig.PV_LOGGER;
 
 import java.util.List;
@@ -14,8 +16,9 @@ import java.util.concurrent.Callable;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
-import com.hartwig.hmftools.common.utils.TaskExecutor;
+import com.hartwig.hmftools.common.perf.TaskExecutor;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
+import com.hartwig.hmftools.common.variant.VcfFileReader;
 import com.hartwig.hmftools.pave.GeneDataCache;
 import com.hartwig.hmftools.pave.PaveConfig;
 
@@ -38,7 +41,7 @@ public class ReferenceData
     {
         GeneDataCache = new GeneDataCache(
                 configBuilder.getValue(ENSEMBL_DATA_DIR), config.RefGenVersion,
-                configBuilder.getValue(DRIVER_GENE_PANEL_OPTION));
+                configBuilder.getValue(DRIVER_GENE_PANEL));
 
         if(!GeneDataCache.loadCache(config.OnlyCanonical, false))
         {
@@ -50,10 +53,15 @@ public class ReferenceData
 
         Annotators = Lists.newArrayList();
 
-        Gnomad = new GnomadAnnotation(configBuilder);
+        // skip applying the PON and Gnomad annotations if already done by Sage
+        VcfFileReader vcfFileReader = new VcfFileReader(config.VcfFile, true);
+        boolean hasPonAnnotation = vcfFileReader.vcfHeader().hasInfoLine(PON_COUNT);
+        boolean hasGnomadAnnotation = vcfFileReader.vcfHeader().hasInfoLine(GNOMAD_FREQ);
+
+        Gnomad = new GnomadAnnotation(configBuilder, !hasGnomadAnnotation);
         Annotators.add(Gnomad);
 
-        StandardPon = new PonAnnotation(configBuilder.getValue(PON_FILE), true);
+        StandardPon = new PonAnnotation(!hasPonAnnotation ? configBuilder.getValue(PON_FILE) : null, true);
         StandardPon.loadFilters(configBuilder.getValue(PON_FILTERS));
         Annotators.add(StandardPon);
 
@@ -91,7 +99,7 @@ public class ReferenceData
 
     public void initialiseChromosomeData(final List<String> chromosomes, int threads)
     {
-        final List<Callable> callableList = Lists.newArrayList();
+        final List<Callable<Void>> callableList = Lists.newArrayList();
 
         for(AnnotationData annotationData : Annotators)
         {
@@ -100,7 +108,7 @@ public class ReferenceData
                 annotationData.registerInitialChromosomes(chromosomes);
 
                 if(annotationData instanceof Callable)
-                    callableList.add((Callable)annotationData);
+                    callableList.add((Callable<Void>) annotationData);
             }
         }
 

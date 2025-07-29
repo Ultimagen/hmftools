@@ -2,19 +2,21 @@ package com.hartwig.hmftools.common.test;
 
 import static java.lang.Math.abs;
 
-import static com.hartwig.hmftools.common.genome.chromosome.MitochondrialChromosome.MT_LENGTH;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.MATE_CIGAR_ATTRIBUTE;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_CHROMOSOME_INDEX;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_CHROMOSOME_NAME;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_POSITION;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.SUPPLEMENTARY_ATTRIBUTE;
+import static com.hartwig.hmftools.common.genome.chromosome.MitochondrialChromosome.MT_LENGTH;
 
+import com.hartwig.hmftools.common.bam.SupplementaryReadData;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.genome.chromosome.MitochondrialChromosome;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeCoordinates;
-import com.hartwig.hmftools.common.bam.SupplementaryReadData;
 
+import htsjdk.samtools.SAMFileHeader;
 import htsjdk.samtools.SAMFlag;
+import htsjdk.samtools.SAMLineParser;
 import htsjdk.samtools.SAMRecord;
 import htsjdk.samtools.SAMRecordSetBuilder;
 import htsjdk.samtools.SAMSequenceDictionary;
@@ -24,6 +26,9 @@ public final class SamRecordTestUtils
 {
     public static final int DEFAULT_BASE_QUAL = 37;
     public static final int DEFAULT_MAP_QUAL = 60;
+    public static final String TEST_READ_BASES = MockRefGenome.generateRandomBases(100);
+    public static final String TEST_READ_ID = "READ_01";
+    public static final String TEST_READ_CIGAR = "100M";
 
     public static SAMSequenceDictionary SAM_DICTIONARY_V37;
 
@@ -39,32 +44,6 @@ public final class SamRecordTestUtils
         }
 
         SAM_DICTIONARY_V37.addSequence(new SAMSequenceRecord(MitochondrialChromosome.MT.toString(), MT_LENGTH));
-    }
-
-    public static SAMRecord createSamRecord(
-            final String readId, final String chrStr, int readStart, final String readBases, final String cigar, final String mateChr,
-            int mateStart, boolean isReversed, boolean isSupplementary, final SupplementaryReadData suppAlignment,
-            boolean mateReversed, final String mateCigar)
-    {
-        SAMRecord record = createSamRecord(readId, chrStr, readStart, readBases, cigar, mateChr, mateStart, isReversed, isSupplementary, suppAlignment);
-
-        if(mateReversed)
-            record.setMateNegativeStrandFlag(true);
-
-        if(mateCigar != null)
-            record.setAttribute(MATE_CIGAR_ATTRIBUTE, mateCigar);
-
-        return record;
-    }
-
-    public static SAMRecord createSamRecordUnpaired(
-            final String readId, final String chrStr, int readStart, final String readBases, final String cigar, boolean isReversed,
-            boolean isSupplementary, final SupplementaryReadData suppAlignment)
-    {
-        SAMRecord record = createSamRecord(
-                readId, chrStr, readStart, readBases, cigar, NO_CHROMOSOME_NAME, NO_POSITION, isReversed, isSupplementary, suppAlignment);
-        record.setReadPairedFlag(false);
-        return record;
     }
 
     public static SAMRecord cloneSamRecord(final SAMRecord record, final String newReadId)
@@ -98,11 +77,6 @@ public final class SamRecordTestUtils
         record.setReadBases(readBases.getBytes());
 
         byte[] qualities = buildDefaultBaseQuals(readBases.length());
-
-        for(int i = 0; i < readBases.length(); ++i)
-        {
-            qualities[i] = DEFAULT_BASE_QUAL;
-        }
 
         record.setBaseQualities(qualities);
         record.setReferenceName(chrStr);
@@ -144,6 +118,50 @@ public final class SamRecordTestUtils
         return record;
     }
 
+    public static SAMRecord createSamRecord(
+            final String readId, final String chrStr, int readStart, final String readBases, final String cigar, final String mateChr,
+            int mateStart, boolean isReversed, boolean isSupplementary, final SupplementaryReadData suppAlignment,
+            boolean mateReversed, final String mateCigar)
+    {
+        SAMRecord record = createSamRecord(
+                readId, chrStr, readStart, readBases, cigar, mateChr, mateStart, isReversed, isSupplementary, suppAlignment);
+
+        if(mateReversed)
+            record.setMateNegativeStrandFlag(true);
+
+        if(mateCigar != null)
+            record.setAttribute(MATE_CIGAR_ATTRIBUTE, mateCigar);
+
+        return record;
+    }
+
+    public static SAMRecord createSamRecordUnpaired(
+            final String readId, final String chrStr, int readStart, final String readBases, final String cigar, boolean isReversed,
+            boolean isSupplementary, final SupplementaryReadData suppAlignment)
+    {
+        SAMRecord record = createSamRecord(
+                readId, chrStr, readStart, readBases, cigar, NO_CHROMOSOME_NAME, NO_POSITION, isReversed, isSupplementary, suppAlignment);
+        record.setReadPairedFlag(false);
+        return record;
+    }
+
+    public static void flipFirstInPair(final SAMRecord record)
+    {
+        if(record.getReadPairedFlag())
+        {
+            if(record.getFirstOfPairFlag())
+            {
+                record.setFirstOfPairFlag(false);
+                record.setSecondOfPairFlag(true);
+            }
+            else
+            {
+                record.setFirstOfPairFlag(true);
+                record.setSecondOfPairFlag(false);
+            }
+        }
+    }
+
     public static int chromosomeOrdinal(final String chromosome)
     {
         if(HumanChromosome.contains(chromosome))
@@ -173,5 +191,19 @@ public final class SamRecordTestUtils
     {
         flags |= flag.intValue();
         return flags;
+    }
+
+    public static SAMRecord parseSamString(final String samString, final SAMSequenceDictionary sequenceDictionary)
+    {
+        SAMRecordSetBuilder recordBuilder = new SAMRecordSetBuilder();
+        SAMFileHeader samHeader = recordBuilder.getHeader();
+        samHeader.setSequenceDictionary(sequenceDictionary);
+        SAMLineParser samLineParser = new SAMLineParser(samHeader);
+        return samLineParser.parseLine(samString);
+    }
+
+    public static SAMRecord parseSamString(final String samString)
+    {
+        return parseSamString(samString, SAM_DICTIONARY_V37);
     }
 }

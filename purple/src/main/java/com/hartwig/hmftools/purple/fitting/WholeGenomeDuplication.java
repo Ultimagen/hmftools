@@ -6,7 +6,7 @@ import com.google.common.collect.ListMultimap;
 import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.purple.PurpleCopyNumber;
 import com.hartwig.hmftools.common.utils.Doubles;
-import com.hartwig.hmftools.common.utils.collection.Multimaps;
+import com.hartwig.hmftools.common.utils.Multimaps;
 
 import org.jetbrains.annotations.NotNull;
 

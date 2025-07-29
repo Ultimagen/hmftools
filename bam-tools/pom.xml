@@ -35,10 +35,20 @@
             <artifactId>guice</artifactId>
             <version>7.0.0</version>
         </dependency>
+        <dependency>
+            <groupId>org.broadinstitute</groupId>
+            <artifactId>gatk-bwamem-jni</artifactId>
+            <version>1.0.5</version>
+        </dependency>
 
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -48,7 +58,6 @@
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
-
     </dependencies>
 
     <build>
@@ -62,37 +71,15 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-assembly-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>single</goal>
-                        </goals>
-                    </execution>
-                </executions>
                 <configuration>
                     <archive>
                         <manifest>
                             <addClasspath>true</addClasspath>
-                            <mainClass>com.hartwig.hmftools.bamtools.metrics.BamMetrics
-                            </mainClass>
+                            <mainClass>com.hartwig.hmftools.bamtools.metrics.BamMetrics</mainClass>
                             <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
                             <addDefaultSpecificationEntries>true</addDefaultSpecificationEntries>
                         </manifest>
                     </archive>
-
-                    <descriptorRefs>
-                        <descriptorRef>jar-with-dependencies</descriptorRef>
-                    </descriptorRefs>
-                </configuration>
-            </plugin>
-
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <source>${maven.compiler.source}</source>
-                    <target>${maven.compiler.target}</target>
                 </configuration>
             </plugin>
         </plugins>

@@ -1,7 +1,6 @@
 package com.hartwig.hmftools.esvee.assembly.output;
 
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
-import static com.hartwig.hmftools.common.utils.file.FileDelimiters.VCF_ZIP_EXTENSION;
 import static com.hartwig.hmftools.esvee.common.FileCommon.RAW_VCF_SUFFIX;
 
 import java.util.Arrays;
@@ -12,13 +11,13 @@ import com.google.common.collect.Lists;
 public enum WriteType
 {
     ASSEMBLY_BAM("assembly.bam"),
-    JUNC_ASSEMBLY("assemblies.tsv"),
+    JUNC_ASSEMBLY("assembly.tsv"),
     ASSEMBLY_READ("assembly_read.tsv"),
     BREAKEND("breakend.tsv"),
     VCF(RAW_VCF_SUFFIX),
+    PHASED_ASSEMBLY("phased_assembly.tsv"),
     ALIGNMENT("alignment.tsv"),
-    ALIGNMENT_DATA("align_detailed.tsv"),
-    DECOY_MATCHES("decoy_matches.tsv"),
+    DECOY_MATCHES("decoy_match.tsv"),
     PHASE_GROUP_BUILDING("phase_group_building.tsv");
 
     private final String mFileId;
@@ -30,36 +29,34 @@ public enum WriteType
 
     public String fileId() { return mFileId; }
 
-    private static final String ALL = "ALL";
-    private static final String ASSEMBLIES_STR = "ASSEMBLIES"; // for backwards compatibility
+    private static final String ALL = "ASSEMBLY_ALL";
+    private static final String STANDARD_TYPES = "ASSEMBLY_STANDARD";
 
-    public static List<WriteType> fromConfig(final String configStr)
+    public static List<WriteType> parseConfigStr(final String configStr)
     {
+        if(configStr == null || configStr.isEmpty() || configStr.contains(STANDARD_TYPES))
+            return List.of(VCF, BREAKEND, JUNC_ASSEMBLY);
+
         List<WriteType> writeTypes = Lists.newArrayList();
 
-        if(configStr != null)
+        if(configStr.equals(ALL))
         {
-            if(configStr.equals(WriteType.ALL))
-            {
-                Arrays.stream(WriteType.values()).filter(x -> x != ASSEMBLY_READ).forEach(x -> writeTypes.add(x));
-            }
-            else
-            {
-                String[] writeTypeValues = configStr.split(ITEM_DELIM, -1);
-
-                for(String writeType : writeTypeValues)
-                {
-                    if(writeType.equals(ASSEMBLIES_STR))
-                        writeTypes.add(JUNC_ASSEMBLY);
-                    else
-                        writeTypes.add(WriteType.valueOf(writeType));
-                }
-            }
+            Arrays.stream(WriteType.values()).forEach(x -> writeTypes.add(x));
         }
         else
         {
-            writeTypes.add(VCF);
-            // writeTypes.add(ASSEMBLY_BAM);
+            String[] writeTypesArray = configStr.split(ITEM_DELIM, -1);
+
+            for(String writeTypeStr : writeTypesArray)
+            {
+                try
+                {
+                    writeTypes.add(WriteType.valueOf(writeTypeStr));
+                }
+                catch(Exception e)
+                {
+                } // invalid or may be a prep write type
+            }
         }
 
         return writeTypes;

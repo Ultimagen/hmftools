@@ -1,16 +1,20 @@
 package com.hartwig.hmftools.esvee.caller;
 
 import static com.hartwig.hmftools.common.sv.LineElements.isMobileLineElement;
-import static com.hartwig.hmftools.common.sv.SvVcfTags.ASSEMBLY_LINKS;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.ALLELE_FRACTION;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.ASM_LINKS;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.CIPOS;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.IHOMPOS;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.LINE_SITE;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH_PAIR;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SEG_REPEAT_LENGTH;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.TOTAL_FRAGS;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.UNIQUE_FRAG_POSITIONS;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.getGenotypeAttributeAsDouble;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.getGenotypeAttributeAsInt;
 import static com.hartwig.hmftools.common.sv.VariantAltInsertCoords.fromRefAlt;
 
-import java.util.Collections;
 import java.util.List;
 
 import com.hartwig.hmftools.common.genome.region.Orientation;
@@ -30,19 +34,16 @@ public class Breakend
     public final Orientation Orient;
     public final boolean IsStart; // the start breakend in an SV, or true if a SGL
 
-    public final Genotype RefGenotype;
-    public final Genotype TumorGenotype;
-
     public final String InsertSequence;
-
     public final Interval ConfidenceInterval;
     public final Interval InexactHomology;
     public final boolean IsLineInsertion;
 
     private final Variant mVariant;
-    private final List<String> mLinkedAssemblyIds;
-    public double mAllelicFrequency;
-    private int mChrLocationIndex;
+    private final Genotype mRefGenotype;
+    private final Genotype mTumorGenotype;
+
+    private Breakend mLineSiteBreakend;
 
     public Breakend(
             final Variant variant, final boolean isStart, final VariantContext context, final String chromosome, final int position,
@@ -56,13 +57,13 @@ public class Breakend
         Orient = orientation;
         IsStart = isStart;
 
-        RefGenotype = refGenotype;
-        TumorGenotype = tumorGenotype;
+        mRefGenotype = refGenotype;
+        mTumorGenotype = tumorGenotype;
 
         ConfidenceInterval = Interval.fromCiposTag(context.getAttributeAsIntList(CIPOS, 0));
 
         String ref = context.getAlleles().get(0).getDisplayString();
-        final VariantAltInsertCoords altInsertCoords = fromRefAlt(context.getAlleles().get(1).getDisplayString(), ref);
+        VariantAltInsertCoords altInsertCoords = fromRefAlt(context.getAlleles().get(1).getDisplayString(), ref);
         InsertSequence = altInsertCoords.InsertSequence;
 
         IsLineInsertion = isMobileLineElement(orientation.asByte(), InsertSequence);
@@ -77,19 +78,14 @@ public class Breakend
             InexactHomology = new Interval();
         }
 
-        if(context.hasAttribute(ASSEMBLY_LINKS))
-            mLinkedAssemblyIds = context.getAttributeAsStringList(ASSEMBLY_LINKS, "");
-        else
-            mLinkedAssemblyIds = Collections.emptyList();
-
-        mChrLocationIndex = -1;
+        mLineSiteBreakend = null;
     }
 
     public static Breakend from(
             final Variant variant, final boolean isStart, final StructuralVariantLeg svLeg,
             final VariantContext variantContext, final int referenceOrdinal, final int tumorOrdinal)
     {
-        final Genotype tumorGenotype = variantContext.getGenotype(tumorOrdinal);
+        final Genotype tumorGenotype = tumorOrdinal >= 0 ? variantContext.getGenotype(tumorOrdinal) : null;
         final Genotype refGenotype = referenceOrdinal >= 0 ? variantContext.getGenotype(referenceOrdinal) : null;
 
         return new Breakend(
@@ -107,11 +103,19 @@ public class Breakend
         return IsStart ? mVariant.breakendEnd() : mVariant.breakendStart();
     }
 
-    public boolean isEnd() { return !mVariant.isSgl() && mVariant.breakendEnd() == this;}
+    public boolean isStart() { return IsStart;}
+    public boolean isEnd() { return !IsStart;}
+
+    public double calcAllelicFrequency()
+    {
+        return mTumorGenotype != null ? calcAllelicFrequency(mTumorGenotype) : calcAllelicFrequency(mRefGenotype);
+    }
 
     public double calcAllelicFrequency(final Genotype genotype)
     {
-        // TODO: just use AF (tag: ALLELE_FRACTION) if present??
+        // set in the depth annotator, which has the same logic as here - so can remove this in future
+        if(genotype.hasExtendedAttribute(ALLELE_FRACTION))
+            return getGenotypeAttributeAsDouble(genotype, ALLELE_FRACTION, 0);
 
         int readPairSupport = (mVariant.isSgl() || !mVariant.isShortLocal()) ? getGenotypeAttributeAsInt(genotype, REF_DEPTH_PAIR, 0) : 0;
         int refSupport = getGenotypeAttributeAsInt(genotype, REF_DEPTH, 0);
@@ -124,20 +128,26 @@ public class Breakend
 
     public int fragmentCount(final Genotype genotype)
     {
-        return getGenotypeAttributeAsInt(genotype, TOTAL_FRAGS, 0);
+        return genotype != null ? getGenotypeAttributeAsInt(genotype, TOTAL_FRAGS, 0) : 0;
     }
+
+    public int fragmentCount() { return fragmentCount(mTumorGenotype) + fragmentCount(mRefGenotype); }
 
     // convenience
     public boolean isSgl() { return mVariant.isSgl(); }
     public StructuralVariantType type() { return mVariant.type(); }
 
-    public int minPosition() { return Position + ConfidenceInterval.Start; }
-    public int maxPosition() { return Position + ConfidenceInterval.End; }
+    public boolean isLine() { return IsLineInsertion || Context.hasAttribute(LINE_SITE); }
+    public void setLineSiteBreakend(final Breakend breakend) { mLineSiteBreakend = breakend; }
+    public Breakend lineSiteBreakend() { return mLineSiteBreakend; }
 
-    public List<String> getAssemblies() { return mLinkedAssemblyIds; }
+    public boolean inChainedAssembly() { return Context.hasAttribute(ASM_LINKS); }
 
-    public void setChrLocationIndex(int index) { mChrLocationIndex = index; }
-    public int chrLocationIndex() { return mChrLocationIndex; }
+    public int anchorLength()
+    {
+        return Context.getAttributeAsInt(SEG_REPEAT_LENGTH, 0);
+    }
+    public int uniqueFragmentPositions() { return Context.getAttributeAsInt(UNIQUE_FRAG_POSITIONS, 0); }
 
     public String toString()
     {

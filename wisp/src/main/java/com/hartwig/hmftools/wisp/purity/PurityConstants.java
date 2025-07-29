@@ -3,12 +3,16 @@ package com.hartwig.hmftools.wisp.purity;
 import java.util.List;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.qual.BaseQualAdjustment;
 
 public class PurityConstants
 {
     public static final double MAX_SUBCLONAL_LIKELIHOOD = 0.5;
     public static final double SUBCLONAL_VCN_THRESHOLD = 0.7;
     public static final double MAX_REPEAT_COUNT = 3;
+    public static final double MIN_AVG_EDGE_DISTANCE = 9;
+    public static final double MAX_GERMLINE_AF = 0.01;
+    public static final int HIGH_GERMLINE_QUAL_THRESHOLD = 30;
 
     public static final int MIN_QUAL_PER_AD = 18;
 
@@ -49,18 +53,26 @@ public class PurityConstants
     public static final double DROPOUT_RATE_INCREMENT = 0.1;
 
     public static final List<Integer> SNV_QUAL_THRESHOLDS = Lists.newArrayList(0, 38, 42, 45);
-    public static final int DEFAULT_BQR_MIN_QUAL = 36;
+    public static final int DEFAULT_BQR_MIN_QUAL = 30;
     public static final double BQR_MIN_ERROR_RATE = 1e-5;
+    public static final double INDEL_ERROR_RATE = BaseQualAdjustment.phredQualToProbability((byte)45);
 
     public static final double SYNTHETIC_TUMOR_VAF = 0.5;
 
-    public static final int CHIP_MIN_ALLELE_FRAGS = 5;
-    public static final double CHIP_MIN_SAMPLE_PERC = 0.33;
+    public static final int OUTLIER_MIN_ALLELE_FRAGS = 3;
+    public static final double OUTLIER_MIN_SAMPLE_PERC = 0.15;
+    public static final int OUTLIER_MIN_AVG_VAF_MULTIPLE = 8;
+    public static final double OUTLIER_MIN_SAMPLE_RETEST_PERC = 0.3;
 
     public static final double AMBER_LOH_MINOR_ALLELE_THRESHOLD = 0.2;
     public static final double AMBER_LOH_CN_THRESHOLD = 0.8;
     public static final double AMBER_LOH_MIN_TUMOR_BAF = 0.55;
     public static final double AMBER_LOH_MIN_AF = 0.55;
+    public static final double AMBER_LOH_PEAK_PURITY_FACTOR = 1.5;
+    public static final double AMBER_LOH_PEAK_PURITY_MIN = 0.03;
+    public static final double AMBER_LOH_PEAK_PROBABILITY = 0.001;
+    public static final double AMBER_LOH_PEAK_SITE_PERC = 0.05;
+    public static final int AMBER_LOH_PEAK_SITE_MIN_COUNT = 2000;
 
     public static final String PURPLE_APPENDED_SOMATIC_VCF_ID = ".purple.somatic.ctdna.";
 }

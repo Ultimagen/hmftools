@@ -5,8 +5,8 @@ import static java.lang.String.format;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.READ_ID_TRIMMER;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.READ_ID_TRIMMER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 
 import static htsjdk.samtools.SAMFlag.FIRST_OF_PAIR;
 import static htsjdk.samtools.SAMFlag.MATE_REVERSE_STRAND;
@@ -16,11 +16,14 @@ import static htsjdk.samtools.SAMFlag.READ_UNMAPPED;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.util.List;
 import java.util.StringJoiner;
 
-import com.hartwig.hmftools.esvee.AssemblyConfig;
+import com.google.common.collect.Lists;
+import com.hartwig.hmftools.esvee.assembly.AssemblyConfig;
 import com.hartwig.hmftools.esvee.assembly.types.SupportRead;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
+import com.hartwig.hmftools.esvee.assembly.types.SupportType;
 
 public class AssemblyReadWriter
 {
@@ -72,13 +75,16 @@ public class AssemblyReadWriter
             sj.add("SuppData");
 
             sj.add("InferredFragLength");
-            sj.add("ReadJunctionIndex");
-            sj.add("JunctionAssemblyIndex");
-            sj.add("LinkedAssemblyIndex");
+            sj.add("JunctionReadStartDistance");
+            sj.add("AlignmentIndex");
+            sj.add("AlignmentOrientation");
+            sj.add("BreakendSupport");
 
             sj.add("Matches");
-            sj.add("Mismatches");
+            sj.add("ExtMismatches");
+            sj.add("RefMismatches");
             sj.add("TrimCount");
+            sj.add("LineTail");
 
             writer.write(sj.toString());
             writer.newLine();
@@ -101,14 +107,30 @@ public class AssemblyReadWriter
         {
             String assemblyInfo = format("%s", assembly.junction().coords());
 
-            for(SupportRead support : assembly.support())
+            List<SupportRead> supportReads;
+
+            if(AssemblyConfig.WriteCandidateReads)
+            {
+                supportReads = Lists.newArrayList(assembly.support());
+                assembly.candidateSupport().forEach(x -> supportReads.add(
+                        new SupportRead(x, SupportType.DISCORDANT, 0, -1, -1)));
+
+                assembly.unmappedReads().forEach(x -> supportReads.add(
+                        new SupportRead(x, SupportType.DISCORDANT, 0, -1, -1)));
+            }
+            else
+            {
+                supportReads = assembly.support();
+            }
+
+            for(SupportRead support : supportReads)
             {
                 StringJoiner sj = new StringJoiner(TSV_DELIM);
 
                 sj.add(String.valueOf(assembly.id()));
                 sj.add(assemblyInfo);
 
-                sj.add(support.fullReadId());
+                sj.add(READ_ID_TRIMMER.restore(support.id()));
                 sj.add(support.type().toString());
                 sj.add(String.valueOf(support.isReference()));
                 sj.add(support.chromosome());
@@ -142,13 +164,17 @@ public class AssemblyReadWriter
                 }
 
                 sj.add(String.valueOf(support.inferredFragmentLength()));
-                sj.add(String.valueOf(support.junctionReadIndex()));
-                sj.add(String.valueOf(support.junctionAssemblyIndex()));
-                sj.add(String.valueOf(support.linkedAssemblyIndex()));
+                sj.add(String.valueOf(support.junctionReadStartDistance()));
+                sj.add(String.valueOf(support.fullAssemblyIndexStart()));
+                sj.add(String.valueOf(support.fullAssemblyOrientation() != null ? support.fullAssemblyOrientation().asByte() : 0));
 
-                sj.add(String.valueOf(support.junctionMatches()));
-                sj.add(String.valueOf(support.mismatchCount()));
+                sj.add(support.breakendSupportType() != null ? support.breakendSupportType().toString() : "NONE");
+
+                sj.add(String.valueOf(support.extensionBaseMatches()));
+                sj.add(String.valueOf(support.extensionBaseMismatches()));
+                sj.add(String.valueOf(support.referenceMismatches()));
                 sj.add(String.valueOf(support.trimCount()));
+                sj.add(String.valueOf(support.hasLineTail()));
 
                 mWriter.write(sj.toString());
                 mWriter.newLine();

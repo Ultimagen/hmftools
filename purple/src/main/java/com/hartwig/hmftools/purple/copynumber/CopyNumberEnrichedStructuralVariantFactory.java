@@ -8,10 +8,10 @@ import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.purple.fitting.PurityAdjuster;
 import com.hartwig.hmftools.common.purple.PurpleCopyNumber;
 import com.hartwig.hmftools.purple.copynumber.sv.StructuralVariantLegCopyNumber;
-import com.hartwig.hmftools.purple.copynumber.sv.StructuralVariantLegCopyNumberChangeFactory;
-import com.hartwig.hmftools.purple.copynumber.sv.StructuralVariantLegCopyNumberFactory;
+import com.hartwig.hmftools.purple.copynumber.sv.SvLegCopyNumberChangeFactory;
+import com.hartwig.hmftools.purple.copynumber.sv.SvLegCopyNumberFactory;
 import com.hartwig.hmftools.purple.copynumber.sv.StructuralVariantLegPloidy;
-import com.hartwig.hmftools.purple.copynumber.sv.StructuralVariantLegPloidyFactory;
+import com.hartwig.hmftools.purple.copynumber.sv.SvLegPloidyFactory;
 import com.hartwig.hmftools.common.sv.EnrichedStructuralVariant;
 import com.hartwig.hmftools.common.sv.ImmutableEnrichedStructuralVariant;
 import com.hartwig.hmftools.common.sv.ImmutableEnrichedStructuralVariantLeg;
@@ -35,16 +35,17 @@ public final class CopyNumberEnrichedStructuralVariantFactory
 
     public List<EnrichedStructuralVariant> enrich(final List<StructuralVariant> variants)
     {
-        final StructuralVariantLegCopyNumberChangeFactory changeFactory = new StructuralVariantLegCopyNumberChangeFactory(
+        SvLegCopyNumberChangeFactory changeFactory = new SvLegCopyNumberChangeFactory(
                 mPurityAdjuster, mCopyNumbers, variants);
 
-        final StructuralVariantLegPloidyFactory<PurpleCopyNumber> ploidyFactory = new StructuralVariantLegPloidyFactory<>(
+        SvLegPloidyFactory<PurpleCopyNumber> ploidyFactory = new SvLegPloidyFactory<>(
                 mPurityAdjuster, PurpleCopyNumber::averageTumorCopyNumber);
 
-        final StructuralVariantLegCopyNumberFactory<PurpleCopyNumber> copyNumberFactory = new StructuralVariantLegCopyNumberFactory<>(
+        SvLegCopyNumberFactory<PurpleCopyNumber> copyNumberFactory = new SvLegCopyNumberFactory<>(
                 PurpleCopyNumber::averageTumorCopyNumber);
 
-        final List<EnrichedStructuralVariant> result = Lists.newArrayList();
+        List<EnrichedStructuralVariant> result = Lists.newArrayList();
+
         for(final StructuralVariant variant : variants)
         {
             ImmutableEnrichedStructuralVariant.Builder builder = ImmutableEnrichedStructuralVariant.builder().from(variant);

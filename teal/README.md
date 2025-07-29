@@ -8,7 +8,7 @@ If a tumor-normal pair is provided, TEAL will also call somatic telomeric rearra
 
 To install, download the latest compiled jar file from the [download links](#version-history-and-download-links).
 
-TEAL requires Java 11+ to be installed.
+TEAL requires Java 17+ to be installed.
 
 ## Using TEAL with HMF pipeline
 We can run TEAL using output files from HMF pipeline tools.
@@ -18,24 +18,25 @@ We can run TEAL using output files from HMF pipeline tools.
 This is the default mode.
 Arguments:
 
-| Argument              | Description                                                                                |
-|-----------------------|--------------------------------------------------------------------------------------------|
-| reference             | Name of the reference sample                                                               |
-| reference_bam         | Path to indexed reference BAM or CRAM file                                                 |
-| tumor                 | Name of the tumor sample                                                                   |
-| tumor_bam             | Path to indexed tumor BAM or CRAM file                                                     |
-| output_dir            | Path to the output directory. This directory will be created if it does not already exist. |
-| purple                | Path to PURPLE output. This should correspond to the output_dir used in PURPLE             |
-| cobalt                | Path to COBALT output. This should correspond to the output_dir used in COBALT             |
-| reference_wgs_metrics | Path to the metrics file of the reference BAM file                                         |
-| tumor_wgs_metrics     | Path to the metrics file of the tumor BAM file                                             |
-| threads (default = 1) | Number of threads to use                                                                   |
-| ref_genome (optional) | Path to the reference genome fasta file. Required only when using CRAM files.              |
+| Argument                         | Description                                                                                |
+|----------------------------------|--------------------------------------------------------------------------------------------|
+| reference                        | Name of the reference sample                                                               |
+| reference_bam                    | Path to indexed reference BAM or CRAM file                                                 |
+| tumor                            | Name of the tumor sample                                                                   |
+| tumor_bam                        | Path to indexed tumor BAM or CRAM file                                                     |
+| output_dir                       | Path to the output directory. This directory will be created if it does not already exist. |
+| purple                           | Path to PURPLE output. This should correspond to the output_dir used in PURPLE             |
+| cobalt                           | Path to COBALT output. This should correspond to the output_dir used in COBALT             |
+| reference_wgs_metrics            | Path to the metrics file of the reference BAM file                                         |
+| tumor_wgs_metrics                | Path to the metrics file of the tumor BAM file                                             |
+| threads (default = 1)            | Number of threads to use                                                                   |
+| ref_genome (optional)            | Path to the reference genome fasta file. Required only when using CRAM files.              |
+| ref_genome_version (default V37) | Reference genome version (V37 or V38)                                                      |
 
 Example Usage:
 
 ```
-java -Xmx16G -cp teal.jar com.hartwig.hmftools.teal.TealApplication \
+java -Xmx16G -cp teal.jar com.hartwig.hmftools.teal.TealPipelineApp \
    -reference COLO829R -reference_bam COLO829R.bam \
    -tumor COLO829T -tumor_bam COLO829T.bam \
    -purple /path/to/COLO829/purple \
@@ -48,20 +49,21 @@ java -Xmx16G -cp teal.jar com.hartwig.hmftools.teal.TealApplication \
 
 ### Germline only mode with HMF pipeline files
 
-| Argument              | Description                                                                                |
-|-----------------------|--------------------------------------------------------------------------------------------|
-| reference             | Name of the reference sample                                                               |
-| reference_bam         | Path to indexed reference BAM or CRAM file                                                 |
-| output_dir            | Path to the output directory. This directory will be created if it does not already exist. |
-| cobalt                | Path to COBALT output. This should correspond to the output_dir used in COBALT             |
-| reference_wgs_metrics | Path to the metrics file of the reference BAM file                                         |
-| threads (default = 1) | Number of threads to use                                                                   |
-| ref_genome (optional) | Path to the reference genome fasta file. Required only when using CRAM files.              |
+| Argument                         | Description                                                                                |
+|----------------------------------|--------------------------------------------------------------------------------------------|
+| reference                        | Name of the reference sample                                                               |
+| reference_bam                    | Path to indexed reference BAM or CRAM file                                                 |
+| output_dir                       | Path to the output directory. This directory will be created if it does not already exist. |
+| cobalt                           | Path to COBALT output. This should correspond to the output_dir used in COBALT             |
+| reference_wgs_metrics            | Path to the metrics file of the reference BAM file                                         |
+| threads (default = 1)            | Number of threads to use                                                                   |
+| ref_genome (optional)            | Path to the reference genome fasta file. Required only when using CRAM files.              |
+| ref_genome_version (default V37) | Reference genome version (V37 or V38)                                                      |
 
 Example Usage:
 
 ```
-java -Xmx16G -cp teal.jar com.hartwig.hmftools.teal.TealApplication \
+java -Xmx16G -cp teal.jar com.hartwig.hmftools.teal.TealPipelineApp \
    -reference COLO829R -reference_bam COLO829R.bam \
    -cobalt /path/to/COLO829/cobalt \
    -reference_wgs_metrics /path/to/COLO829/bam_metrics/COLO829R_WGSMetrics.txt \
@@ -92,6 +94,8 @@ other pipeline tools will need to be explicited provided.
 | tumor_gc50_read_depth          | tumor_mean_read_depth     | GC 50 read depth. Defaults to mean read depth if not provided                              |
 | threads                        | 1                         | Number of threads to use                                                                   |
 | ref_genome                     |                           | Path to the reference genome fasta file. Required only when using CRAM files.              |
+| ref_genome (optional)          |                           | Path to the reference genome fasta file. Required only when using CRAM files.              |
+| ref_genome_version             | V37                       | Reference genome version (V37 or V38)                                                      |
 
 Example Usage:
 ```
@@ -112,16 +116,17 @@ java -Xmx16G -cp teal.jar com.hartwig.hmftools.teal.TealApplication \
 
 ### Running germline only mode standalone
 
-| Argument                       | Default                     | Description                                                                                |
-|--------------------------------|-----------------------------|--------------------------------------------------------------------------------------------|
-| reference                      |                             | Name of the reference sample                                                               |
-| reference_bam                  |                             | Path to indexed reference BAM or CRAM file                                                 |
-| output_dir                     |                             | Path to the output directory. This directory will be created if it does not already exist. |
-| reference_duplicate_proportion | 0                           | Proportion of reads that are marked duplicates in the reference sample BAM                 |
-| reference_mean_read_depth      |                             | Mean read depth of the reference sample                                                    |
-| reference_gc50_read_depth      | reference_mean_read_depth   | GC 50 read depth of the reference sample. Defaults to mean read depth if not provided    |
-| threads                        | 1                           | Number of threads to use                                                                   |
-| ref_genome                     |                             | Path to the reference genome fasta file. Required only when using CRAM files.              |
+| Argument                       | Default                   | Description                                                                                |
+|--------------------------------|---------------------------|--------------------------------------------------------------------------------------------|
+| reference                      |                           | Name of the reference sample                                                               |
+| reference_bam                  |                           | Path to indexed reference BAM or CRAM file                                                 |
+| output_dir                     |                           | Path to the output directory. This directory will be created if it does not already exist. |
+| reference_duplicate_proportion | 0                         | Proportion of reads that are marked duplicates in the reference sample BAM                 |
+| reference_mean_read_depth      |                           | Mean read depth of the reference sample                                                    |
+| reference_gc50_read_depth      | reference_mean_read_depth | GC 50 read depth of the reference sample. Defaults to mean read depth if not provided      |
+| threads                        | 1                         | Number of threads to use                                                                   |
+| ref_genome                     |                           | Path to the reference genome fasta file. Required only when using CRAM files.              |
+| ref_genome_version             | V37                       | Reference genome version (V37 or V38)                                                      |
 
 Example Usage:
 
@@ -301,6 +306,15 @@ details the estimated  telomeric length and content and finally a file which pre
 * TEAL could aslo count relative amount T-Type, C-Type, G-Type and J-Type content per sample (relevant for ALT pathway identification)
 
 # Version History and Download Links
+- [1.3.4](https://github.com/hartwigmedical/hmftools/releases/tag/teal-v1.3.4)
+  - Fix loading of excluded bed regions.
+- [1.3.3](https://github.com/hartwigmedical/hmftools/releases/tag/teal-v1.3.3)
+  - Fix division by 0
+- [1.3.2](https://github.com/hartwigmedical/hmftools/releases/tag/teal-v1.3.2)
+  - Use the new bam metrics format
+- [1.3.1](https://github.com/hartwigmedical/hmftools/releases/tag/teal-v1.3.1)
+  - Always use lenient BAM validation
+  - Change the pipeline mode calling to allow separating bam processing and telomere calculation stages.
 - [1.3.0](https://github.com/hartwigmedical/hmftools/releases/tag/teal-v1.3.0)
   - Ignore consensus reads
 - [1.2.2](https://github.com/hartwigmedical/hmftools/releases/tag/teal-v1.2.2)

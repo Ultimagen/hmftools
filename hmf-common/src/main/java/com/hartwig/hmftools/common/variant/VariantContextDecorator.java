@@ -3,6 +3,7 @@ package com.hartwig.hmftools.common.variant;
 import static com.hartwig.hmftools.common.variant.AllelicDepth.NO_DEPTH;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_AF;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_BIALLELIC_FLAG;
+import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_BIALLELIC_PROB;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_CN;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_MINOR_ALLELE_CN_INFO;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_VARIANT_CN;
@@ -19,7 +20,7 @@ import java.util.Set;
 import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
-import com.hartwig.hmftools.common.drivercatalog.DriverImpact;
+import com.hartwig.hmftools.common.driver.DriverImpact;
 import com.hartwig.hmftools.common.genome.position.GenomePosition;
 import com.hartwig.hmftools.common.genotype.GenotypeStatus;
 import com.hartwig.hmftools.common.pathogenic.PathogenicSummary;
@@ -118,6 +119,7 @@ public class VariantContextDecorator implements GenomePosition
     }
 
     @Override
+    @NotNull
     public String chromosome()
     {
         return mContext.getContig();
@@ -179,6 +181,11 @@ public class VariantContextDecorator implements GenomePosition
         return mContext.getAttributeAsBoolean(PURPLE_BIALLELIC_FLAG, false);
     }
 
+    public double biallelicProbability()
+    {
+        return mContext.getAttributeAsDouble(PURPLE_BIALLELIC_PROB, biallelic() ? 1 : 0);
+    }
+
     public double minorAlleleCopyNumber()
     {
         return mContext.getAttributeAsDouble(PURPLE_MINOR_ALLELE_CN_INFO, 0);
@@ -234,6 +241,8 @@ public class VariantContextDecorator implements GenomePosition
     {
         return mContext.getAttributeAsInt(SageVcfTags.REPEAT_COUNT, 0);
     }
+
+    public int altRepeatCount() { return mContext.getAttributeAsInt(SageVcfTags.READ_CONTEXT_REPEAT_COUNT, 0); }
 
     public String repeatSequence()
     {

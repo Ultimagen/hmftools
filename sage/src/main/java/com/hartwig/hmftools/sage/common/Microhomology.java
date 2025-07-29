@@ -1,7 +1,8 @@
 package com.hartwig.hmftools.sage.common;
 
-import static java.lang.Math.abs;
 import static java.lang.String.format;
+
+import com.hartwig.hmftools.common.variant.SimpleVariant;
 
 public class Microhomology
 {
@@ -68,7 +69,7 @@ public class Microhomology
         // start looking in the read in the first base after the variant
         int homReadIndexStart = varReadIndex + 1;
 
-        if(applyIndelLength && variant.isInsert())
+        if(applyIndelLength)
             homReadIndexStart += indelAltLength;
 
         int homReadIndex = homReadIndexStart;

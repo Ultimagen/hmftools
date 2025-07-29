@@ -9,6 +9,7 @@ import static com.hartwig.hmftools.common.region.BaseRegion.positionsWithin;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
 import static com.hartwig.hmftools.sage.SageConstants.INDEL_DEDUP_MIN_MATCHED_LPS_PERCENT;
 import static com.hartwig.hmftools.sage.SageConstants.MAX_READ_EDGE_DISTANCE_PERC;
+import static com.hartwig.hmftools.sage.SageConstants.MAX_READ_EDGE_DISTANCE_PERC_PANEL;
 import static com.hartwig.hmftools.sage.filter.SoftFilter.DEDUP_INDEL;
 
 import java.util.Collections;
@@ -23,20 +24,22 @@ import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
 import com.hartwig.hmftools.sage.common.VariantReadContext;
 import com.hartwig.hmftools.sage.common.SageVariant;
-import com.hartwig.hmftools.sage.common.SimpleVariant;
+import com.hartwig.hmftools.common.variant.SimpleVariant;
+import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.sage.evidence.ReadContextCounter;
 import com.hartwig.hmftools.sage.filter.SoftFilter;
+import com.hartwig.hmftools.sage.filter.VariantFilters;
 
 public class IndelDeduper
 {
     private final RefGenomeInterface mRefGenome;
     private int mGroupIterations;
-    private final int mReadEdgeDistanceThreshold;
+    private final VariantFilters mFilters;
 
-    public IndelDeduper(final RefGenomeInterface refGenome, int readLength)
+    public IndelDeduper(final RefGenomeInterface refGenome, final VariantFilters filters)
     {
         mRefGenome = refGenome;
-        mReadEdgeDistanceThreshold = (int)(readLength * MAX_READ_EDGE_DISTANCE_PERC);
+        mFilters = filters;
         mGroupIterations = 0;
     }
 
@@ -263,7 +266,9 @@ public class IndelDeduper
                 return true;
         }
 
-        if(variant.ReadCounter.readEdgeDistance().maxAltDistanceFromEdge() < mReadEdgeDistanceThreshold)
+        int readEdgeDistanceThreshold = mFilters.readEdgeDistanceThreshold(variant.Variant.tier());
+
+        if(variant.ReadCounter.readEdgeDistance().maxAltDistanceFromEdge() < readEdgeDistanceThreshold)
             return true;
 
         return false;
@@ -471,15 +476,6 @@ public class IndelDeduper
         public boolean allowByFilter()
         {
             return Variant.isPassing();
-
-            /* no inclusion of germline filtered variants any longer
-            if(Variant.isPassing())
-                return true;
-
-            // must only have the germline filters below
-            return Variant.filters().stream()
-                    .allMatch(x -> x.equals(MAX_GERMLINE_VAF) || x.equals(MAX_GERMLINE_RELATIVE_VAF) || x.equals(MAX_GERMLINE_ALT_SUPPORT));
-            */
         }
 
         public int indelScore()
@@ -495,7 +491,15 @@ public class IndelDeduper
             if(position() == other.position())
             {
                 if(ref().length() == other.ref().length())
-                    return 0;
+                {
+                    int altSupport = ReadCounter.altSupport();
+                    int otherAltSupport = other.ReadCounter.altSupport();
+
+                    if(altSupport == otherAltSupport)
+                        return 0;
+
+                    return altSupport > otherAltSupport ? -1 : 1;
+                }
 
                 return ref().length() < other.ref().length() ? -1 : 1;
             }

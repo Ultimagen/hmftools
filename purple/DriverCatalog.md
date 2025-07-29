@@ -6,31 +6,32 @@ Running [LINX](https://github.com/hartwigmedical/hmftools/tree/master/linx) enri
 
 ## Gene Panel Configuration
 
-The gene panel is a configuration file of which genes to add to the driver catalog and which mutation types to report in the canonical transcript and any 'additionalReportedTranscripts' specified for each gene.  The format is:
+The driver gene panel TSV file configures which genes to add to the driver catalog and which mutation types to report in the canonical transcript and any 'additionalReportedTranscripts' specified for each gene.  The format is:
 
-Field | Values | Description
----|---|---
-Gene | | HGNC symbol of gene 
-Report Missense | T/F | Report if any missense variant is found in the gene
-Report Nonsense | T/F | Report if any nonsense or frameshift variant is found in the gene
-Report Splice | T/F |  Report if any canonical splice acceptor or donor variant is found in the gene [+1,+2,+5,-1,-2]  Mutations affecting the last exonic base at a donor location as well as N>G variants only at the -3 acceptor base are also treated as SPLICE.
-Report Amplification | T/F | Report amplification if min gene copy number > 3x sample ploidy and partial amplification if max gene copy number > 3x sample ploidy. (Note if qcstatus = HIGH_CN_WARN_HIGH_COPY_NUMBER_NOISE, AMPS must be bounded on at least one side by an SV).
-Report Deletion | T/F | Report if gene copy number < 0.5 (Note - If qcStatus in {WARN_DELETED_GENES,WARN_HIGH_COPY_NUMBER_NOISE} deletions must also be supported on both sides by SV OR (supported by SV + CENTROMERE/TELOMERE and be <10M bases)
-Report Disruption | T/F | LINX will report ‘HOM DISRUPTION' where the exonic copy number of the gene is > 0.5 but where no intact copies of the gene are predicted to remain), or simply DISRUPTION for other structural variants which may disrupt the stucture of the canonical transcript.
-Report Hotspot | T/F | Report somatic hotspot mutation regardless of other rules
-Likelihood Type | ONCO/TSG | Calculate driver likelihood as a tumor suppressor gene or onco gene
-reportGermlineVariant	| 'WILDTYPE_LOST','NONE', 'ANY','VARIANT_NOT_LOST'| Report any germline variants that meet pathogenic criteria based on specified tumor status
-reportGermlineHotspot | 'WILDTYPE_LOST','NONE', 'ANY','VARIANT_NOT_LOST'| Report hotspot germline pathogenic variants based on specified tumor status
-reportGermlineDisruption | 'WILDTYPE_LOST','NONE', 'ANY','VARIANT_NOT_LOST'| Report germline structural variant gene disruptions
-reportGermlineDeletion | 'WILDTYPE_LOST','NONE', 'ANY','VARIANT_NOT_LOST'| Report germline gene deletions
-additionalReportedTranscript | <Ensembl Transcript Stable Id> | Ensembl transcripts to report on in addition to the ensembl canonical transcript (eg. CDKN2Ap14Arf). Any drivers on the additional transcript will be added to the driver catalog table as a separate record with canonicalTranscript=0. Copy number data for that transcript will also be added to the geneCopyNumber table and any somatic or germline point mutations will report the effect of the variant on the additional transcript in the otherTranscriptEffects column in somaticVariant and germlineVariant tables. Any breakend impacting the additional transcript will also be reported in the svBreakend table
+Field | Valid values | Description
+------|--------------|------------
+gene | | HGNC symbol of gene 
+reportMissense | TRUE/FALSE | Report if any missense variant is found in the gene
+reportNonsense | TRUE/FALSE | Report if any nonsense or frameshift variant is found in the gene
+reportSplice | TRUE/FALSE |  Report if any canonical splice acceptor or donor variant is found in the gene [+1,+2,+5,-1,-2]  Mutations affecting the last exonic base at a donor location as well as N>G variants only at the -3 acceptor base are also treated as SPLICE.
+reportAmplification | TRUE/FALSE | Report amplification if min gene copy number > 3x sample ploidy and partial amplification if max gene copy number > 3x sample ploidy (for genes on chrX for males 1.5x sample ploidy is used). (Note if qcstatus = HIGH_CN_WARN_HIGH_COPY_NUMBER_NOISE, AMPS must be bounded on at least one side by an SV).
+reportDeletion | TRUE/FALSE | Report if gene copy number < 0.5 (Note - If qcStatus in {WARN_DELETED_GENES,WARN_HIGH_COPY_NUMBER_NOISE} deletions must also be supported on both sides by SV OR (supported by SV + CENTROMERE/TELOMERE and be <10M bases)
+reportDisruption | TRUE/FALSE | LINX will report ‘HOM DISRUPTION' where the exonic copy number of the gene is > 0.5 but where no intact copies of the gene are predicted to remain), or simply DISRUPTION for other structural variants which may disrupt the structure of the canonical transcript.
+reeportSomaticHotspot | TRUE/FALSE | Report somatic hotspot mutation regardless of other rules
+likelihoodType | ONCO/TSG | Calculate driver likelihood as a tumor suppressor gene or onco gene
+reportGermlineVariant	| WILDTYPE_LOST, NONE, ANY, VARIANT_NOT_LOST | Report any germline variants that meet pathogenic criteria based on specified tumor status
+reportGermlineHotspot | WILDTYPE_LOST, NONE, ANY, VARIANT_NOT_LOST | Report hotspot germline pathogenic variants based on specified tumor status
+reportGermlineDisruption | WILDTYPE_LOST, NONE, ANY, VARIANT_NOT_LOST | Report germline structural variant gene disruptions
+reportGermlineDeletion | WILDTYPE_LOST, NONE, ANY, VARIANT_NOT_LOST | Report germline gene deletions
+additionalReportedTranscript | <Ensembl Transcript Stable Id>            | Ensembl transcripts to report on in addition to the ensembl canonical transcript (eg. CDKN2Ap14Arf). Any drivers on the additional transcript will be added to the driver catalog table as a separate record with canonicalTranscript=0. Copy number data for that transcript will also be added to the geneCopyNumber table and any somatic or germline point mutations will report the effect of the variant on the additional transcript in the otherTranscriptEffects column in somaticVariant and germlineVariant tables. Any breakend impacting the additional transcript will also be reported in the svBreakend table
 
 Up to 3 individual driver catalog records may be added per gene per sample if more than 1 type of event is present: 
 * Germline mutations (GERMLINE_MUTATION,GERMLINE_DELETION,GERMLINE_DISRUPTION)
 * Copy number or disruption events (DEL,AMP,HOM_DISRUPTION) 
 * Somatic point mutations (MUTATION).
 
-The Hartwig Medical Foundation curated gene panel is available from [HMFTools-Resources > Gene Panel](https://resources.hartwigmedicalfoundation.nl) and is updated periodically. 
+The Hartwig Medical Foundation curated gene panel is available from the [HMF Resource page](../pipeline/README_RESOURCES.md)
+
 A detailed description of our gene discovery and initial construction of our gene panel is available in the [supplementary information](https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1689-y/MediaObjects/41586_2019_1689_MOESM1_ESM.pdf) of our ["Pan-cancer whole genome analyses of metastatic solid tumors"](https://www.nature.com/articles/s41586-019-1689-y) paper.
 
 ## Gene Driver Likelihood
@@ -74,9 +75,9 @@ Note that the TMB is calculated separately for INDELs and SNVs.   For TSG dnds r
   
 ## Known issues / points for improvement
  
-- **Clustered variants** - Pahtogenic variants are likely to occur clustered in specific locations of genes that are functionally important.  This should be reflected in driver likelihood
+- **Clustered variants** - Pathogenic variants are likely to occur clustered in specific locations of genes that are functionally important.  This should be reflected in driver likelihood
 - **Cancer type specificity** - DNDS is calculated pan-cancer due to size of cohorts. Ideally this would be calculated cancer type specific, especially for large cohorts.
-- **INFRAME INDELS in repeats with 3 base microhomology** - Generally inframe indels are extremely rare and are likely to be drivers and hece are give driver likelihood = 1.  An exception should be made for 3 base indels found in microsatellites with a repeat length of 3 as this is a common passenger mutaiton, particularly in MSI samples.
+- **INFRAME INDELS in repeats with 3 base microhomology** - Generally inframe indels are extremely rare and are likely to be drivers and hence are given driver likelihood = 1.  An exception should be made for 3 base indels found in microsatellites with a repeat length of 3 as this is a common passenger mutation, particularly in MSI samples.
 - **AMPLIFICATION PASSENGERS** - All amplifications are given a likelihood of 1.  Since nearby genes are amplified together, some of the amplification drivers may well be passengers, commonly amplified with nearby drivers.  
 - **FUNCTIONAL ANNOTATION** - may improve driver likelihood annotation
 

@@ -3,8 +3,9 @@ package com.hartwig.hmftools.linx;
 import static java.lang.Math.min;
 
 import static com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache.addEnsemblDir;
+import static com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkCreateOutputDir;
-import static com.hartwig.hmftools.common.utils.version.VersionInfo.fromAppName;
+import static com.hartwig.hmftools.common.utils.config.VersionInfo.fromAppName;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
 
 import java.io.IOException;
@@ -15,11 +16,11 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
-import com.hartwig.hmftools.common.utils.PerformanceCounter;
-import com.hartwig.hmftools.common.utils.TaskExecutor;
+import com.hartwig.hmftools.common.perf.PerformanceCounter;
+import com.hartwig.hmftools.common.perf.TaskExecutor;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.common.utils.config.ConfigUtils;
-import com.hartwig.hmftools.common.utils.version.VersionInfo;
+import com.hartwig.hmftools.common.utils.config.VersionInfo;
 import com.hartwig.hmftools.linx.fusion.FusionConfig;
 import com.hartwig.hmftools.linx.fusion.FusionResources;
 
@@ -37,7 +38,7 @@ public class LinxApplication
             return;
         }
 
-        long startTime = System.currentTimeMillis();
+        long startTimeMs = System.currentTimeMillis();
 
         List<String> samplesList = config.getSampleIds();
 
@@ -131,7 +132,7 @@ public class LinxApplication
                 sampleAnalysers.get(i).setSampleIds(saSampleLists.get(i));
             }
 
-            final List<Callable> callableList = sampleAnalysers.stream().collect(Collectors.toList());
+            final List<Callable<Void>> callableList = sampleAnalysers.stream().collect(Collectors.toList());
             TaskExecutor.executeTasks(callableList, callableList.size());
         }
         else
@@ -146,16 +147,16 @@ public class LinxApplication
 
         cohortDataWriter.close();
 
-        if(config.hasMultipleSamples())
+        if(config.hasMultipleSamples() && config.PerfDebug)
         {
             // combine and log performance counters
-            Map<String,PerformanceCounter> combinedPerfCounters = sampleAnalysers.get(0).getPerfCounters();
+            Map<String, PerformanceCounter> combinedPerfCounters = sampleAnalysers.get(0).getPerfCounters();
 
             for(int i = 1; i < sampleAnalysers.size(); ++i)
             {
-                Map<String,PerformanceCounter> saPerfCounters = sampleAnalysers.get(i).getPerfCounters();
+                Map<String, PerformanceCounter> saPerfCounters = sampleAnalysers.get(i).getPerfCounters();
 
-                for(Map.Entry<String,PerformanceCounter> entry : combinedPerfCounters.entrySet())
+                for(Map.Entry<String, PerformanceCounter> entry : combinedPerfCounters.entrySet())
                 {
                     PerformanceCounter combinedPc = entry.getValue();
                     PerformanceCounter saPc = saPerfCounters.get(entry.getKey());
@@ -165,7 +166,7 @@ public class LinxApplication
                 }
             }
 
-            for(Map.Entry<String,PerformanceCounter> entry : combinedPerfCounters.entrySet())
+            for(Map.Entry<String, PerformanceCounter> entry : combinedPerfCounters.entrySet())
             {
                 entry.getValue().logStats();
             }
@@ -183,10 +184,7 @@ public class LinxApplication
         }
         else
         {
-            double runTime = (System.currentTimeMillis() - startTime) / 1000.0;
-
-            LNX_LOGGER.info("SV analysis complete for {} samples, run time({})s",
-                    samplesList.size(), String.format("%.3f", runTime));
+            LNX_LOGGER.info("Linx complete for {} samples, mins({})", samplesList.size(), runTimeMinsStr(startTimeMs));
         }
     }
 

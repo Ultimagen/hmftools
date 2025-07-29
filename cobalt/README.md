@@ -7,11 +7,11 @@
 ### Calculating read depths and masking
 COBALT starts with finding the mean read depth per 1,000 base window for both normal and tumor samples by counting the number of alignment starts 
 in the respective bam files with a mapping quality score of at least 10 that is neither unmapped, duplicated, secondary, nor supplementary. 
-Windows with a GC content less than 0.2 or greater than 0.6 or with an average mappability below 0.85 are excluded from further analysis.
+Windows with a GC content less than 0.23 or greater than 0.69 or with an average mappability below 0.85 are excluded from further analysis.
 
 ### GC normalisation
 Next we apply a GC normalization to calculate the read ratios. To do this we divide the read depth of each window by the median read depth of
-all windows sharing the same GC content then normalise further to the ratio of the median to mean read depth of all windows.
+all windows sharing the same per percentile bucket of GC content over a range of GC content: [0.25:0.67]. The results are smoothed futher for each bucket by taking the mean of the percentile bucket and the 2 adjacent percentile buckets.  We then normalise further to the ratio of the median to mean read depth of all windows.   
 
 ### Diploid normalisation
 
@@ -19,14 +19,15 @@ The reference sample ratios have a further ‘diploid’ normalization applied t
 This normalization assumes that the median ratio of each 10Mb window (minimum 1Mb readable) should be diploid for autosomes and haploid for 
 male sex chromosomes in addition to the following exceptions:
 
-| Aberration                | Chromosome    | Normalized Ratio   |
-|---------------------------|---------------|--------------------|
-| `MOSAIC_X`                | X             | use median X ratio |
-| `KLINEFELTER`             | X             | 1                  |
-| `KLINEFELTER`             | Y             | 0.5                |
-| `TRISOMY_[X,21,13,18,15]` | X,21,13,18,15 | 1.5                |
+| Aberration                   | Chromosome       | Normalized Ratio   |
+|------------------------------|------------------|--------------------|
+| `MOSAIC_X`                   | X                | use median X ratio |
+| `KLINEFELTER`                | X                | 1                  |
+| `KLINEFELTER`                | Y                | 0.5                |
+| `TRISOMY_[X,21,13,18,15,9P]` | X,21,13,18,15,9P | 1.5                |
+| `TETRASOMY_9P`               | 9P               | 1.5                |
 
-### Depth window consoldiation
+### Depth window consolidation
 Sparse information in COBALT may cause a noisy fit for lpWGS.  Therefore, we consolidate buckets to try to reach a median read depth of at
 least 8 per bucket. The ConsolidatedBucketSize is set to = clamp(roundToOneSigDigit(80 / medianTumorReadCount, 10, 1000).   This formula allows
 consolidation into buckets of up to 1000 depth windows.  For standard WGS this should have no effect as medianTumorReadDepth >> 8. We should
@@ -43,7 +44,7 @@ Post GC normalization, COBALT is able to detect the following germline chromosom
 |---------------------------|--------|--------------------------------------------------|
 | `MOSAIC_X`                | FEMALE | X ratio < min(0.8, minAutosomeMedianDepthRatio*) |
 | `KLINEFELTER` (XXY)       | MALE   | X ratio >= 0.65                                  |
-| `TRISOMY_[X,21,13,18,15]` | BOTH   | chromosome ratio >= 1.35                          |
+| `TRISOMY_[X,21,13,18,15]` | BOTH   | chromosome ratio >= 1.35                         |
 
 *By checking against autosomes we rule out very high GC bias in the reference.  
 
@@ -51,9 +52,7 @@ Post GC normalization, COBALT is able to detect the following germline chromosom
 
 Finally, the Bioconductor copy number package is used to generate segments from the ratio file.
 
-## Installation
-
-To install, download the latest compiled jar file from the [download links](#version-history-and-download-links) and the appropriate GC profile from [HMFTools-Resources > DNA Pipeline](https://console.cloud.google.com/storage/browser/hmf-public/HMFtools-Resources/dna_pipeline/).
+All resource files for this tool and the WiGiTs pipeline are available for download via the [HMF Resource page](../pipeline/README_RESOURCES.md).
 
 COBALT depends on the Bioconductor [copynumber](http://bioconductor.org/packages/release/bioc/html/copynumber.html) package for segmentation.
 The R package [dplyr](https://cran.r-project.org/web/packages/dplyr/index.html) is also used.
@@ -64,7 +63,7 @@ After installing [R](https://www.r-project.org/) or [RStudio](https://rstudio.co
     install("dplyr")
 ```
 
-COBALT requires Java 11+ and can be run with the minimum set of arguments as follows:
+COBALT requires Java 17+ and can be run with the minimum set of arguments as follows:
 
 ```
 java -jar -Xmx8G cobalt.jar \

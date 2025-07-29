@@ -8,14 +8,20 @@ import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.V38;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.hartwig.hmftools.common.region.ChrBaseRegion;
+import com.hartwig.hmftools.common.region.SpecificRegions;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import htsjdk.samtools.SamReader;
+import htsjdk.samtools.SAMSequenceRecord;
 import htsjdk.samtools.reference.IndexedFastaSequenceFile;
 
 public class RefGenomeSource implements RefGenomeInterface
@@ -80,6 +86,19 @@ public class RefGenomeSource implements RefGenomeInterface
         return mRefGenome.getSubsequenceAt(chromosome, posStart, posEnd).getBases();
     }
 
+    @Override
+    public Map<String,Integer> chromosomeLengths()
+    {
+        Map<String,Integer> chromosomeLengthMap = Maps.newHashMap();
+
+        for(SAMSequenceRecord sequenceRecord : mRefGenome.getSequenceDictionary().getSequences())
+        {
+            chromosomeLengthMap.put(sequenceRecord.getSequenceName(), sequenceRecord.getSequenceLength());
+        }
+
+        return chromosomeLengthMap;
+    }
+
     public static RefGenomeVersion deriveRefGenomeVersion(final RefGenomeSource refGenomeSource)
     {
         String firstChromosome = refGenomeSource.refGenomeFile().getSequenceDictionary().getSequences().get(0).getSequenceName();
@@ -102,5 +121,26 @@ public class RefGenomeSource implements RefGenomeInterface
             LOGGER.error("Reference file loading failed: {}", e.toString());
             return null;
         }
+    }
+
+    public static List<ChrBaseRegion> formRefGenomeRegions(final SpecificRegions specificRegions, final RefGenomeInterface refGenome)
+    {
+        List<ChrBaseRegion> inputRegions = Lists.newArrayList();
+
+        for(Map.Entry<String,Integer> contigEntry : refGenome.chromosomeLengths().entrySet())
+        {
+            String contig = contigEntry.getKey();
+
+            if(specificRegions.excludeChromosome(contig))
+                continue;
+
+            int contigLength = contigEntry.getValue();
+
+            inputRegions.add(new ChrBaseRegion(contig, 1, contigLength));
+        }
+
+        Collections.sort(inputRegions);
+
+        return inputRegions;
     }
 }

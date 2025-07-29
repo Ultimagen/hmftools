@@ -8,10 +8,10 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.drivercatalog.DriverCategory;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGene;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGeneGermlineReporting;
-import com.hartwig.hmftools.common.drivercatalog.panel.ImmutableDriverGene;
+import com.hartwig.hmftools.common.driver.DriverCategory;
+import com.hartwig.hmftools.common.driver.panel.DriverGene;
+import com.hartwig.hmftools.common.driver.panel.DriverGeneGermlineReporting;
+import com.hartwig.hmftools.common.driver.panel.ImmutableDriverGene;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
 import com.hartwig.hmftools.common.purple.GeneCopyNumberTestFactory;
 import com.hartwig.hmftools.common.purple.GermlineDeletion;
@@ -24,6 +24,7 @@ import com.hartwig.hmftools.common.sv.StructuralVariantType;
 import com.hartwig.hmftools.datamodel.linx.LinxBreakend;
 import com.hartwig.hmftools.datamodel.linx.LinxBreakendType;
 import com.hartwig.hmftools.datamodel.linx.LinxSvAnnotation;
+import com.hartwig.hmftools.datamodel.orange.OrangeRefGenomeVersion;
 import com.hartwig.hmftools.datamodel.purple.PurpleRecord;
 import com.hartwig.hmftools.orange.algo.linx.LinxOrangeTestFactory;
 import com.hartwig.hmftools.orange.algo.linx.TestLinxInterpretationFactory;
@@ -46,7 +47,7 @@ public class PurpleInterpreterTest
     }
 
     @Test
-    public void canCreateReportableGermlineFullLosses()
+    public void canCreateReportableGermlineFullDels()
     {
         // Gene is needed to be able to match with ensembl test data
         GermlineDeletion hetReported = GermlineDeletionTestFactory.create(TEST_GENE, true, GermlineStatus.HET_DELETION, 1);
@@ -56,14 +57,14 @@ public class PurpleInterpreterTest
 
         PurpleInterpreter interpreter = createRealInterpreter();
         PurpleRecord interpreted = interpreter.interpret(purple);
-        assertEquals(1, interpreted.allGermlineFullLosses().size());
-        assertEquals(1, interpreted.reportableGermlineFullLosses().size());
+        assertEquals(1, interpreted.allGermlineFullDels().size());
+        assertEquals(1, interpreted.reportableGermlineFullDels().size());
         assertEquals(1, interpreted.allGermlineLossOfHeterozygosities().size());
         assertEquals(1, interpreted.reportableGermlineLossOfHeterozygosities().size());
     }
 
     @Test
-    public void canHandleHalfReportableGermlineFullLosses()
+    public void canHandleHalfReportableGermlineFullDels()
     {
         // Gene is needed to be able to match with ensembl test data
         GermlineDeletion hetUnreported = GermlineDeletionTestFactory.create(TEST_GENE, false, GermlineStatus.HET_DELETION, 1);
@@ -73,14 +74,14 @@ public class PurpleInterpreterTest
 
         PurpleInterpreter interpreter = createRealInterpreter();
         PurpleRecord interpreted = interpreter.interpret(purple);
-        assertEquals(1, interpreted.allGermlineFullLosses().size());
-        assertEquals(1, interpreted.reportableGermlineFullLosses().size());
+        assertEquals(1, interpreted.allGermlineFullDels().size());
+        assertEquals(1, interpreted.reportableGermlineFullDels().size());
         assertEquals(1, interpreted.allGermlineLossOfHeterozygosities().size());
         assertEquals(0, interpreted.reportableGermlineLossOfHeterozygosities().size());
     }
 
     @Test
-    public void canCreateNonReportableGermlineFullLosses()
+    public void canCreateNonReportableGermlineFullDels()
     {
         // Gene is needed to be able to match with ensembl test data
         GermlineDeletion hetUnreported = GermlineDeletionTestFactory.create(TEST_GENE, false, GermlineStatus.HET_DELETION, 1);
@@ -90,8 +91,8 @@ public class PurpleInterpreterTest
 
         PurpleInterpreter interpreter = createRealInterpreter();
         PurpleRecord interpreted = interpreter.interpret(purple);
-        assertEquals(1, interpreted.allGermlineFullLosses().size());
-        assertEquals(0, interpreted.reportableGermlineFullLosses().size());
+        assertEquals(1, interpreted.allGermlineFullDels().size());
+        assertEquals(0, interpreted.reportableGermlineFullDels().size());
         assertEquals(1, interpreted.allGermlineLossOfHeterozygosities().size());
         assertEquals(0, interpreted.reportableGermlineLossOfHeterozygosities().size());
     }
@@ -279,7 +280,7 @@ public class PurpleInterpreterTest
         return ImmutablePurpleData.builder()
                 .from(PurpleTestFactory.createMinimalTestPurpleData())
                 .addAllSomaticGeneCopyNumbers(GeneCopyNumberTestFactory.builder().chromosome("1").geneName(TEST_GENE).build())
-                .allGermlineStructuralVariants(Lists.newArrayList())
+                .allPassingGermlineStructuralVariants(Lists.newArrayList())
                 .allGermlineDeletions(allGermlineDeletions)
                 .reportableGermlineDeletions(allGermlineDeletions.stream().filter(d -> d.Reported).collect(Collectors.toList()))
                 .build();
@@ -363,16 +364,20 @@ public class PurpleInterpreterTest
     {
         PaveAlgo pave = new PaveAlgo(ensemblDataCache, false);
         PurpleVariantFactory purpleVariantFactory = new PurpleVariantFactory(pave);
-        GermlineGainLossFactory germlineGainLossFactory = new GermlineGainLossFactory(ensemblDataCache);
+        GermlineGainDeletionFactory germlineGainDeletionFactory = new GermlineGainDeletionFactory(ensemblDataCache);
         GermlineLossOfHeterozygosityFactory germlineLossOfHeterozygosityFactory = new GermlineLossOfHeterozygosityFactory(ensemblDataCache);
+        ChromosomalRearrangementsDeterminer chromosomalRearrangementsDeterminer =
+                ChromosomalRearrangementsDeterminer.createForRefGenomeVersion(OrangeRefGenomeVersion.V37);
 
         return new PurpleInterpreter(
                 purpleVariantFactory,
-                germlineGainLossFactory,
+                germlineGainDeletionFactory,
                 germlineLossOfHeterozygosityFactory,
                 Lists.newArrayList(),
                 TestLinxInterpretationFactory.createMinimalTestLinxData(),
-                null
+                chromosomalRearrangementsDeterminer,
+                null,
+                false
         );
     }
 
@@ -398,7 +403,6 @@ public class PurpleInterpreterTest
                 .insertSequence(Strings.EMPTY)
                 .type(StructuralVariantType.DEL)
                 .qualityScore(0D)
-                .recovered(false)
                 .hotspot(false)
                 .build();
     }

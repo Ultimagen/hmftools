@@ -10,9 +10,9 @@ import static com.hartwig.hmftools.common.gene.CodingBaseData.PHASE_NONE;
 import static com.hartwig.hmftools.common.gene.TranscriptCodingType.ENHANCER;
 import static com.hartwig.hmftools.common.gene.TranscriptCodingType.UTR_5P;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.BND;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.switchIndex;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.switchIndex;
 import static com.hartwig.hmftools.linx.fusion.FusionConstants.ENHANCER_PROMISCUOUS_MIN_DISTANCE;
 import static com.hartwig.hmftools.linx.fusion.FusionConstants.MAX_UPSTREAM_DISTANCE_IG_KNOWN;
 import static com.hartwig.hmftools.linx.fusion.FusionReportability.isReportable;
@@ -165,7 +165,7 @@ public class SpecialFusions
             gene.setSvData(var.getSvData(), var.jcn());
 
             TranscriptData transData = new TranscriptData(
-                    0, "", "", false, POS_STRAND, 0, 0, null, null, "");
+                    0, "", "", false, POS_STRAND, 0, 0, null, null, "", null);
 
             BreakendTransData transcript = new BreakendTransData(
                     gene, transData,  0, 0, PHASE_NONE, PHASE_NONE, 0, 0);
@@ -189,16 +189,27 @@ public class SpecialFusions
         else
         {
             ChrBaseRegion geneRegion = knownFusionData.geneRegion();
-            GeneData geneData = new GeneData(
-                    "", knownFusionData.ThreeGene, geneRegion.chromosome(), geneStrand,
-                    geneRegion.start(), geneRegion.end(), "");
+
+            GeneData geneData = mFusionFinder.getGeneTransCache().getGeneDataByName(knownFusionData.ThreeGene);
+            TranscriptData transData = null;
+
+            if(geneData != null)
+            {
+                transData = mFusionFinder.getGeneTransCache().getCanonicalTranscriptData(geneData.GeneId);
+            }
+            else
+            {
+                geneData = new GeneData(
+                        "", knownFusionData.ThreeGene, geneRegion.chromosome(), geneStrand,
+                        geneRegion.start(), geneRegion.end(), "");
+
+                transData = new TranscriptData(
+                        0, "", knownFusionData.ThreeGene, false, geneStrand,
+                        geneRegion.start(), geneRegion.end(), null, null, "", null);
+            }
 
             BreakendGeneData gene = new BreakendGeneData(var.id(), seIndex == SE_START, geneData);
             gene.setSvData(var.getSvData(), var.jcn());
-
-            TranscriptData transData = new TranscriptData(
-                    0, "", knownFusionData.ThreeGene, false, geneStrand,
-                    geneRegion.start(), geneRegion.end(), null, null, "");
 
             BreakendTransData transcript = new BreakendTransData(
                     gene, transData,  1, 1, PHASE_NONE, PHASE_NONE, 0, 0);

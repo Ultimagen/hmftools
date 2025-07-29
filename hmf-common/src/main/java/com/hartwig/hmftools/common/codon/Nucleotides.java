@@ -4,6 +4,8 @@ public final class Nucleotides
 {
     public static final char[] DNA_BASES = {'A', 'C', 'G', 'T'};
     public static final byte[] DNA_BASE_BYTES = { 65, 67, 71, 84 };
+    public static final char DNA_N_BASE = 'N';
+    public static final byte DNA_N_BYTE = 78;
 
     public static char swapDnaBase(final char base)
     {
@@ -22,6 +24,7 @@ public final class Nucleotides
         if(base == DNA_BASE_BYTES[1]) return 1;
         if(base == DNA_BASE_BYTES[2]) return 2;
         if(base == DNA_BASE_BYTES[3]) return 3;
+        if(base == DNA_N_BYTE) return 4;
 
         return -1;
     }
@@ -32,6 +35,7 @@ public final class Nucleotides
         if(base == DNA_BASES[1]) return 1;
         if(base == DNA_BASES[2]) return 2;
         if(base == DNA_BASES[3]) return 3;
+        if(base == DNA_N_BASE) return 4;
 
         return -1;
     }
@@ -44,6 +48,7 @@ public final class Nucleotides
     }
 
     public static boolean isValidDnaBase(final char base) { return base == 'G' || base == 'A' || base == 'T' || base == 'C'; }
+    public static boolean isValidDnaBase(final byte base) { return baseIndex(base) >= 0; }
 
     public static String reverseComplementBases(final String bases)
     {
@@ -56,5 +61,17 @@ public final class Nucleotides
         }
 
         return newBases.toString();
+    }
+
+    public static byte[] reverseComplementBases(final byte[] bases)
+    {
+        byte[] newBases = new byte[bases.length];
+
+        for(int i = 0; i < bases.length; ++i)
+        {
+            newBases[i] = swapDnaBase(bases[bases.length - 1 - i]);
+        }
+
+        return newBases;
     }
 }

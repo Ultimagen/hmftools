@@ -6,10 +6,10 @@ import static java.lang.Math.min;
 import static com.hartwig.hmftools.redux.consensus.ConsensusOutcome.UNSET;
 
 import java.util.List;
+import java.util.Map;
 
-import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
-
-import org.apache.commons.compress.utils.Lists;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 
 import htsjdk.samtools.CigarElement;
 import htsjdk.samtools.CigarOperator;
@@ -19,7 +19,8 @@ public class ConsensusState
 {
     public final boolean IsForward;
     public final String Chromosome;
-    private final RefGenomeInterface mRefGenome;
+    public final Map<String, Object> Attributes;
+    private final RefGenome mRefGenome;
     public byte[] Bases;
     public byte[] BaseQualities;
     public List<CigarElement> CigarElements;
@@ -33,10 +34,11 @@ public class ConsensusState
 
     private ConsensusOutcome mOutcome;
 
-    public ConsensusState(final boolean isForward, final String chromosome, final RefGenomeInterface refGenome)
+    public ConsensusState(final boolean isForward, final String chromosome, final RefGenome refGenome)
     {
         IsForward = isForward;
         Chromosome = chromosome;
+        Attributes = Maps.newHashMap();
         mRefGenome = refGenome;
         Bases = null;
         BaseQualities = null;
@@ -84,6 +86,14 @@ public class ConsensusState
         }
     }
 
+    public void setBoundaries(int unclippedStart, int unclippedEnd, int readStart, int readEnd)
+    {
+        MinUnclippedPosStart = unclippedStart;
+        MaxUnclippedPosEnd = unclippedEnd;
+        MinAlignedPosStart = readStart;
+        MaxAlignedPosEnd = readEnd;
+    }
+
     public void addCigarElement(int length, final CigarOperator operator)
     {
         // combine with existing if a match on type
@@ -108,7 +118,11 @@ public class ConsensusState
     public void setNumMutations()
     {
         NumMutations = 0;
-        String refBases = mRefGenome.getBaseString(Chromosome, MinAlignedPosStart, MaxAlignedPosEnd);
+        byte[] refBases = mRefGenome.getRefBases(Chromosome, MinAlignedPosStart, MaxAlignedPosEnd);
+
+        if(refBases == null) // abort any attempt to set this property
+            return;
+
         int baseIndex = 0;
         int refBaseIndex = 0;
         for(CigarElement cigarElement : CigarElements)
@@ -124,7 +138,7 @@ public class ConsensusState
             {
                 for(int i = 0; i < elemLength; i++)
                 {
-                    if(refBases.charAt(refBaseIndex + i) != (char) Bases[baseIndex + i])
+                    if(refBases[refBaseIndex + i] != Bases[baseIndex + i])
                         ++NumMutations;
                 }
             }

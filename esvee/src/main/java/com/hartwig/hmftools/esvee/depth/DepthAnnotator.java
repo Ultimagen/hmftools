@@ -2,14 +2,14 @@ package com.hartwig.hmftools.esvee.depth;
 
 import static java.lang.String.format;
 
+import static com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.ALLELE_FRACTION;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.ALLELE_FRACTION_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH_PAIR;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH_PAIR_DESC;
-import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.common.FileCommon.APP_NAME;
 import static com.hartwig.hmftools.esvee.common.FileCommon.DEPTH_VCF_SUFFIX;
 import static com.hartwig.hmftools.esvee.common.FileCommon.ESVEE_FILE_ID;
@@ -26,10 +26,10 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
+import com.hartwig.hmftools.common.perf.PerformanceCounter;
+import com.hartwig.hmftools.common.perf.TaskExecutor;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.common.region.ExcludedRegions;
-import com.hartwig.hmftools.common.utils.PerformanceCounter;
-import com.hartwig.hmftools.common.utils.TaskExecutor;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.common.variant.VcfFileReader;
 
@@ -47,9 +47,9 @@ import htsjdk.variant.vcf.VCFInfoHeaderLine;
 public class DepthAnnotator
 {
     private final DepthConfig mConfig;
-    private final Map<String,Integer> mSampleVcfGenotypeIds;
+    private final Map<String, Integer> mSampleVcfGenotypeIds;
 
-    private final Map<String,List<VariantContext>> mChrVariantMap;
+    private final Map<String, List<VariantContext>> mChrVariantMap;
     private final List<ChrBaseRegion> mExcludedRegions;
 
     public DepthAnnotator(final ConfigBuilder configBuilder)
@@ -68,13 +68,13 @@ public class DepthAnnotator
             System.exit(1);
         }
 
-        if(mConfig.BamFiles.size() != mConfig.Samples.size())
+        if(mConfig.BamFiles.size() != mConfig.SampleIds.size())
         {
             SV_LOGGER.error("inconsistent samples and BAM files");
             System.exit(1);
         }
 
-        SV_LOGGER.info("running depth annotation for samples: {}", mConfig.Samples);
+        SV_LOGGER.info("running depth annotation for samples: {}", mConfig.SampleIds);
 
         long startTimeMs = System.currentTimeMillis();
 
@@ -154,22 +154,31 @@ public class DepthAnnotator
             depthTasks.add(depthTask);
         }
 
-        final List<Callable> callableList = depthTasks.stream().collect(Collectors.toList());
+        final List<Callable<Void>> callableList = depthTasks.stream().collect(Collectors.toList());
         if(!TaskExecutor.executeTasks(callableList, mConfig.Threads))
             System.exit(1);
+
+        if(mConfig.UnmapRegionsFile != null)
+        {
+            UnmappedRegionDepth unmappedRegionDepth = new UnmappedRegionDepth(mConfig.UnmapRegionsFile);
+            unmappedRegionDepth.setUnmappedRegionsDepth(mConfig.SampleIds.size(), depthTasks);
+        }
 
         // write output VCF
         writeVcf(vcfHeader, depthTasks);
 
-        SV_LOGGER.info("depth annotation complete, mins({})", runTimeMinsStr(startTimeMs));
+        SV_LOGGER.info("Esvee depth annotation complete, mins({})", runTimeMinsStr(startTimeMs));
 
-        PerformanceCounter perfCounter = depthTasks.get(0).getPerfCounter();
-        for(int i = 1; i < depthTasks.size(); ++i)
+        if(mConfig.PerfLogTime > 0)
         {
-            perfCounter.merge(depthTasks.get(i).getPerfCounter());
-        }
+            PerformanceCounter perfCounter = depthTasks.get(0).getPerfCounter();
+            for(int i = 1; i < depthTasks.size(); ++i)
+            {
+                perfCounter.merge(depthTasks.get(i).getPerfCounter());
+            }
 
-        perfCounter.logStats();
+            perfCounter.logStats();
+        }
     }
 
     private void writeVcf(final VCFHeader header, final List<DepthTask> depthTasks)
@@ -183,6 +192,9 @@ public class DepthAnnotator
                 .setOutputFile(outputVcf)
                 .setOutputFileType(VariantContextWriterBuilder.OutputType.BLOCK_COMPRESSED_VCF)
                 .build();
+
+        if(!header.hasInfoLine(ALLELE_FRACTION))
+            header.addMetaDataLine(new VCFInfoHeaderLine(ALLELE_FRACTION, 1, VCFHeaderLineType.Float, ALLELE_FRACTION_DESC));
 
         if(!header.hasFormatLine(ALLELE_FRACTION))
             header.addMetaDataLine(new VCFFormatHeaderLine(ALLELE_FRACTION, 1, VCFHeaderLineType.Float, ALLELE_FRACTION_DESC));
@@ -234,9 +246,9 @@ public class DepthAnnotator
     {
         List<String> vcfSampleNames = header.getGenotypeSamples();
 
-        for(int s = 0; s < mConfig.Samples.size(); ++s)
+        for(int s = 0; s < mConfig.SampleIds.size(); ++s)
         {
-            String sampleId = mConfig.Samples.get(s);
+            String sampleId = mConfig.SampleIds.get(s);
             boolean found = false;
 
             for(int i = 0; i < vcfSampleNames.size(); ++i)
@@ -263,7 +275,7 @@ public class DepthAnnotator
 
     private void analyseVariantDistribution()
     {
-        Map<Integer,Integer> groupFrequencies = Maps.newHashMap();
+        Map<Integer, Integer> groupFrequencies = Maps.newHashMap();
 
         int totalGroups = 0;
         int totalVariants = 0;
@@ -318,13 +330,13 @@ public class DepthAnnotator
             }
 
             SV_LOGGER.debug("chr({}) variants({}) group({}) soloVariants({} pct={})",
-                    chrStr, variants.size(), groupCount, soloVariants, format("%.3f", soloVariants / (double)variants.size()));
+                    chrStr, variants.size(), groupCount, soloVariants, format("%.3f", soloVariants / (double) variants.size()));
         }
 
         int largeGroupCount = 0;
         int largeVariantsCount = 0;
 
-        for(Map.Entry<Integer,Integer> entry : groupFrequencies.entrySet())
+        for(Map.Entry<Integer, Integer> entry : groupFrequencies.entrySet())
         {
             if(entry.getKey() >= 25)
             {
@@ -357,7 +369,7 @@ public class DepthAnnotator
     public static void main(@NotNull final String[] args)
     {
         ConfigBuilder configBuilder = new ConfigBuilder(APP_NAME);
-        DepthConfig.addConfig(configBuilder);
+        DepthConfig.registerConfig(configBuilder);
 
         configBuilder.checkAndParseCommandLine(args);
 

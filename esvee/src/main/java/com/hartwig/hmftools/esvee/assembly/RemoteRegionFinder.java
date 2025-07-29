@@ -1,17 +1,24 @@
 package com.hartwig.hmftools.esvee.assembly;
 
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.ALIGNMENT_SCORE_ATTRIBUTE;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.firstInPair;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.getMateAlignmentEnd;
+import static com.hartwig.hmftools.common.region.BaseRegion.positionsOverlap;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.REMOTE_REGION_DISC_READ_BASE_MIN_AS;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.REMOTE_REGION_DISC_READ_BASE_MIN_QUAL_PERC;
 import static com.hartwig.hmftools.esvee.assembly.types.RemoteReadType.DISCORDANT;
 import static com.hartwig.hmftools.esvee.assembly.types.RemoteReadType.JUNCTION_MATE;
 import static com.hartwig.hmftools.esvee.assembly.types.RemoteReadType.SUPPLEMENTARY;
 import static com.hartwig.hmftools.esvee.assembly.types.RemoteRegion.mergeRegions;
+import static com.hartwig.hmftools.esvee.assembly.types.RemoteRegion.purgeLowQualDiscordantOnlyRegions;
 import static com.hartwig.hmftools.esvee.assembly.types.RemoteRegion.purgeWeakSupplementaryRegions;
+import static com.hartwig.hmftools.esvee.prep.ReadFilters.filterLowQualRead;
 
 import java.util.List;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
-import com.hartwig.hmftools.common.genome.region.Orientation;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.common.bam.SupplementaryReadData;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
@@ -21,6 +28,8 @@ import com.hartwig.hmftools.esvee.assembly.read.Read;
 
 public final class RemoteRegionFinder
 {
+    private static final int MAX_REMOTE_REGION_LENGTH = 10000;
+
     public static void findRemoteRegions(
             final JunctionAssembly assembly, final List<Read> discordantReads, final List<Read> remoteJunctionMates,
             final List<Read> suppJunctionReads)
@@ -49,13 +58,46 @@ public final class RemoteRegionFinder
 
         // purge regions with only weak supplementary support
         purgeWeakSupplementaryRegions(remoteRegions);
+        purgeLowQualDiscordantOnlyRegions(remoteRegions);
+
+        // remove regions which overlap the assembly
+        int index = 0;
+        while(index < remoteRegions.size())
+        {
+            RemoteRegion remoteRegion = remoteRegions.get(index);
+
+            if(assemblyOverlapsRemoteRegion(assembly, remoteRegion) && !remoteRegion.hasDiscordantReads())
+            {
+                remoteRegions.remove(index);
+            }
+            else if(remoteRegion.length() > MAX_REMOTE_REGION_LENGTH)
+            {
+                SV_LOGGER.warn("assembly({}) excluding long remote region({})", assembly, remoteRegion);
+                remoteRegions.remove(index);
+            }
+            else
+            {
+                ++index;
+            }
+        }
 
         assembly.addRemoteRegions(remoteRegions);
     }
 
-    private static void addOrCreateMateRemoteRegion(final List<RemoteRegion> remoteRegions, final Read read, boolean isJunctionRead)
+    private static boolean assemblyOverlapsRemoteRegion(final JunctionAssembly assembly, final RemoteRegion remoteRegion)
     {
-        if(read.isMateUnmapped())
+        if(!assembly.junction().Chromosome.equals(remoteRegion.Chromosome))
+            return false;
+
+        if(assembly.isForwardJunction())
+            return positionsOverlap(assembly.refBasePosition(), assembly.junction().Position, remoteRegion.start(), remoteRegion.end());
+        else
+            return positionsOverlap(assembly.junction().Position, assembly.refBasePosition(), remoteRegion.start(), remoteRegion.end());
+    }
+
+    public static void addOrCreateMateRemoteRegion(final List<RemoteRegion> remoteRegions, final Read read, boolean isJunctionRead)
+    {
+        if(read.isMateUnmapped() || read.isSupplementary())
             return;
 
         String mateChr = read.mateChromosome();
@@ -65,28 +107,44 @@ public final class RemoteRegionFinder
 
         addOrCreateRemoteRegion(
                 remoteRegions, read, isJunctionRead ? JUNCTION_MATE : DISCORDANT,
-                mateChr, read.mateAlignmentStart(), read.mateAlignmentEnd(), read.mateOrientation());
+                mateChr, read.mateAlignmentStart(), read.mateAlignmentEnd());
     }
 
     private static RemoteRegion addOrCreateRemoteRegion(
             final List<RemoteRegion> remoteRegions, final Read read, final RemoteReadType readType,
-            final String remoteChr, final int remotePosStart, final int remotePosEnd, final Orientation remoteOrientation)
+            final String remoteChr, final int remotePosStart, final int remotePosEnd)
     {
-        RemoteRegion matchedRegion = remoteRegions.stream()
-                .filter(x -> x.overlaps(remoteChr, remotePosStart, remotePosEnd, remoteOrientation)).findFirst().orElse(null);
+        RemoteRegion remoteRegion = remoteRegions.stream()
+                .filter(x -> x.overlaps(remoteChr, remotePosStart, remotePosEnd)).findFirst().orElse(null);
 
-        if(matchedRegion != null)
+
+        if(remoteRegion == null)
         {
-            matchedRegion.addReadDetails(read.id(), remotePosStart, remotePosEnd, readType);
-            return matchedRegion;
+            remoteRegion = new RemoteRegion(new ChrBaseRegion(remoteChr, remotePosStart, remotePosEnd), read.id(), readType);
+            remoteRegions.add(remoteRegion);
         }
         else
         {
-            RemoteRegion newRegion = new RemoteRegion(
-                    new ChrBaseRegion(remoteChr, remotePosStart, remotePosEnd), read.orientation(), read.id(), readType);
-            remoteRegions.add(newRegion);
-            return newRegion;
+            remoteRegion.addReadDetails(read.id(), remotePosStart, remotePosEnd, readType);
         }
+
+        if(readType == DISCORDANT && !remoteRegion.hasHighQualDiscordantRead() && isHighQualityDiscordantRead(read))
+        {
+            remoteRegion.setHasHighQualDiscordantRead();
+        }
+
+        return remoteRegion;
+    }
+
+    private static boolean isHighQualityDiscordantRead(final Read read)
+    {
+        int alignmentScore = read.bamRecord().hasAttribute(ALIGNMENT_SCORE_ATTRIBUTE)
+                ? read.bamRecord().getIntegerAttribute(ALIGNMENT_SCORE_ATTRIBUTE).intValue() : 0;
+
+        if(alignmentScore < REMOTE_REGION_DISC_READ_BASE_MIN_AS)
+            return false;
+
+        return !filterLowQualRead(read.bamRecord(), REMOTE_REGION_DISC_READ_BASE_MIN_QUAL_PERC);
     }
 
     private static void addOrCreateSupplementaryRemoteRegion(final List<RemoteRegion> remoteRegions, final Read read, int readScLength)
@@ -98,16 +156,9 @@ public final class RemoteRegionFinder
 
         int remotePosEnd = getMateAlignmentEnd(suppData.Position, suppData.Cigar);
 
-        /*
-        SV_LOGGER.debug("asmJunction({}) read({} flags={}) supp({})",
-                mAssembly.junction(), read.getName(), read.getFlags(), suppData);
-        */
-
         RemoteRegion region = addOrCreateRemoteRegion(
-                remoteRegions, read, SUPPLEMENTARY, suppData.Chromosome, suppData.Position,
-                remotePosEnd, Orientation.fromByte(suppData.orientation()));
+                remoteRegions, read, SUPPLEMENTARY, suppData.Chromosome, suppData.Position, remotePosEnd);
 
         region.addSoftClipMapQual(readScLength, suppData.MapQuality);
     }
-
 }

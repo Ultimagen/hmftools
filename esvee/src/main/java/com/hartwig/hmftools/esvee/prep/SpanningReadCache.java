@@ -3,7 +3,7 @@ package com.hartwig.hmftools.esvee.prep;
 import static java.lang.Math.abs;
 import static java.lang.String.format;
 
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 
 import java.util.List;
 import java.util.Map;
@@ -14,7 +14,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.hartwig.hmftools.common.utils.PerformanceCounter;
+import com.hartwig.hmftools.common.perf.PerformanceCounter;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.esvee.prep.types.ReadGroup;
 import com.hartwig.hmftools.esvee.prep.types.PrepRead;

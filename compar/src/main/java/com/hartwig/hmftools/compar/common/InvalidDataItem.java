@@ -18,7 +18,7 @@ public class InvalidDataItem implements ComparableItem
     public String key() { return ""; }
 
     @Override
-    public List<String> displayValues() { return Collections.EMPTY_LIST; }
+    public List<String> displayValues() { return Collections.emptyList(); }
 
     @Override
     public boolean reportable()
@@ -27,10 +27,17 @@ public class InvalidDataItem implements ComparableItem
     }
 
     @Override
+    public boolean isPass()
+    {
+        return true;
+    }
+
+    @Override
     public boolean matches(final ComparableItem other) { return false; }
 
     @Override
-    public Mismatch findMismatch(final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds)
+    public Mismatch findMismatch(final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds,
+            final boolean includeMatches)
     {
         return null;
     }

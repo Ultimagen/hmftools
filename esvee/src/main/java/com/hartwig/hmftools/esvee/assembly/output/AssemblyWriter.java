@@ -3,7 +3,8 @@ package com.hartwig.hmftools.esvee.assembly.output;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.READ_ID_TRIMMER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.assembly.output.AssemblyWriterUtils.addPhasingHeader;
 import static com.hartwig.hmftools.esvee.assembly.output.AssemblyWriterUtils.addPhasingInfo;
 import static com.hartwig.hmftools.esvee.assembly.output.AssemblyWriterUtils.addRemoteRegionHeader;
@@ -17,25 +18,21 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.util.StringJoiner;
 
-import com.hartwig.hmftools.esvee.AssemblyConfig;
+import com.hartwig.hmftools.esvee.assembly.AssemblyConfig;
 import com.hartwig.hmftools.esvee.assembly.AssemblyUtils;
 import com.hartwig.hmftools.esvee.assembly.types.AssemblyStats;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
-import com.hartwig.hmftools.esvee.utils.TruthsetAnnotation;
 
 public class AssemblyWriter
 {
     private final AssemblyConfig mConfig;
 
     private final BufferedWriter mWriter;
-    private final TruthsetAnnotation mTruthsetAnnotation;
 
     // write info about assemblies
-    public AssemblyWriter(final AssemblyConfig config, final TruthsetAnnotation truthsetAnnotation)
+    public AssemblyWriter(final AssemblyConfig config)
     {
         mConfig = config;
-        mTruthsetAnnotation = truthsetAnnotation;
-
         mWriter = initialiseWriter();
     }
 
@@ -53,42 +50,42 @@ public class AssemblyWriter
             StringJoiner sj = new StringJoiner(TSV_DELIM);
 
             sj.add("Id");
-            sj.add("Chromosome").add("JunctionPosition").add("JunctionOrientation");
+            sj.add("Chromosome").add("JuncPosition").add("JuncOrientation").add("JuncType");
 
-            sj.add("ExtBaseLength").add("RefBasePosition").add("RefBaseLength");
+            sj.add("ExtBaseLength").add("RefBasePosition").add("RefBaseLength").add("RefBaseCigar");
 
             addSupportHeader(sj);
-            AssemblyStats.addReadTypeHeader(sj);
 
             sj.add("Outcome");
 
             addPhasingHeader(sj);
 
-            AssemblyStats.addReadStatsHeader(sj);
-            sj.add("MismatchReads");
-
-            sj.add("RefBaseTrimmed");
-            sj.add("RefBaseTrimLength");
             sj.add("JunctionSequence");
             sj.add("RefBaseSequence");
+            sj.add("InsertType");
 
-            addRemoteRegionHeader(sj);
+            sj.add("RefBaseCandidates");
+            sj.add("UnmappedCandidates");
 
-            if(mConfig.RunAlignment)
-            {
-                sj.add("AlignResult");
-                sj.add("AssemblyInfo");
-            }
+            sj.add("AssemblyInfo");
 
             // extra detailed fields
-            sj.add("InitialReadId");
+            if(mConfig.AssemblyDetailedTsv)
+            {
+                sj.add("InitialReadId");
+                sj.add("ExtBaseBuildInfo");
+                sj.add("MismatchReads");
 
-            sj.add("InitRefBaseCandidates");
+                sj.add("RefSideSoftClips");
+                sj.add("RefBaseTrimmed");
+                sj.add("RefBaseTrimLength");
+                sj.add("RepeatInfo");
+                AssemblyStats.addReadStatsHeader(sj);
 
-            sj.add("MergedAssemblies");
-
-            sj.add("RepeatInfo");
-            sj.add("RefSideSoftClips");
+                AssemblyStats.addReadTypeHeader(sj);
+                addRemoteRegionHeader(sj);
+                sj.add("MergedAssemblies");
+            }
 
             writer.write(sj.toString());
             writer.newLine();
@@ -116,22 +113,20 @@ public class AssemblyWriter
             sj.add(String.valueOf(assembly.junction().Position));
             sj.add(String.valueOf(assembly.junction().Orient));
 
+            String juncType = assembly.junction().DiscordantOnly ? "DISC" :
+                    (assembly.junction().indelBased() ? "INDEL" : "SPLIT");
+            sj.add(juncType);
+
             sj.add(String.valueOf(assembly.extensionLength()));
             sj.add(String.valueOf(assembly.refBasePosition()));
             sj.add(String.valueOf(assembly.refBaseLength()));
+            sj.add(String.valueOf(assembly.refBaseCigar()));
 
             addSupportCounts(assembly, sj);
-            assembly.stats().addReadTypeCounts(sj);
 
             sj.add(String.valueOf(assembly.outcome()));
 
             addPhasingInfo(assembly, sj);
-
-            assembly.stats().addReadStats(sj);
-            sj.add(String.valueOf(assembly.mismatchReadCount()));
-
-            sj.add(assembly.refBasesRepeatedTrimmed());
-            sj.add(String.valueOf(assembly.refBaseTrimLength()));
 
             if(AssemblyUtils.hasUnsetBases(assembly))
             {
@@ -146,23 +141,33 @@ public class AssemblyWriter
                 sj.add(assembly.formRefBaseSequence(refBaseLength)); // long enough to show most short TIs
             }
 
-            addRemoteRegionInfo(assembly, sj);
-
-            if(mConfig.RunAlignment)
-            {
-                sj.add(String.valueOf(assembly.alignmentOutcome()));
-                sj.add(assembly.assemblyAlignmentInfo());
-            }
-
-            sj.add(assembly.initialReadId());
+            String insertionType =  assembly.hasLineSequence() ? "LINE" : "NONE";
+            sj.add(insertionType);
 
             sj.add(String.valueOf(assembly.stats().CandidateSupportCount));
+            sj.add(String.valueOf(assembly.stats().UnmappedReadCount));
 
-            sj.add(String.valueOf(assembly.mergedAssemblyCount()));
+            sj.add(assembly.assemblyAlignmentInfo());
 
-            sj.add(repeatsInfoStr(assembly.repeatInfo()));
+            if(mConfig.AssemblyDetailedTsv)
+            {
+                sj.add(READ_ID_TRIMMER.restore(assembly.initialReadId()));
+                sj.add(assembly.extBaseBuildInfo());
+                sj.add(String.valueOf(assembly.mismatchReadCount()));
 
-            sj.add(refSideSoftClipsStr(assembly.refSideSoftClips()));
+                sj.add(refSideSoftClipsStr(assembly.refSideSoftClips()));
+
+                sj.add(assembly.refBasesRepeatedTrimmed());
+                sj.add(String.valueOf(assembly.refBaseTrimLength()));
+
+                sj.add(repeatsInfoStr(assembly.repeatInfo()));
+
+                assembly.stats().addReadStats(sj);
+                assembly.stats().addReadTypeCounts(sj);
+
+                addRemoteRegionInfo(assembly, sj);
+                sj.add(String.valueOf(assembly.mergedAssemblyCount()));
+            }
 
             mWriter.write(sj.toString());
             mWriter.newLine();

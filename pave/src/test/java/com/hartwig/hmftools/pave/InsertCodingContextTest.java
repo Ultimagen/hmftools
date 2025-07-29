@@ -7,8 +7,8 @@ import static com.hartwig.hmftools.common.gene.TranscriptCodingType.CODING;
 import static com.hartwig.hmftools.common.gene.TranscriptRegionType.EXONIC;
 import static com.hartwig.hmftools.common.gene.TranscriptRegionType.INTRONIC;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_1;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
 import static com.hartwig.hmftools.common.variant.impact.VariantEffect.FRAMESHIFT;
 import static com.hartwig.hmftools.common.variant.impact.VariantEffect.INFRAME_INSERTION;
 import static com.hartwig.hmftools.pave.impact.HgvsProtein.HGVS_SPLICE_UNKNOWN;
@@ -201,6 +201,7 @@ public class InsertCodingContextTest
         altCodonBases = refBases.substring(57, 61) + alt + refBases.substring(71, 75);
         assertEquals(altCodonBases, impact.proteinContext().AltCodonBases);
         assertEquals(INFRAME_INSERTION, impact.topEffect());
+        assertEquals("p.Asp6delinsValTyr", impact.proteinContext().Hgvs);
 
         // test at phase 0
         pos = 92;

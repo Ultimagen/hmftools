@@ -13,7 +13,7 @@ import java.util.Map;
 import com.google.common.annotations.VisibleForTesting;
 import com.hartwig.hmftools.common.bam.BamSlicer;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
-import com.hartwig.hmftools.common.utils.PerformanceCounter;
+import com.hartwig.hmftools.common.perf.PerformanceCounter;
 
 import org.apache.commons.lang3.Validate;
 
@@ -61,8 +61,6 @@ public class PartitionReader implements AutoCloseable
         mPerfCounter = new PerformanceCounter("PartitionReader");
     }
 
-    private static final int LOG_COUNT = 100;
-
     @Override
     public void close()
     {
@@ -84,7 +82,14 @@ public class PartitionReader implements AutoCloseable
 
         perfCountersStart();
 
-        mBamSlicer.slice(mSamReader, mCurrentRegion, this::processSamRecord);
+        try
+        {
+            mBamSlicer.slice(mSamReader, mCurrentRegion, this::processSamRecord);
+        }
+        catch(Exception e)
+        {
+            BT_LOGGER.error("failed to slice region({}): {}", region, e.toString());
+        }
 
         postProcessRegion();
     }
@@ -112,12 +117,8 @@ public class PartitionReader implements AutoCloseable
         if(read.hasAttribute(CONSENSUS_READ_ATTRIBUTE)) // drop any consensus reads
             return;
 
-        // check for hard clip
-        if(read.getCigar().containsOperator(CigarOperator.HARD_CLIP))
-        {
-            BT_LOGGER.error("read: {}, hard clip found, require extra logic to handle", read);
-            throw new RuntimeException("hard clip found on read");
-        }
+        if(read.getCigar().containsOperator(CigarOperator.HARD_CLIP)) // hard-clips are only present on supplementaries so ignore
+            return;
 
         if(!read.getReadPairedFlag())
         {

@@ -2,8 +2,11 @@ package com.hartwig.hmftools.esvee.prep;
 
 import static com.hartwig.hmftools.common.region.ExcludedRegions.getPolyGRegion;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionsOverlap;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.assembly.LineUtils.hasLineTail;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.BAM_RECORD_SAMPLE_ID_TAG;
+import static com.hartwig.hmftools.esvee.prep.PrepConstants.DEPTH_WINDOW_SIZE;
+import static com.hartwig.hmftools.esvee.prep.types.WriteType.PREP_JUNCTION;
 
 import java.util.List;
 import java.util.Map;
@@ -12,17 +15,16 @@ import java.util.Set;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.bam.BamSlicer;
-import com.hartwig.hmftools.common.utils.PerformanceCounter;
+import com.hartwig.hmftools.common.perf.PerformanceCounter;
+import com.hartwig.hmftools.common.region.BaseRegion;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.esvee.prep.types.CombinedStats;
 import com.hartwig.hmftools.esvee.prep.types.PartitionStats;
 import com.hartwig.hmftools.esvee.prep.types.ReadFilterType;
-import com.hartwig.hmftools.esvee.prep.types.ReadFilters;
 import com.hartwig.hmftools.esvee.prep.types.ReadGroup;
 import com.hartwig.hmftools.esvee.prep.types.ReadGroupStatus;
 import com.hartwig.hmftools.esvee.prep.types.PrepRead;
 import com.hartwig.hmftools.esvee.prep.types.ReadType;
-import com.hartwig.hmftools.esvee.prep.types.WriteType;
 
 import htsjdk.samtools.SAMRecord;
 import htsjdk.samtools.SamReader;
@@ -42,6 +44,7 @@ public class PartitionSlicer
     private String mCurrentSampleId;
 
     private final JunctionTracker mJunctionTracker;
+    private final DepthTracker mDepthTracker;
 
     private final PartitionStats mStats;
     private final CombinedStats mCombinedStats;
@@ -68,7 +71,8 @@ public class PartitionSlicer
         mRegion = region;
         mCombinedStats = combinedStats;
 
-        mJunctionTracker = new JunctionTracker(mRegion, mConfig, mConfig.Hotspots, mConfig.Blacklist);
+        mDepthTracker = new DepthTracker(new BaseRegion(mRegion.start(), mRegion.end()), DEPTH_WINDOW_SIZE);
+        mJunctionTracker = new JunctionTracker(mRegion, mConfig, mDepthTracker, mConfig.Hotspots, mConfig.Blacklist);
 
         mSamReaders = samReaders;
         mBamSlicer = bamSlicer;
@@ -123,6 +127,7 @@ public class PartitionSlicer
         perfCounterStop(PerfCounters.Total);
 
         mCombinedStats.addPartitionStats(mStats);
+        mCombinedStats.addDiscordantStats(mJunctionTracker.discordantStats());
 
         if(mConfig.PerfDebug)
             mPerfCounters.addAll(mJunctionTracker.perfCounters());
@@ -141,7 +146,7 @@ public class PartitionSlicer
 
         if(mFilterRegion != null)
         {
-            if(positionsOverlap(readStart, readStart + mConfig.ReadLength, mFilterRegion.start(), mFilterRegion.end()))
+            if(positionsOverlap(readStart, readStart + mConfig.readLength(), mFilterRegion.start(), mFilterRegion.end()))
                 return;
         }
 
@@ -150,44 +155,61 @@ public class PartitionSlicer
             SV_LOGGER.debug("specific readId({}) unmapped({})", record.getReadName(), record.getReadUnmappedFlag());
         }
 
+        boolean hasLineTail = hasLineTail(record);
+
+        if(mReadFilters.ignoreRead(record, hasLineTail))
+            return;
+
         record.setAttribute(BAM_RECORD_SAMPLE_ID_TAG, mCurrentSampleId);
 
-        int filters = mReadFilters.checkFilters(record);
+        PrepRead read = new PrepRead(record);
 
-        if(filters == 0 || filters == ReadFilterType.MIN_MAP_QUAL.flag()) // allow reads only filtered by low map quality through
+        if(hasLineTail)
+            read.markLineTail();
+
+        mReadFilters.checkFilters(read);
+
+        if(mConfig.PerfDebug)
         {
-            PrepRead read = PrepRead.from(record);
-            read.setFilters(filters);
+            for(ReadFilterType type : ReadFilterType.values())
+            {
+                if(type.isSet(read.filters()))
+                    ++mStats.ReadFilterCounts[type.index()];
+            }
+        }
+
+        if(read.unfiltered() || read.filters() == ReadFilterType.MIN_MAP_QUAL.flag())
+        {
+            // allow reads only filtered by low map quality through
             read.setReadType(ReadType.JUNCTION);
 
             mJunctionTracker.processRead(read);
         }
         else
         {
-            processFilteredRead(record, filters);
+            processFilteredRead(read);
         }
+
+        mDepthTracker.processRead(record);
     }
 
-    private void processFilteredRead(final SAMRecord record, final int filters)
+    private void processFilteredRead(final PrepRead read)
     {
         // check criteria to keep an otherwise filtered, to see if it supports a non-filtered read or location
         if(mConfig.PerfDebug)
         {
             for(ReadFilterType type : ReadFilterType.values())
             {
-                if(type.isSet(filters))
+                if(type.isSet(read.filters()))
                     ++mStats.ReadFilterCounts[type.index()];
             }
         }
 
         // check for any evidence of support for an SV
-        boolean isSupportCandidate = mReadFilters.isCandidateSupportingRead(record, filters);
+        boolean isSupportCandidate = mReadFilters.isCandidateSupportingRead(read);
 
         if(!isSupportCandidate && !mConfig.writeReads())
             return;
-
-        PrepRead read = PrepRead.from(record);
-        read.setFilters(filters);
 
         if(isSupportCandidate)
             read.setReadType(ReadType.CANDIDATE_SUPPORT);
@@ -224,10 +246,10 @@ public class PartitionSlicer
             SV_LOGGER.debug("region({}) readGroups({} spanning={} candidate={}) expected({})",
                     mRegion, totalGroupCount, spanningGroupCount, remoteCandidateCount, expectedGroupCount);
 
-            mWriter.writeReadGroup(junctionGroups);
+            mWriter.writeReadGroups(junctionGroups);
         }
 
-        if(mConfig.WriteTypes.contains(WriteType.JUNCTIONS))
+        if(mConfig.WriteTypes.contains(PREP_JUNCTION))
         {
             mWriter.writeJunctionData(mRegion.Chromosome, mJunctionTracker.junctions());
         }

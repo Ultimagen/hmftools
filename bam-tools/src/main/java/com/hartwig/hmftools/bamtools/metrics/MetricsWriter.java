@@ -25,19 +25,43 @@ import static com.hartwig.hmftools.bamtools.metrics.FlagStatType.SINGLETON;
 import static com.hartwig.hmftools.bamtools.metrics.FlagStatType.SUPPLEMENTARY;
 import static com.hartwig.hmftools.bamtools.metrics.FlagStatType.TOTAL;
 import static com.hartwig.hmftools.bamtools.metrics.OffTargetFragments.writeOverlapCounts;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_BOTH_MAPPED;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_DUPLICATE;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_MAPPED;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_MATE_DIFF_CHR;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_MATE_DIFF_CHR_MAPQ_5;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_PAIRED;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_PRIMARY;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_PRIMARY_DUPLICATE;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_PRIMARY_MAPPED;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_PROPER_PAIR;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_READ1;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_READ2;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_SECONDARY;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_SINGLE;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_SUPPLEMENTARY;
+import static com.hartwig.hmftools.common.metrics.BamFlagStats.FLAGSTAT_TOTAL;
+import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_CHROMOSOME;
+import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_POSITION_END;
+import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_POSITION_START;
+import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.util.List;
+import java.util.StringJoiner;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.metrics.BamFlagStats;
 import com.hartwig.hmftools.common.metrics.BamMetricsSummary;
 import com.hartwig.hmftools.common.metrics.ImmutableBamMetricsSummary;
+import com.hartwig.hmftools.common.region.ChrBaseRegion;
 
 public class MetricsWriter
 {
+    private BufferedWriter mPartitionWriter;
     private BufferedWriter mTargetRegionsWriter;
     private BufferedWriter mOffTargetHighFragmentOverlapWriter;
 
@@ -45,15 +69,19 @@ public class MetricsWriter
     {
         mTargetRegionsWriter = !config.TargetRegions.isEmpty() ? TargetRegionStats.initialiseWriter(config) : null;
 
+        mPartitionWriter = !config.OnlyTargetRegions ? initialisePartitionWriter(config) : null;
+
         mOffTargetHighFragmentOverlapWriter = !config.TargetRegions.isEmpty() && config.HighFragmentOverlapThreshold > 0 ?
                 OffTargetFragments.initialiseEnrichedRegionWriter(config) : null;
     }
 
     public BufferedWriter targetRegionsWriter() { return mTargetRegionsWriter; }
+    public BufferedWriter partitionWriter() { return mPartitionWriter; }
     public BufferedWriter offTargetHighFragmentOverlapWriter() { return mOffTargetHighFragmentOverlapWriter; }
 
     public void close()
     {
+        closeBufferedWriter(mPartitionWriter);
         closeBufferedWriter(mTargetRegionsWriter);
         closeBufferedWriter(mOffTargetHighFragmentOverlapWriter);
     }
@@ -178,63 +206,65 @@ public class MetricsWriter
         try
         {
             // write flag stats
-            String filename = config.formFilename("flag_counts");
+            String filename = BamFlagStats.generateFilename(config.OutputDir, config.SampleId);
 
             BufferedWriter writer = createBufferedWriter(filename, false);
 
-            writer.write(String.format("%s in total (QC-passed reads + QC-failed reads)", flagStats.statAsString(TOTAL)));
+            writer.write(String.format("%s %s", flagStats.statAsString(TOTAL), FLAGSTAT_TOTAL));
             writer.newLine();
 
-            writer.write(String.format("%s primary", flagStats.statAsString(PRIMARY)));
+            writer.write(String.format("%s %s", flagStats.statAsString(PRIMARY), FLAGSTAT_PRIMARY));
             writer.newLine();
 
-            writer.write(String.format("%s secondary", flagStats.statAsString(SECONDARY)));
+            writer.write(String.format("%s %s", flagStats.statAsString(SECONDARY), FLAGSTAT_SECONDARY));
             writer.newLine();
 
-            writer.write(String.format("%s supplementary", flagStats.statAsString(SUPPLEMENTARY)));
+            writer.write(String.format("%s %s", flagStats.statAsString(SUPPLEMENTARY), FLAGSTAT_SUPPLEMENTARY));
             writer.newLine();
 
-            writer.write(String.format("%s duplicates", flagStats.statAsString(FlagStatType.DUPLICATE)));
+            writer.write(String.format("%s %s", flagStats.statAsString(FlagStatType.DUPLICATE), FLAGSTAT_DUPLICATE));
             writer.newLine();
 
-            writer.write(String.format("%s primary duplicates", flagStats.statAsString(PRIMARY_DUPLICATE)));
+            writer.write(String.format("%s %s", flagStats.statAsString(PRIMARY_DUPLICATE), FLAGSTAT_PRIMARY_DUPLICATE));
             writer.newLine();
 
-            writer.write(String.format("%s mapped %s",
-                    flagStats.statAsString(MAPPED), flagStatsPercentages(flagStats.getStat(MAPPED), flagStats.getStat(TOTAL))));
+            writer.write(String.format("%s %s %s",
+                    flagStats.statAsString(MAPPED), FLAGSTAT_MAPPED,
+                    flagStatsPercentages(flagStats.getStat(MAPPED), flagStats.getStat(TOTAL))));
             writer.newLine();
 
-            writer.write(String.format("%s primary mapped %s",
-                    flagStats.statAsString(PRIMARY_MAPPED), flagStatsPercentages(flagStats.getStat(PRIMARY_MAPPED), flagStats.getStat(PRIMARY))));
+            writer.write(String.format("%s %s %s",
+                    flagStats.statAsString(PRIMARY_MAPPED), FLAGSTAT_PRIMARY_MAPPED,
+                    flagStatsPercentages(flagStats.getStat(PRIMARY_MAPPED), flagStats.getStat(PRIMARY))));
             writer.newLine();
 
-            writer.write(String.format("%s paired in sequencing", flagStats.statAsString(PAIRED)));
+            writer.write(String.format("%s %s", flagStats.statAsString(PAIRED), FLAGSTAT_PAIRED));
             writer.newLine();
 
-            writer.write(String.format("%s read1", flagStats.statAsString(FlagStatType.READ1)));
+            writer.write(String.format("%s %s", flagStats.statAsString(FlagStatType.READ1), FLAGSTAT_READ1));
             writer.newLine();
 
-            writer.write(String.format("%s read2", flagStats.statAsString(FlagStatType.READ2)));
+            writer.write(String.format("%s %s", flagStats.statAsString(FlagStatType.READ2), FLAGSTAT_READ2));
             writer.newLine();
 
             writer.write(String.format(
-                    "%s properly paired %s",
-                    flagStats.statAsString(PROPERLY_PAIRED),
+                    "%s %s %s",
+                    flagStats.statAsString(PROPERLY_PAIRED), FLAGSTAT_PROPER_PAIR,
                     flagStatsPercentages(flagStats.getStat(PROPERLY_PAIRED), flagStats.getStat(PAIRED))));
             writer.newLine();
 
-            writer.write(String.format("%s with itself and mate mapped", flagStats.statAsString(PAIR_MAPPED)));
+            writer.write(String.format("%s %s", flagStats.statAsString(PAIR_MAPPED), FLAGSTAT_BOTH_MAPPED));
             writer.newLine();
 
-            writer.write(String.format("%s singletons %s",
-                    flagStats.statAsString(SINGLETON),
+            writer.write(String.format("%s %s %s",
+                    flagStats.statAsString(SINGLETON), FLAGSTAT_SINGLE,
                     flagStatsPercentages(flagStats.getStat(SINGLETON), flagStats.getStat(PAIRED))));
             writer.newLine();
 
-            writer.write(String.format("%s with mate mapped to a different chr", flagStats.statAsString(INTER_CHR_PAIR_MAPPED)));
+            writer.write(String.format("%s %s", flagStats.statAsString(INTER_CHR_PAIR_MAPPED), FLAGSTAT_MATE_DIFF_CHR));
             writer.newLine();
 
-            writer.write(String.format("%s with mate mapped to a different chr (mapQ>=5)", flagStats.statAsString(INTER_CHR_PAIR_MAP_QUAL_GE5)));
+            writer.write(String.format("%s %s", flagStats.statAsString(INTER_CHR_PAIR_MAP_QUAL_GE5), FLAGSTAT_MATE_DIFF_CHR_MAPQ_5));
             writer.newLine();
 
             writer.close();
@@ -268,6 +298,61 @@ public class MetricsWriter
         catch(IOException e)
         {
             BT_LOGGER.error("failed to write frag lengths file: {}", e.toString());
+        }
+    }
+
+    private BufferedWriter initialisePartitionWriter(final MetricsConfig config)
+    {
+        try
+        {
+            String filename = config.formFilename("partition_stats");
+
+            BufferedWriter writer = createBufferedWriter(filename, false);
+
+            StringJoiner header = new StringJoiner(TSV_DELIM);
+
+            header.add(FLD_CHROMOSOME);
+            header.add(FLD_POSITION_START);
+            header.add(FLD_POSITION_END);
+            header.add("TotalReads");
+            header.add("DuplicateReads");
+            header.add("ChimericReads");
+            header.add("InterPartition");
+            header.add("UnmappedReads");
+            header.add("ProcessTime");
+            writer.write(header.toString());
+            writer.newLine();
+            return writer;
+        }
+        catch(IOException e)
+        {
+            BT_LOGGER.error("failed to initialise partition stats file: {}", e.toString());
+            return null;
+        }
+    }
+
+    public synchronized void writePartitionStats(final ChrBaseRegion region, final PartitionStats partitionStats)
+    {
+        if(mPartitionWriter == null)
+            return;
+
+        try
+        {
+            StringJoiner sj = new StringJoiner(TSV_DELIM);
+
+            sj.add(region.Chromosome).add(String.valueOf(region.start())).add(String.valueOf(region.end()));
+            sj.add(String.valueOf(partitionStats.TotalReads));
+            sj.add(String.valueOf(partitionStats.DuplicateReads));
+            sj.add(String.valueOf(partitionStats.ChimericReads));
+            sj.add(String.valueOf(partitionStats.InterPartition));
+            sj.add(String.valueOf(partitionStats.UnmappedReads));
+            sj.add(format("%.3f", partitionStats.ProcessTime));
+            mPartitionWriter.write(sj.toString());
+            mPartitionWriter.newLine();
+        }
+        catch(IOException e)
+        {
+            BT_LOGGER.error("failed to write partition stats file: {}", e.toString());
         }
     }
 }

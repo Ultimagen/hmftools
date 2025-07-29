@@ -1,6 +1,10 @@
 package com.hartwig.hmftools.cobalt.norm;
 
+import static java.lang.Math.round;
+
 import static com.hartwig.hmftools.cobalt.CobaltConfig.CB_LOGGER;
+import static com.hartwig.hmftools.cobalt.CobaltConfig.registerCommonConfig;
+import static com.hartwig.hmftools.common.genome.gc.GCBucket.calcGcBucket;
 import static com.hartwig.hmftools.common.genome.gc.GCProfileFactory.GC_PROFILE;
 import static com.hartwig.hmftools.common.genome.gc.GCProfileFactory.addGcProfilePath;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.REF_GENOME_VERSION;
@@ -26,6 +30,8 @@ import java.util.Map;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.hartwig.hmftools.cobalt.CobaltConfig;
+import com.hartwig.hmftools.cobalt.CobaltConstants;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.purple.Gender;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
@@ -67,6 +73,10 @@ public class NormalisationConfig
         RefGenVersion = RefGenomeVersion.from(configBuilder);
         OutputFile = configBuilder.getValue(OUTPUT_FILE);
         DetailedFile = configBuilder.getValue(DETAILED_OUTPUT);
+
+        // set global constants
+        CobaltConstants.GC_BUCKET_MIN = calcGcBucket(configBuilder.getDecimal(CobaltConfig.GC_RATIO_MIN));
+        CobaltConstants.GC_BUCKET_MAX = calcGcBucket(configBuilder.getDecimal(CobaltConfig.GC_RATIO_MAX));
     }
 
     public String getWgsSampleId(final String sampleId)
@@ -129,6 +139,7 @@ public class NormalisationConfig
         configBuilder.addPath(COBALT_WGS_DIR, false, "Path to cobalt WGS files");
         configBuilder.addConfigItem(REF_GENOME_VERSION, true, REF_GENOME_VERSION_CFG_DESC);
         configBuilder.addPath(TARGET_REGIONS_BED, true, TARGET_REGIONS_BED_DESC);
+        registerCommonConfig(configBuilder);
         configBuilder.addRequiredConfigItem(OUTPUT_FILE, "Output normalisation file");
         configBuilder.addConfigItem(DETAILED_OUTPUT, "Detailed normalisation calcs file");
         addGcProfilePath(configBuilder, true);

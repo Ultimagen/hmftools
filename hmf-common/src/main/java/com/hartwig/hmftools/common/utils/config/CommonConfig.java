@@ -45,6 +45,9 @@ public final class CommonConfig
     public static final String PERF_DEBUG = "perf_debug";
     public static final String PERF_DEBUG_DESC = "Detailed performance tracking and logging";
 
+    public static final String PERF_LOG_TIME = "perf_log_time";
+    public static final String PERF_LOG_TIME_DESC = "Log performance data for routine exceeding specified time (0 = disabled)";
+
     public static final String TARGET_REGIONS_BED = "target_regions_bed";
     public static final String TARGET_REGIONS_BED_DESC = "Target regions BED file";
 
@@ -59,6 +62,9 @@ public final class CommonConfig
 
     public static final String CHORD_DIR_CFG = toolDirectory("chord");
     public static final String CHORD_DIR_DESC = toolDirectoryDesc("Chord");
+
+    public static final String CIDER_DIR_CFG = toolDirectory("cider");
+    public static final String CIDER_DIR_DESC = toolDirectoryDesc("Cider");
 
     public static final String COBALT_DIR_CFG = toolDirectory("cobalt");
     public static final String COBALT_DIR_DESC = toolDirectoryDesc("Cobalt");
@@ -102,8 +108,17 @@ public final class CommonConfig
     public static final String SIGS_DIR_CFG = toolDirectory("sigs");
     public static final String SIGS_DIR_DESC = toolDirectoryDesc("Signatures");
 
+    public static final String TEAL_DIR_CFG = toolDirectory("teal");
+    public static final String TEAL_DIR_DESC = toolDirectoryDesc("Teal");
+
     public static final String VIRUS_DIR_CFG = toolDirectory("virus");
     public static final String VIRUS_DIR_DESC = toolDirectoryDesc("Virus");
+
+    public static final String TUMOR_METRICS_DIR_CFG = "tumor_metrics_dir";
+    public static final String TUMOR_METRICS_DIR_DESC = "Path to sample metrics directory";
+
+    public static final String REF_METRICS_DIR_CFG = "ref_metrics_dir";
+    public static final String REF_METRICS_DIR_DESC = "Path to reference metrics directory";
 
     private static String toolDirectory(final String toolName) { return format("%s_dir", toolName); }
     private static String toolDirectoryDesc(final String toolName) { return format("Path to %s pipeline files", toolName); }

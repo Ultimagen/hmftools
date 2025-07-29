@@ -1,10 +1,9 @@
 package com.hartwig.hmftools.esvee.assembly.phase;
 
 import static java.lang.Math.min;
-import static java.lang.String.format;
 
-import static com.hartwig.hmftools.common.utils.TaskExecutor.runThreadTasks;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.runThreadTasks;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.assembly.types.ThreadTask.mergePerfCounters;
 
 import java.util.ArrayList;
@@ -18,13 +17,13 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.utils.PerformanceCounter;
-import com.hartwig.hmftools.esvee.AssemblyConfig;
+import com.hartwig.hmftools.common.perf.PerformanceCounter;
+import com.hartwig.hmftools.esvee.assembly.AssemblyConfig;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionGroup;
 import com.hartwig.hmftools.esvee.assembly.types.PhaseGroup;
-import com.hartwig.hmftools.esvee.assembly.types.ThreadTask;
 import com.hartwig.hmftools.esvee.assembly.output.PhaseGroupBuildWriter;
+import com.hartwig.hmftools.common.perf.TaskQueue;
 
 public class PhaseGroupBuilder
 {
@@ -54,6 +53,8 @@ public class PhaseGroupBuilder
 
     public List<PhaseGroup> phaseGroups() { return mPhaseGroups; }
 
+    private static final int PHASE_BUILD_LOG_COUNT = 100_000;
+
     public void buildGroups(final List<PerformanceCounter> perfCounters)
     {
         List<JunctionGroup> allJunctionGroups = Lists.newArrayList();
@@ -72,13 +73,15 @@ public class PhaseGroupBuilder
 
         junctionGroupQueue.addAll(allJunctionGroups);
 
+        TaskQueue taskQueue = new TaskQueue(junctionGroupQueue, "junction groups to local phase groups", PHASE_BUILD_LOG_COUNT);
+
         List<Thread> threadTasks = new ArrayList<>();
 
         List<LocalGroupBuilder> localBuilderTasks = Lists.newArrayList();
 
         for(int i = 0; i < taskCount; ++i)
         {
-            LocalGroupBuilder groupBuilderTask = new LocalGroupBuilder(mConfig, junctionGroupQueue, mWriter);
+            LocalGroupBuilder groupBuilderTask = new LocalGroupBuilder(taskQueue, mWriter);
             localBuilderTasks.add(groupBuilderTask);
             threadTasks.add(groupBuilderTask);
         }
@@ -97,6 +100,8 @@ public class PhaseGroupBuilder
 
         junctionGroupQueue.addAll(allJunctionGroups);
 
+        taskQueue = new TaskQueue(junctionGroupQueue, "junction groups to remote phase groups", PHASE_BUILD_LOG_COUNT);
+
         SV_LOGGER.info("building remote phase groups, current group count({})", mPhaseGroups.size());
 
         threadTasks = new ArrayList<>();
@@ -105,7 +110,7 @@ public class PhaseGroupBuilder
 
         for(int i = 0; i < taskCount; ++i)
         {
-            RemoteGroupBuilder groupBuilderTask = new RemoteGroupBuilder(mConfig, junctionGroupQueue, mJunctionGroupMap, mWriter);
+            RemoteGroupBuilder groupBuilderTask = new RemoteGroupBuilder(mConfig, taskQueue, mJunctionGroupMap, mWriter);
             remoteBuilderTasks.add(groupBuilderTask);
             threadTasks.add(groupBuilderTask);
         }
@@ -117,6 +122,8 @@ public class PhaseGroupBuilder
 
         // clean-up phase groups which were transferred into another group
         remoteBuilderTasks.forEach(x -> x.removedPhaseGroups().forEach(y -> mPhaseGroups.remove(y)));
+
+        SV_LOGGER.info("phase group building complete, final group count({})", mPhaseGroups.size());
 
         mergePerfCounters(perfCounters, remoteBuilderTasks.stream().collect(Collectors.toList()));
 
@@ -140,7 +147,7 @@ public class PhaseGroupBuilder
         }
 
         // run validation
-        if(mConfig.PerfDebug)
+        if(AssemblyConfig.DevDebug)
         {
             // check if an assembly is in 2 phase groups
             List<JunctionAssembly> assemblies = Lists.newArrayList();

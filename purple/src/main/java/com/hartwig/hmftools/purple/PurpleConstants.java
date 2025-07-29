@@ -13,6 +13,7 @@ public class PurpleConstants
     // TMB calcs
     public static final double MB_PER_GENOME = 2859;
     public static final double CODING_BASES_PER_GENOME = 3.188e7; // calculated from GRCh38 canonical transcripts (overlaps ignored)
+    public static final double TUMOR_MSI_LOAD_MIN_VAF = 0.02;
 
     // no-tumor
     public static final int NO_TUMOR_BAF_TOTAL = 3000;
@@ -21,7 +22,6 @@ public class PurpleConstants
 
     // target regions
     public static final int TARGET_REGIONS_MAX_DELETED_GENES = 1500;
-    public static final double ASSUMED_BIALLELIC_FRACTION = 0.2;
 
     // purity fitting
     public static final double MAX_DIPLOID_COPY_NUMBER = 1.2;
@@ -46,25 +46,20 @@ public class PurpleConstants
 
     public static final int MIN_DIPLOID_TUMOR_RATIO_COUNT_DEFAULT = 30;
     public static final int MIN_DIPLOID_TUMOR_RATIO_COUNT_AT_CENTROMERE_DEFAULT = 150;
-    public static final int TARGETED_MIN_DIPLOID_TUMOR_RATIO_COUNT_DEFAULT = 3;
+    public static final int TARGETED_MIN_DIPLOID_TUMOR_RATIO_COUNT_DEFAULT = 1;
 
     public static final double PLOIDY_PENALTY_FACTOR_DEFAULT = 0.4;
-
     public static final double PLOIDY_PENALTY_STANDARD_DEVIATION_DEFAULT = 0.05;
     public static final double TARGETED_PLOIDY_PENALTY_STANDARD_DEVIATION_DEFAULT = 0.1;
-
     public static final double PLOIDY_PENALTY_MIN_STANDARD_DEVIATION_DEFAULT = 1.5;
-
     public static final double PLOIDY_PENALTY_SUB_ONE_MAJOR_ALLELE_MULTIPLIER_DEFAULT = 1;
-    public static final double TARGETED_PLOIDY_PENALTY_SUB_ONE_MAJOR_ALLELE_MULTIPLIER_DEFAULT = 3;
-
     public static final double PLOIDY_PENALTY_SUB_MIN_ADDITIONAL_DEFAULT = 1.5;
-
     public static final double PLOIDY_PENALTY_MIN_DEFAULT = 0.1;
-    public static final double TARGETED_PLOIDY_PENALTY_MIN_DEFAULT = 0.2;
 
     public static final double TARGETED_DEVIATION_PENALTY_GC_MIN_ADJUST_DEFAULT = 0.25;
     public static final double TARGETED_GC_RATIO_EXPONENT_DEFAULT = 3;
+    
+    public static final double AMBIGUOUS_BAF_THRESHOLD = 0.535;
 
     // somatic fitting
     public static final double SNV_HOTSPOT_VAF_PROBABILITY = 0.01;
@@ -77,12 +72,15 @@ public class PurpleConstants
     public static final int SOMATIC_MIN_VARIANTS_DEFAULT = 10;
     public static final double SOMATIC_PENALTY_WEIGHT_DEFAULT = 1.5;
     public static final double HIGHLY_DIPLOID_PERCENTAGE_DEFAULT = 0.97;
+    public static final double HOTSPOT_GNOMAD_FREQ_THRESHOLD = 0.01;
 
     // tumor-only somatic fitting
     public static final double SOMATIC_FIT_TUMOR_ONLY_PURITY_MIN = 0.92;
     public static final double SOMATIC_FIT_TUMOR_ONLY_PLOIDY_MIN = 1.8;
     public static final double SOMATIC_FIT_TUMOR_ONLY_PLOIDY_MAX = 2.2;
-    public static final double SOMATIC_FIT_TUMOR_ONLY_MIN_VAF = 0.04;
+    public static final double SOMATIC_FIT_TUMOR_ONLY_VAF_MIN = 0.05;
+    public static final double SOMATIC_FIT_TUMOR_ONLY_VAF_MAX = 0.35;
+    public static final double SOMATIC_FIT_TUMOR_ONLY_HOTSPOT_VAF_CUTOFF = 0.50;
 
     // somatic fitting readjustment
     public static final double SNV_READJUST_CN_MIN = 1.8;
@@ -102,16 +100,11 @@ public class PurpleConstants
     public static final int MIN_TOTAL_SV_FRAGMENT_COUNT = 1000;
     public static final int MIN_TOTAL_SOMATIC_VAR_ALLELE_READ_COUNT = 1000;
 
+    public static final int SV_MAX_INFERRED_COPY_NUMBER = 1000;
+
     // SV recovery
     public static final int DEFAULT_RECOVERY_MIN_MATE_QUAL_SCORE = 300;
     public static final int DEFAULT_RECOVERY_MIN_SGL_QUAL_SCORE = 500;
-    public static final double RECOVERY_MIN_LENGTH = 1000;
-    public static final double RECOVERY_MIN_PLOIDY = 0.5;
-    public static final double RECOVERY_MIN_PLOIDY_PERC = 0.5;
-    public static final int RECOVERY_MIN_MATE_UNCERTAINTY = 150;
-    public static final int RECOVERY_UNBALANCED_MIN_DEPTH_WINDOW_COUNT = 5;
-    public static final double RECOVERY_UNBALANCED_MIN_UNEXPLAINED_COPY_NUMBER_CHANGE = 0.6;
-    public static final double RECOVERY_UNBALANCED_MIN_UNEXPLAINED_COPY_NUMBER_CHANGE_PERC = 0.2;
 
     // germline deletions
     public static final int GERMLINE_DEL_GENE_BUFFER = 500;
@@ -148,4 +141,10 @@ public class PurpleConstants
     public static final double BIALLELIC_THRESHOLD_PARAMETER_I = 1.4;
     public static final double BIALLELIC_THRESHOLD_PARAMETER_II = 0.8;
     public static final double BIALLELIC_LOH_BASE_ERROR_RATE = 0.02;
+    public static final double BIALLELIC_ASSUMED_FRACTION = 0.2;
+
+    // chimerism
+    public static final double CHIMERISM_SAMPLE_CUTOFF = 0.08;
+    public static final int CHIMERISM_MIN_BAF_COUNT = 2;
+    public static final double CHIMERISM_KDE_BANDWIDTH = 0.01;
 }

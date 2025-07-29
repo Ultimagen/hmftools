@@ -1,41 +1,45 @@
 package com.hartwig.hmftools.bamtools.slice;
 
-import static java.lang.Math.min;
-import static java.lang.String.format;
-
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.APP_NAME;
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.BT_LOGGER;
-import static com.hartwig.hmftools.common.genome.chromosome.HumanChromosome.lowerChromosome;
-import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.runThreadTasks;
+import static com.hartwig.hmftools.bamtools.slice.SliceConfig.UNMAPPED_READS_DISABLED;
+import static com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr;
 
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.Queue;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.stream.Collectors;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
-import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
-import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
-import com.hartwig.hmftools.common.utils.TaskExecutor;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import com.hartwig.hmftools.common.region.ExcludedRegions;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 
 import org.jetbrains.annotations.NotNull;
 
+import htsjdk.samtools.SAMRecordIterator;
+import htsjdk.samtools.SamReader;
+import htsjdk.samtools.SamReaderFactory;
+import htsjdk.samtools.ValidationStringency;
+
+
 public class RegionSlicer
 {
     private final SliceConfig mConfig;
+    private final List<SamReader> mBamReaders = Collections.synchronizedList(new ArrayList<>());
 
     public RegionSlicer(final ConfigBuilder configBuilder)
     {
         mConfig = new SliceConfig(configBuilder);
     }
 
-    public void run()
+    public void run() throws ExecutionException, InterruptedException, IOException
     {
         if(!mConfig.isValid())
             System.exit(1);
@@ -45,83 +49,123 @@ public class RegionSlicer
         long startTimeMs = System.currentTimeMillis();
 
         SliceWriter sliceWriter = new SliceWriter(mConfig);
-        ReadCache readCache = new ReadCache(mConfig);
+        ReadCache readCache = new ReadCache(sliceWriter);
 
-        Queue<ChrBaseRegion> regionsQueue = new ConcurrentLinkedQueue<>();
-        regionsQueue.addAll(mConfig.SpecificChrRegions.Regions);
+        ThreadLocal<SamReader> threadBamReader = createThreadLocalBamReader();
+        ExecutorService executorService = createExecutorService();
 
-        List<Thread> threadTasks = Lists.newArrayList();
-        List<RegionBamSlicer> regionBamSlicers = Lists.newArrayList();
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-        for(int i = 0; i < min(mConfig.SpecificChrRegions.Regions.size(), mConfig.Threads); ++i)
+        for(ChrBaseRegion region : mConfig.SliceRegions.Regions)
         {
-            RegionBamSlicer regionSlicer = new RegionBamSlicer(regionsQueue, mConfig, readCache, sliceWriter);
-            regionBamSlicers.add(regionSlicer);
-            threadTasks.add(regionSlicer);
+            futures.add(CompletableFuture.runAsync(new RegionBamSlicer(region, mConfig, readCache, threadBamReader), executorService));
         }
 
-        BT_LOGGER.info("splitting {} regions across {} threads", regionsQueue.size(), mConfig.Threads);
+        BT_LOGGER.info("splitting {} regions across {} threads", mConfig.SliceRegions.Regions.size(), mConfig.Threads);
 
-        if(!runThreadTasks(threadTasks))
-            System.exit(1);
+        // wait for completion
+        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).get();
+        futures.clear();
 
-        BT_LOGGER.info("initial slice complete");
+        BT_LOGGER.info("initial slice complete, read written({}) cached fragments({})",
+                sliceWriter.writeCount(), readCache.fragmentMap().size());
 
-        List<RemotePositions> remoteChrPositions = Lists.newArrayList();
+        readCache.setProcessingRemoteRegions(true);
 
-        for(Map.Entry<String,List<RemotePosition>> entry : readCache.chrRemotePositions().entrySet())
+        List<ChrBaseRegion> excludedRegions = mConfig.DropExcluded ?
+                ExcludedRegions.getPolyGRegions(mConfig.RefGenVersion) : Collections.emptyList();
+
+        // perform the slice of remote positions twice if necessary to pick up remote mates which in turn have remote supplementaries
+        for(int i = 0; i < 2; ++i)
         {
-            // no reason not to include MT and any alt contigs
-            List<RemotePosition> remotePositions = entry.getValue();
-            Collections.sort(remotePositions);
+            List<ChrBaseRegion> remotePositions = readCache.collateRemoteReadRegions();
 
-            remoteChrPositions.add(new RemotePositions(entry.getKey(), remotePositions));
+            for(ChrBaseRegion region : remotePositions)
+            {
+                if(ChrBaseRegion.overlaps(excludedRegions, region))
+                    continue;
+
+                futures.add(CompletableFuture.runAsync(new RemoteReadSlicer(region, mConfig, readCache, threadBamReader),
+                        executorService));
+            }
+
+            BT_LOGGER.info("splitting {} remote regions across {} threads", remotePositions.size(), mConfig.Threads);
+
+            // wait for completion
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).get();
+            futures.clear();
         }
 
-        Collections.sort(remoteChrPositions);
+        BT_LOGGER.info("remote slice complete");
 
-        List<RemoteReadSlicer> remoteReadSlicers = remoteChrPositions.stream()
-                .map(x -> new RemoteReadSlicer(x.Chromosome, x.Positions, mConfig, sliceWriter)).collect(Collectors.toList());
+        if(mConfig.MaxUnmappedReads != UNMAPPED_READS_DISABLED)
+        {
+            BT_LOGGER.info("slicing unmapped reads");
 
-        List<Callable> callableTasks = remoteReadSlicers.stream().collect(Collectors.toList());
+            sliceUnmappedReads(sliceWriter, threadBamReader.get());
 
-        if(!TaskExecutor.executeTasks(callableTasks, mConfig.Threads))
-            System.exit(1);
+            BT_LOGGER.info("unmapped read slice complete");
+        }
 
+        executorService.shutdown();
         sliceWriter.close();
+        closeBamReaders();
 
-        BT_LOGGER.info("secondary slice complete");
+        if(mConfig.LogMissingReads)
+        {
+            readCache.logMissingReads(excludedRegions);
+        }
 
         BT_LOGGER.info("Regions slice complete, mins({})", runTimeMinsStr(startTimeMs));
     }
 
-    private class RemotePositions implements Comparable<RemotePositions>
+    private void sliceUnmappedReads(final SliceWriter sliceWriter, SamReader samReader)
     {
-        public final String Chromosome;
-        public final List<RemotePosition> Positions;
+        long unmappedCount = 0;
 
-        public RemotePositions(final String chromosome, final List<RemotePosition> positions)
+        SAMRecordIterator iterator = samReader.queryUnmapped();
+
+        while(iterator.hasNext())
         {
-            Chromosome = chromosome;
-            Positions = positions;
-        }
+            sliceWriter.writeRead(iterator.next());
+            ++unmappedCount;
 
-        public String toString() { return format("chr(%s) positions(%d)", Chromosome, Positions.size()); }
-
-        @Override
-        public int compareTo(final RemotePositions other)
-        {
-            if(!Chromosome.equals(other.Chromosome))
-                return Chromosome.compareTo(other.Chromosome);
-
-            if(Positions.size() != other.Positions.size())
-                return Positions.size() > other.Positions.size() ? -1 : 1;
-
-            return 0;
+            if(mConfig.MaxUnmappedReads > 0 && unmappedCount >= mConfig.MaxUnmappedReads)
+                break;
         }
     }
 
-    public static void main(@NotNull final String[] args)
+    private ExecutorService createExecutorService()
+    {
+        int numDigits = Integer.toString(mConfig.Threads - 1).length();
+        final ThreadFactory namedThreadFactory = new ThreadFactoryBuilder().setNameFormat("thread-%0" + numDigits + "d").build();
+        return Executors.newFixedThreadPool(mConfig.Threads, namedThreadFactory);
+    }
+
+    private ThreadLocal<SamReader> createThreadLocalBamReader()
+    {
+        return ThreadLocal.withInitial(() ->
+        {
+            SamReaderFactory samReaderFactory = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT);
+            if(mConfig.RefGenomeFile != null)
+            {
+                samReaderFactory = samReaderFactory.referenceSequence(new File(mConfig.RefGenomeFile));
+            }
+            SamReader bamReader = samReaderFactory.open(new File(mConfig.BamFile));
+            mBamReaders.add(bamReader);
+            return bamReader;
+        });
+    }
+
+    private void closeBamReaders() throws IOException
+    {
+        for(SamReader bamReader : mBamReaders)
+        {
+            bamReader.close();
+        }
+    }
+
+    public static void main(@NotNull final String[] args) throws ExecutionException, InterruptedException, IOException
     {
         ConfigBuilder configBuilder = new ConfigBuilder(APP_NAME);
         SliceConfig.addConfig(configBuilder);

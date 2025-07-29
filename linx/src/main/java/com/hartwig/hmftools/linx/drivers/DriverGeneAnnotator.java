@@ -1,10 +1,10 @@
 package com.hartwig.hmftools.linx.drivers;
 
-import static com.hartwig.hmftools.common.drivercatalog.DriverCategory.TSG;
-import static com.hartwig.hmftools.common.drivercatalog.DriverType.PARTIAL_AMP;
+import static com.hartwig.hmftools.common.driver.DriverCategory.TSG;
+import static com.hartwig.hmftools.common.driver.DriverType.PARTIAL_AMP;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
 import static com.hartwig.hmftools.linx.drivers.GeneCopyNumberRegion.calcGeneCopyNumberRegion;
 import static com.hartwig.hmftools.common.purple.ChromosomeArm.P_ARM;
@@ -18,13 +18,13 @@ import java.util.Map;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.drivercatalog.DriverCatalog;
-import com.hartwig.hmftools.common.drivercatalog.DriverType;
+import com.hartwig.hmftools.common.driver.DriverCatalog;
+import com.hartwig.hmftools.common.driver.DriverType;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
 import com.hartwig.hmftools.common.gene.GeneData;
 import com.hartwig.hmftools.common.gene.TranscriptData;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
-import com.hartwig.hmftools.common.utils.PerformanceCounter;
+import com.hartwig.hmftools.common.perf.PerformanceCounter;
 import com.hartwig.hmftools.common.linx.ImmutableLinxDriver;
 import com.hartwig.hmftools.common.linx.LinxDriver;
 import com.hartwig.hmftools.linx.CohortFileInterface;

@@ -1,6 +1,8 @@
 package com.hartwig.hmftools.sage.filter;
 
+import static com.hartwig.hmftools.sage.SageCallConfig.RUN_TINC;
 import static com.hartwig.hmftools.sage.SageConstants.DEFAULT_FILTERED_MAX_GERMLINE_ALT_SUPPORT;
+import static com.hartwig.hmftools.sage.SageConstants.DEFAULT_FILTERED_MAX_GERMLINE_ALT_SUPPORT_TINC;
 import static com.hartwig.hmftools.sage.SageConstants.DEFAULT_HARD_MIN_TUMOR_ALT_SUPPORT;
 import static com.hartwig.hmftools.sage.SageConstants.DEFAULT_HARD_MIN_TUMOR_QUAL;
 import static com.hartwig.hmftools.sage.SageConstants.DEFAULT_HARD_MIN_TUMOR_VAF;
@@ -19,11 +21,13 @@ public class FilterConfig
     public final boolean DisableSoftFilter;
     public final int HardMinTumorQual;
     public final double HardMinTumorVaf;
-    public final int HardMinTumorRawAltSupport;
     public final int FilteredMaxGermlineAltSupport;
     public final int MinAvgBaseQual;
     public final int MinAvgBaseQualHotspot;
     public final int ReferenceSampleCount;
+
+    // static since accessed directly by alt candidates
+    public static int HardMinTumorRawAltSupport = DEFAULT_HARD_MIN_TUMOR_ALT_SUPPORT;
 
     public final SoftFilterConfig SoftHotspotFilter;
     public final SoftFilterConfig SoftPanelFilter;
@@ -45,7 +49,14 @@ public class FilterConfig
     {
         DisableSoftFilter = configBuilder.hasFlag(DISABLE_SOFT_FILTER);
         DisableHardFilter = configBuilder.hasFlag(DISABLE_HARD_FILTER);
-        FilteredMaxGermlineAltSupport = configBuilder.getInteger(FILTERED_MAX_GERMLINE_ALT_SUPPORT);
+
+        if(configBuilder.hasValue(FILTERED_MAX_GERMLINE_ALT_SUPPORT))
+            FilteredMaxGermlineAltSupport = configBuilder.getInteger(FILTERED_MAX_GERMLINE_ALT_SUPPORT);
+        else if(configBuilder.isRegistered(RUN_TINC) && configBuilder.hasFlag(RUN_TINC))
+            FilteredMaxGermlineAltSupport = DEFAULT_FILTERED_MAX_GERMLINE_ALT_SUPPORT_TINC;
+        else
+            FilteredMaxGermlineAltSupport = DEFAULT_FILTERED_MAX_GERMLINE_ALT_SUPPORT;
+
         HardMinTumorQual = configBuilder.getInteger(HARD_MIN_TUMOR_QUAL);
         HardMinTumorVaf = configBuilder.getDecimal(HARD_MIN_TUMOR_VAF);
         HardMinTumorRawAltSupport = configBuilder.getInteger(HARD_MIN_TUMOR_RAW_ALT_SUPPORT);
@@ -64,7 +75,6 @@ public class FilterConfig
         DisableSoftFilter = false;
         HardMinTumorQual = DEFAULT_HARD_MIN_TUMOR_QUAL;
         HardMinTumorVaf = DEFAULT_HARD_MIN_TUMOR_VAF;
-        HardMinTumorRawAltSupport = DEFAULT_HARD_MIN_TUMOR_ALT_SUPPORT;
         SoftHotspotFilter = DEFAULT_HOTSPOT_FILTER;
         SoftPanelFilter = DEFAULT_PANEL_FILTER;
         SoftHighConfidenceFilter = DEFAULT_HIGH_CONFIDENCE_FILTER;
@@ -89,7 +99,7 @@ public class FilterConfig
         configBuilder.addInteger(HARD_MIN_TUMOR_RAW_ALT_SUPPORT,
                 "Hard minimum tumor raw alt support", DEFAULT_HARD_MIN_TUMOR_ALT_SUPPORT);
 
-        configBuilder.addInteger(MIN_AVG_BASE_QUAL, "Min average base qua", DEFAULT_MIN_AVG_BASE_QUALITY);
+        configBuilder.addInteger(MIN_AVG_BASE_QUAL, "Min average base qual", DEFAULT_MIN_AVG_BASE_QUALITY);
 
         configBuilder.addInteger(
                 MIN_AVG_BASE_QUAL_HOTSPOT,

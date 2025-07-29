@@ -7,18 +7,22 @@ import com.google.common.collect.Sets;
 public enum SoftFilter
 {
     MIN_TUMOR_QUAL("minTumorQual", "min_tumor_qual", true, false, "Insufficient tumor quality"),
+    MIN_MAP_QUAL_FACTOR("minMQF", "min_mqf", true, false, "Insufficient map qual factor"),
     MIN_TUMOR_VAF("minTumorVAF", "min_tumor_vaf", true, false, "Insufficient tumor VAF"),
+    MIN_TUMOR_SUPPORT("minTumorSupport", "min_tumor_support", true, false, "Insufficient tumor strong support"),
     MIN_GERMLINE_DEPTH("minGermlineDepth", "min_germline_depth", false, true, "Insufficient germline depth"),
     MAX_GERMLINE_VAF("maxGermlineVAF", "max_germline_vaf", false, true, "Excess germline VAF"),
     MAX_GERMLINE_RELATIVE_QUAL(
             "maxGermlineRelQual", "max_germline_rel_qual", false, true, "Excess germline relative qual"),
     MAX_GERMLINE_ALT_SUPPORT(
             "maxGermlineAltSupport", "max_germline_alt_support", false, true, "Excess germline alt support"),
-    MIN_AVG_BASE_QUALITY("minAvgBaseQual", "", true, false, "Variant average base quality below limit"),
+    MIN_AVG_BASE_QUALITY("minAvgRawBaseQual", "", true, false, "Variant average raw base quality below limit"),
     FRAGMENT_STRAND_BIAS("fragmentStrandBias", "", true, false, "Variant exceeds fragment strand bias limit"),
     READ_STRAND_BIAS("readStrandBias", "", true, false, "Variant exceeds read strand bias limit"),
     FRAGMENT_COORDS("minFragmentCoords", "", true, false, "Insufficient fragment coordinate variation"),
     MAX_EDGE_DISTANCE("maxEdgeDistance", "", true, false, "Variant close to read edge"),
+    REALIGNED_FREQ("realignFrequency", "", true, false, "Support is predominantly realigned"),
+    FRAGMENT_LENGTH("fragmentLength", "", true, false, "Alt max fragment length well below average non-alt"),
     MAP_QUAL_REF_ALT_DIFFERENCE(
             "mapQualRefAltDiff", "", true, false, "Alt support map qual well below ref support"),
     JITTER("jitter", "", true, false, "Jitter filter"),
@@ -29,7 +33,7 @@ public enum SoftFilter
     DEDUP_INDEL("dedupIndel", "", true, false, "Variant duplicate SNV/MNV vs INDEL"),
     DEDUP_MATCH("dedupMatch", "", true, false, "Variant duplicate with different read contexts");
 
-    private static final Set<SoftFilter> TUMOR_FILTERS = Sets.newHashSet();
+    public static final Set<SoftFilter> TUMOR_FILTERS = Sets.newHashSet();
     public static final Set<SoftFilter> GERMLINE_FILTERS = Sets.newHashSet();
 
     static
@@ -80,6 +84,15 @@ public enum SoftFilter
         }
 
         return !softFilters.isEmpty();
+    }
+
+    public static boolean filtersMatch(final Set<SoftFilter> first, final Set<SoftFilter> second)
+    {
+        if(first.size() != second.size())
+            return false;
+
+        return first.stream().allMatch(x -> second.contains(x));
+
     }
 }
 

@@ -3,7 +3,9 @@ package com.hartwig.hmftools.wisp.purity.variant;
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.common.stats.PoissonCalcs.calcPoissonNoiseValue;
+import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 import static com.hartwig.hmftools.wisp.purity.PurityConstants.HIGH_PROBABILITY;
+import static com.hartwig.hmftools.wisp.purity.PurityConstants.INDEL_ERROR_RATE;
 import static com.hartwig.hmftools.wisp.purity.PurityConstants.LOW_PROBABILITY;
 import static com.hartwig.hmftools.wisp.purity.PurityConstants.SNV_QUAL_THRESHOLDS;
 import static com.hartwig.hmftools.wisp.purity.PurityConstants.SYNTHETIC_TUMOR_VAF;
@@ -21,9 +23,11 @@ import static com.hartwig.hmftools.wisp.purity.variant.SomaticPurityResult.INVAL
 
 import java.util.Collections;
 import java.util.List;
+import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
 import com.hartwig.hmftools.common.purple.PurityContext;
+import com.hartwig.hmftools.common.variant.VariantType;
 import com.hartwig.hmftools.wisp.purity.SampleData;
 import com.hartwig.hmftools.wisp.purity.PurityConfig;
 import com.hartwig.hmftools.wisp.purity.ResultsWriter;
@@ -44,10 +48,11 @@ public class SomaticPurityEstimator
     }
 
     public SomaticPurityResult calculatePurity(
-            final String sampleId, final PurityContext purityContext, final List<SomaticVariant> variants,
-            final int totalVariantCount, final int chipVariants)
+            final String sampleId, final List<SomaticVariant> variants, final int totalVariantCount,
+            final List<SomaticVariant> outlierVariants)
     {
         FragmentTotals fragmentTotals = new FragmentTotals();
+        FragmentTotals dualFragmentTotals = new FragmentTotals();
 
         int sampleDualDP = 0;
         int sampleDualAD = 0;
@@ -61,7 +66,11 @@ public class SomaticPurityEstimator
 
             fragmentTotals.addVariantData(
                     variant.CopyNumber, variant.VariantCopyNumber, tumorFragData.AlleleCount, sampleFragData.AlleleCount,
-                    tumorFragData.Depth, sampleFragData.Depth, sampleFragData.QualTotal);
+                    tumorFragData.Depth, sampleFragData.Depth);
+
+            dualFragmentTotals.addVariantData(
+                    variant.CopyNumber, variant.VariantCopyNumber, tumorFragData.AlleleCount, sampleFragData.UmiCounts.AlleleDual,
+                    tumorFragData.Depth, sampleFragData.UmiCounts.TotalDual);
 
             umiTypeCounts.add(sampleFragData.UmiCounts);
             sampleDualDP += sampleFragData.UmiCounts.TotalDual;
@@ -176,13 +185,34 @@ public class SomaticPurityEstimator
         }
 
         // report final probability as min of Dual and Normal Prob
-        double expectedDualNoiseFragments = mConfig.noiseRate(true) * sampleDualDP;
+        double dualNoiseRate = mConfig.noiseRate(true);
+        double expectedDualNoiseFragments = dualNoiseRate * sampleDualDP;
         purityCalcData.DualProbability = estimatedProbability(sampleDualAD, expectedDualNoiseFragments);
+        purityCalcData.DualLodPurityEstimate = calcLimitOfDetection(dualFragmentTotals, dualNoiseRate);
 
         // CT_LOGGER.info(format("patient(%s) sample(%s) sampleTotalFrags(%d) noise(%.1f) LOD(%.6f)",
         //        mSample.PatientId, sampleId, sampleDepthTotal, allFragsNoise, lodFragsResult.EstimatedPurity));
 
-        return new SomaticPurityResult(true, totalVariantCount, chipVariants, fragmentTotals, umiTypeCounts, purityCalcData);
+        StringJoiner sjOutlier = new StringJoiner(ITEM_DELIM);
+
+        for(SomaticVariant outlier : outlierVariants)
+        {
+            GenotypeFragments sampleFragData = outlier.findGenotypeData(sampleId);
+            GenotypeFragments tumorFragData = outlier.findGenotypeData(mSample.TumorId);
+
+            FragmentTotals variantFragTotals = new FragmentTotals();
+
+            variantFragTotals.addVariantData(
+                    outlier.CopyNumber, outlier.VariantCopyNumber, tumorFragData.AlleleCount, sampleFragData.AlleleCount,
+                    tumorFragData.Depth, sampleFragData.Depth);
+
+            double impliedTF = estimatedPurity(variantFragTotals.rawSampleVaf(), noiseRate, variantFragTotals);
+
+            sjOutlier.add(format("%s %d/%d %.2f %s",
+                    outlier, sampleFragData.AlleleCount, sampleFragData.Depth, sampleFragData.vaf(), formatPurityValue(impliedTF)));
+        }
+
+        return new SomaticPurityResult(true, totalVariantCount, sjOutlier.toString(), fragmentTotals, umiTypeCounts, purityCalcData);
     }
 
     public double getBqrErrorRate(final SomaticVariant variant)
@@ -203,30 +233,43 @@ public class SomaticPurityEstimator
         FragmentTotals fragmentTotals = new FragmentTotals();
 
         double depthWeightedErrorRate = 0;
+        double sampleDepthTotal = 0;
 
         for(SomaticVariant variant : variants)
         {
-            if(!hasVariantContext(filteredBqrData, variant.TriNucContext, variant.Alt))
-                continue;
-
             GenotypeFragments sampleFragData = variant.findGenotypeData(sampleId);
 
-            double varBqrErrorRate = getBqrErrorRate(variant);
+            double varBqrErrorRate = 0;
+
+            if(variant.Type == VariantType.SNP)
+            {
+                if(!hasVariantContext(filteredBqrData, variant.TriNucContext, variant.Alt))
+                    continue;
+
+                varBqrErrorRate = getBqrErrorRate(variant);
+            }
+            else
+            {
+                varBqrErrorRate = INDEL_ERROR_RATE;
+            }
+
             sampleFragData.setBqrErrorRate(varBqrErrorRate);
 
             depthWeightedErrorRate += varBqrErrorRate * sampleFragData.Depth;
+
+            sampleDepthTotal += sampleFragData.Depth;
 
             GenotypeFragments tumorFragData = variant.findGenotypeData(mSample.TumorId);
 
             fragmentTotals.addVariantData(
                     variant.CopyNumber, variant.VariantCopyNumber, tumorFragData.AlleleCount, sampleFragData.AlleleCount,
-                    tumorFragData.Depth, sampleFragData.Depth, sampleFragData.QualTotal);
+                    tumorFragData.Depth, sampleFragData.Depth);
         }
 
         if(fragmentTotals.sampleDepthTotal() == 0)
             return null;
 
-        double bqrErrorRate = depthWeightedErrorRate / fragmentTotals.sampleDepthTotal();
+        double bqrErrorRate = depthWeightedErrorRate / sampleDepthTotal;
 
         double probability = estimatedProbability(fragmentTotals, bqrErrorRate);
 

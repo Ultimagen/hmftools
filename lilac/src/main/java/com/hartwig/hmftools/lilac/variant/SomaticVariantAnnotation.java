@@ -2,6 +2,13 @@ package com.hartwig.hmftools.lilac.variant;
 
 import static com.hartwig.hmftools.common.region.BaseRegion.positionsOverlap;
 import static com.hartwig.hmftools.lilac.LilacConfig.LL_LOGGER;
+import static com.hartwig.hmftools.lilac.LilacUtils.calcNucelotideLocus;
+import static com.hartwig.hmftools.lilac.seq.HlaSequence.WILD_STR;
+
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -12,19 +19,12 @@ import com.hartwig.hmftools.common.variant.VariantContextDecorator;
 import com.hartwig.hmftools.common.variant.VcfFileReader;
 import com.hartwig.hmftools.lilac.LilacConfig;
 import com.hartwig.hmftools.lilac.LilacConstants;
-import com.hartwig.hmftools.lilac.LociPosition;
 import com.hartwig.hmftools.lilac.coverage.AlleleCoverage;
 import com.hartwig.hmftools.lilac.fragment.Fragment;
 import com.hartwig.hmftools.lilac.seq.HlaSequenceLoci;
-
-import static com.hartwig.hmftools.lilac.seq.HlaSequence.WILD_STR;
+import com.hartwig.hmftools.lilac.evidence.AminoAcid;
 
 import htsjdk.variant.variantcontext.VariantContext;
-
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 public class SomaticVariantAnnotation
 {
@@ -37,17 +37,14 @@ public class SomaticVariantAnnotation
 
     private final Map<String,TranscriptData> mHlaTranscriptData;
 
-    private final LociPosition mLociPositionFinder;
-
-    public SomaticVariantAnnotation(
-            final LilacConfig config, final Map<String,TranscriptData> transcriptData, final LociPosition lociPositionFinder)
+    public SomaticVariantAnnotation(final LilacConfig config, final Map<String,TranscriptData> transcriptData)
     {
         mConfig = config;
         mHlaTranscriptData = transcriptData;
 
         mGeneVariantLoci = Maps.newHashMap();
 
-        mLociPositionFinder = lociPositionFinder;
+        List<TranscriptData> transcripts = transcriptData.values().stream().toList();
 
         mSomaticVariants = Lists.newArrayList();
 
@@ -55,7 +52,7 @@ public class SomaticVariantAnnotation
 
         for(SomaticVariant variant : variants)
         {
-            int variantNucleotideLoci = mLociPositionFinder.calcNucelotideLocus(variant.Position);
+            int variantNucleotideLoci = calcNucelotideLocus(transcripts, variant.Position);
 
             if(variantNucleotideLoci < 0)
                 continue;
@@ -64,14 +61,8 @@ public class SomaticVariantAnnotation
 
             int variantAminoAcidLoci = variantNucleotideLoci / 3;
 
+            mGeneVariantLoci.computeIfAbsent(variant.Gene, k -> Lists.newArrayList());
             List<Integer> geneLoci = mGeneVariantLoci.get(variant.Gene);
-
-            if(geneLoci == null)
-            {
-                geneLoci = Lists.newArrayList();
-                mGeneVariantLoci.put(variant.Gene, geneLoci);
-            }
-
             geneLoci.add(variantAminoAcidLoci);
         }
     }
@@ -86,8 +77,8 @@ public class SomaticVariantAnnotation
         if(fragments.isEmpty())
             return coverages;
 
-        fragments.forEach(x -> x.qualityFilter(mConfig.MinBaseQual));
-        fragments.forEach(x -> x.buildAminoAcids());
+        fragments.forEach(Fragment::removeLowQualBases);
+        fragments.forEach(Fragment::buildAminoAcids);
 
         // take all variants in this gene together, and then ignore those loci
         List<Integer> variantLoci = mGeneVariantLoci.get(variant.Gene);
@@ -106,7 +97,6 @@ public class SomaticVariantAnnotation
             {
                 boolean matches = true;
                 int matchCount = 0;
-
                 for(int locus = fragment.minAminoAcidLocus(); locus <= fragment.maxAminoAcidLocus(); ++locus)
                 {
                     if(locus >= sequenceLoci.length())
@@ -115,12 +105,12 @@ public class SomaticVariantAnnotation
                     if(variantLoci.contains(locus))
                         continue;
 
-                    int index = fragment.getAminoAcidLoci().indexOf(locus);
-                    String fragmentAA = "";
+                    AminoAcid aminoAcid = fragment.aminoAcidsByLoci().get(locus);
+                    String fragmentAA;
 
-                    if(index >= 0)
+                    if(aminoAcid != null)
                     {
-                        fragmentAA = fragment.getAminoAcids().get(index);
+                        fragmentAA = aminoAcid.acid();
                     }
                     else
                     {

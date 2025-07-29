@@ -2,7 +2,7 @@ package com.hartwig.hmftools.orange.algo.purple;
 
 import java.util.List;
 
-import com.hartwig.hmftools.common.drivercatalog.DriverCatalog;
+import com.hartwig.hmftools.common.driver.DriverCatalog;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
 import com.hartwig.hmftools.common.purple.GermlineDeletion;
 import com.hartwig.hmftools.common.purple.PurityContext;
@@ -39,10 +39,16 @@ public interface PurpleData
     List<PurpleVariantContext> reportableGermlineVariants();
 
     @NotNull
-    List<StructuralVariant> allSomaticStructuralVariants();
+    List<StructuralVariant> allPassingSomaticStructuralVariants();
 
     @Nullable
-    List<StructuralVariant> allGermlineStructuralVariants();
+    List<StructuralVariant> allPassingGermlineStructuralVariants();
+
+    @NotNull
+    List<StructuralVariant> allInferredSomaticStructuralVariants();
+
+    @Nullable
+    List<StructuralVariant> allInferredGermlineStructuralVariants();
 
     @NotNull
     List<PurpleCopyNumber> allSomaticCopyNumbers();
@@ -55,4 +61,7 @@ public interface PurpleData
 
     @Nullable
     List<GermlineDeletion> reportableGermlineDeletions();
+
+    @NotNull
+    List<Segment> segments();
 }

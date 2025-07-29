@@ -3,8 +3,8 @@ package com.hartwig.hmftools.pave.impact;
 import static java.lang.Math.min;
 
 import static com.hartwig.hmftools.common.codon.Codons.STOP_AMINO_ACID;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
 import static com.hartwig.hmftools.common.variant.impact.VariantEffect.FRAMESHIFT;
 import static com.hartwig.hmftools.common.variant.impact.VariantEffect.MISSENSE;
 import static com.hartwig.hmftools.common.variant.impact.VariantEffect.STOP_GAINED;
@@ -25,9 +25,6 @@ import com.hartwig.hmftools.common.variant.impact.VariantEffect;
 
 public final class HgvsProtein
 {
-    /* Rules and conventions
-     */
-
     private static final String PROTEIN_ID = "p.";
     private static final String HGVS_FRAMESHIFT = "fs";
     private static final String HGVS_STOP_LOST = "ext*?";
@@ -83,7 +80,7 @@ public final class HgvsProtein
             {
                 hgvs += HGVS_STOP_GAINED;
             }
-            else if(hgvs.endsWith(HGVS_FRAMESHIFT))
+            else if(hgvs.endsWith(HGVS_FRAMESHIFT) && proteinContext.NetAltAminoAcids.charAt(0) == STOP_AMINO_ACID)
             {
                 hgvs = hgvs.substring(0, hgvs.length() - HGVS_FRAMESHIFT.length()) + HGVS_STOP_GAINED;
             }
@@ -303,6 +300,7 @@ public final class HgvsProtein
                 }
 
                 int aaStartIndex = proteinContext.CodonIndex + i;
+
                 int aaEndIndex = aaStartIndex + 1;
 
                 // conservative: only an insert, no deleted AAs so quote the range

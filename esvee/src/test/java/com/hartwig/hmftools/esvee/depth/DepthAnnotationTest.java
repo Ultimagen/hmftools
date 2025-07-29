@@ -2,6 +2,8 @@ package com.hartwig.hmftools.esvee.depth;
 
 import static java.lang.String.format;
 
+import static com.hartwig.hmftools.common.sv.StructuralVariantType.BND;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SV_TYPE;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.TOTAL_FRAGS;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_1;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_2;
@@ -46,7 +48,7 @@ public class DepthAnnotationTest
         Map<String,Integer> sampleVcfGenotypeIds = Maps.newHashMap();
         sampleVcfGenotypeIds.put(TEST_SAMPLE_ID, 0);
         DepthConfig config = new DepthConfig(0.1, 1000);
-        config.Samples.add(TEST_SAMPLE_ID);
+        config.SampleIds.add(TEST_SAMPLE_ID);
         mDepthTask = new DepthTask(CHR_1, config, sampleVcfGenotypeIds);
     }
 
@@ -286,6 +288,7 @@ public class DepthAnnotationTest
 
         Map<String,Object> commonAttributes = Maps.newHashMap();
         commonAttributes.put(TOTAL_FRAGS, 1);
+        commonAttributes.put(SV_TYPE, BND.toString());
 
         Map<String,Object> genotypeAttributes = Maps.newHashMap();
 

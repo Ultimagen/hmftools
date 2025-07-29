@@ -7,9 +7,9 @@ import com.beust.jcommander.UnixStyleUsageFormatter
 import com.google.common.collect.Multimap
 import com.hartwig.hmftools.cider.*
 import com.hartwig.hmftools.cider.CiderConstants.BLAST_REF_GENOME_VERSION
-import com.hartwig.hmftools.cider.blastn.BlastnMatch
-import com.hartwig.hmftools.cider.blastn.BlastnMatch.Companion.PRIMARY_ASSEMBLY_NAME
-import com.hartwig.hmftools.cider.blastn.BlastnRunner
+import com.hartwig.hmftools.cider.IgTcrGene.Companion.toCommonIgTcrGene
+import com.hartwig.hmftools.cider.blastn.BlastnUtil
+import com.hartwig.hmftools.cider.blastn.BlastnUtil.PRIMARY_ASSEMBLY_NAME
 import com.hartwig.hmftools.cider.curator.ImgtGeneCuratorSettings.BLASTN_EVALUE_CUTOFF
 import com.hartwig.hmftools.cider.curator.ImgtGeneCuratorSettings.BLASTN_MAX_MISMATCH
 import com.hartwig.hmftools.cider.curator.ImgtGeneCuratorSettings.IGKDEL_SEQ
@@ -20,7 +20,8 @@ import com.hartwig.hmftools.cider.curator.ImgtGeneCuratorSettings.SPECIES
 import com.hartwig.hmftools.cider.curator.ImgtGeneCuratorSettings.jAnchorSignatures
 import com.hartwig.hmftools.cider.curator.ImgtGeneCuratorSettings.liftOverBlacklist
 import com.hartwig.hmftools.cider.genes.GenomicLocation
-import com.hartwig.hmftools.cider.genes.IgTcrGeneFile
+import com.hartwig.hmftools.common.blastn.BlastnMatch
+import com.hartwig.hmftools.common.cider.IgTcrGeneFile
 import com.hartwig.hmftools.common.codon.Codons
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache
 import com.hartwig.hmftools.common.gene.GeneData
@@ -93,7 +94,7 @@ class ImgtGeneCurator
     lateinit var outputV37: String
 
     @Parameter(names = ["-threads"], description = "Number of threads")
-    var threadCount = CiderParams.DEFAULT_THREADS
+    var threadCount = 1
 
     @Parameter(names = ["-workdir"], description = "Number of threads")
     lateinit var workdir: String
@@ -139,8 +140,8 @@ class ImgtGeneCurator
         sLogger.info("validating V37 anchor locations")
         validateAnchorLocations(igTcrGeneListV37, refGenomeV37)
 
-        IgTcrGeneFile.write(outputV38, igTcrGeneListV38)
-        IgTcrGeneFile.write(outputV37, igTcrGeneListV37)
+        IgTcrGeneFile.write(outputV38, igTcrGeneListV38.map { o -> toCommonIgTcrGene(o) })
+        IgTcrGeneFile.write(outputV37, igTcrGeneListV37.map { o -> toCommonIgTcrGene(o) })
 
         return 0
     }
@@ -478,12 +479,10 @@ class ImgtGeneCurator
             var key = 0
             val keyToGeneDataMap: Map<Int, ImgtGeneData> = imgtGeneDataList.associateBy { ++key }
 
-            val blastnResults: Multimap<Int, BlastnMatch> = BlastnRunner.runBlastn(
+            val blastnResults: Multimap<Int, BlastnMatch> = BlastnUtil.runBlastn(
                 "imgt", blastn, blastDb,
                 keyToGeneDataMap.mapValues { geneData -> geneData.value.sequenceWithoutGaps },
-                workdir, numThreads, BLASTN_EVALUE_CUTOFF,
-                true
-            )
+                workdir, numThreads, BLASTN_EVALUE_CUTOFF)
 
             // process the blastnResults
             for ((k, geneData) in keyToGeneDataMap)
@@ -504,7 +503,7 @@ class ImgtGeneCurator
 
                 for (match in matches)
                 {
-                    val matchLocation = match.toGenomicLocation()
+                    val matchLocation = BlastnUtil.toGenomicLocation(match)
 
                     if (matchLocation == null)
                     {
@@ -663,7 +662,7 @@ class ImgtGeneCurator
             // we need to correct for the ends to make sure things align properly
             val startExtend = match.queryAlignStart - 1
             val endExtend = match.querySeqLen - match.queryAlignEnd
-            val matchGenomicLoc = match.toGenomicLocation()!!
+            val matchGenomicLoc = BlastnUtil.toGenomicLocation(match)!!
 
             if (startExtend == 0 && endExtend == 0)
             {

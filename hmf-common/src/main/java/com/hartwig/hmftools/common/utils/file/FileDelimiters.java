@@ -10,16 +10,21 @@ public final class FileDelimiters
     public static final String ITEM_DELIM = ";";
 
     public static final String CSV_EXTENSION = ".csv";
+    public static final String CSV_ZIP_EXTENSION = ".csv.gz";
     public static final String TSV_EXTENSION = ".tsv";
     public static final String TSV_ZIP_EXTENSION = ".tsv.gz";
     public static final String ZIP_EXTENSION = ".gz";
     public static final String VCF_ZIP_EXTENSION = ".vcf.gz";
+
     public static final String BAM_EXTENSION = ".bam";
     public static final String BAM_INDEX_EXTENSION = ".bai";
 
+    public static final String CRAM_EXTENSION = ".cram";
+    public static final String CRAM_INDEX_EXTENSION = ".crai";
+
     public static String inferFileDelimiter(final String filename)
     {
-        return filename.endsWith(CSV_EXTENSION) ? CSV_DELIM : TSV_DELIM;
+        return filename.endsWith(CSV_EXTENSION) || filename.endsWith(CSV_ZIP_EXTENSION) ? CSV_DELIM : TSV_DELIM;
     }
 
     public static String inferHeaderDelimiter(final String header)

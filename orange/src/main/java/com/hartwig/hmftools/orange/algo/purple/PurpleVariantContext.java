@@ -7,6 +7,7 @@ import com.hartwig.hmftools.common.variant.AllelicDepth;
 import com.hartwig.hmftools.common.variant.CodingEffect;
 import com.hartwig.hmftools.common.variant.Hotspot;
 import com.hartwig.hmftools.common.variant.Variant;
+import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.common.variant.impact.VariantTranscriptImpact;
 
 import org.immutables.value.Value;
@@ -26,6 +27,9 @@ public interface PurpleVariantContext extends Variant
     List<VariantTranscriptImpact> otherImpacts();
 
     @NotNull
+    VariantTier tier();
+
+    @NotNull
     Hotspot hotspot();
 
     boolean reported();
@@ -42,6 +46,8 @@ public interface PurpleVariantContext extends Variant
     double variantCopyNumber();
 
     boolean biallelic();
+
+    double biallelicProbability();
 
     @NotNull
     GenotypeStatus genotypeStatus();

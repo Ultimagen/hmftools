@@ -1,15 +1,18 @@
 package com.hartwig.hmftools.sage.append;
 
-import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
+import static com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
-import static com.hartwig.hmftools.common.utils.version.VersionInfo.fromAppName;
+import static com.hartwig.hmftools.common.utils.config.VersionInfo.fromAppName;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.LPS_APPEND_INFO;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.LPS_APPEND_INFO_DESC;
 import static com.hartwig.hmftools.sage.SageCommon.APP_NAME;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
-import static com.hartwig.hmftools.sage.vcf.VariantVCF.appendHeader;
+import static com.hartwig.hmftools.sage.vcf.VariantVCF.addGenotypeHeader;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.VERSION_META_DATA;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.module.ModuleDescriptor.Version;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -21,19 +24,19 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.hartwig.hmftools.common.utils.Doubles;
-import com.hartwig.hmftools.common.utils.TaskExecutor;
-import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
+import com.hartwig.hmftools.common.perf.TaskExecutor;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
-import com.hartwig.hmftools.common.utils.version.VersionInfo;
+import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
+import com.hartwig.hmftools.common.utils.config.VersionInfo;
 import com.hartwig.hmftools.common.variant.VcfFileReader;
 import com.hartwig.hmftools.common.variant.impact.VariantImpact;
 import com.hartwig.hmftools.common.variant.impact.VariantImpactSerialiser;
 import com.hartwig.hmftools.sage.SageCommon;
-import com.hartwig.hmftools.sage.evidence.FragmentLengths;
-import com.hartwig.hmftools.sage.pipeline.ChromosomePartition;
 import com.hartwig.hmftools.sage.bqr.BaseQualityRecalibration;
 import com.hartwig.hmftools.sage.bqr.BqrRecordMap;
+import com.hartwig.hmftools.sage.evidence.FragmentLengthWriter;
+import com.hartwig.hmftools.sage.pipeline.ChromosomePartition;
+import com.hartwig.hmftools.sage.quality.MsiJitterCalcs;
 import com.hartwig.hmftools.sage.vcf.VariantVCF;
 
 import org.jetbrains.annotations.NotNull;
@@ -45,22 +48,24 @@ import htsjdk.samtools.SamReaderFactory;
 import htsjdk.samtools.cram.ref.ReferenceSource;
 import htsjdk.samtools.reference.IndexedFastaSequenceFile;
 import htsjdk.variant.variantcontext.VariantContext;
+import htsjdk.variant.vcf.VCFFormatHeaderLine;
 import htsjdk.variant.vcf.VCFHeader;
 import htsjdk.variant.vcf.VCFHeaderLine;
+import htsjdk.variant.vcf.VCFHeaderLineType;
 
 public class SageAppendApplication
 {
     private final SageAppendConfig mConfig;
     private final IndexedFastaSequenceFile mRefGenome;
-    private final FragmentLengths mFragmentLengths;
+    private final FragmentLengthWriter mFragmentLengths;
 
-    private static final double MIN_PRIOR_VERSION = 2.8;
+    private static final Version MIN_PRIOR_VERSION = Version.parse("2.8");
 
     public SageAppendApplication(final ConfigBuilder configBuilder)
     {
         final VersionInfo version = fromAppName(APP_NAME);
         mConfig = new SageAppendConfig(version.version(), configBuilder);
-        mFragmentLengths = new FragmentLengths(mConfig.Common);
+        mFragmentLengths = new FragmentLengthWriter(mConfig.Common);
 
         if(!mConfig.Common.isValid())
         {
@@ -74,7 +79,7 @@ public class SageAppendApplication
         {
             refFastaSeqFile = new IndexedFastaSequenceFile(new File(mConfig.Common.RefGenomeFile));
         }
-        catch (IOException e)
+        catch(IOException e)
         {
             SG_LOGGER.error("Reference file loading failed: {}", e.toString());
             System.exit(1);
@@ -139,6 +144,11 @@ public class SageAppendApplication
                     continue;
                 }
             }
+            else if(mConfig.Common.SpecificChrRegions.hasFilters())
+            {
+                if(!mConfig.Common.SpecificChrRegions.includePosition(variant.getContig(), variant.getStart()))
+                    continue;
+            }
 
             existingVariants.add(variant);
         }
@@ -148,12 +158,14 @@ public class SageAppendApplication
         SG_LOGGER.info("loaded {} variants", existingVariants.size());
 
         SG_LOGGER.info("writing to file: {}", mConfig.Common.OutputFile);
-        VariantVCF outputVCF = new VariantVCF(mRefGenome, mConfig.Common, inputHeader);
+
+        VariantVCF outputVCF = new VariantVCF(mRefGenome, mConfig.Common.ReferenceIds, inputHeader, mConfig.Common.OutputFile);
 
         if(existingVariants.isEmpty())
         {
             outputVCF.close();
-            SG_LOGGER.info("writing empty output VCF", existingVariants.size());
+            mFragmentLengths.close();
+            SG_LOGGER.info("writing empty output VCF and fragment lengths TSV");
             return;
         }
 
@@ -172,9 +184,13 @@ public class SageAppendApplication
 
         final Map<String, BqrRecordMap> recalibrationMap = baseQualityRecalibration.getSampleRecalibrationMap();
 
-        final ChromosomePartition chromosomePartition = new ChromosomePartition(mConfig.Common, mRefGenome);
+        MsiJitterCalcs msiJitterCalcs = MsiJitterCalcs.build(
+                mConfig.Common.ReferenceIds, !mConfig.Common.SkipMsiJitter ? mConfig.Common.JitterParamsDir : null,
+                mConfig.Common.Quality.HighDepthMode);
 
-        for(final SAMSequenceRecord samSequenceRecord : dictionary().getSequences())
+        ChromosomePartition chromosomePartition = new ChromosomePartition(mConfig.Common, mRefGenome);
+
+        for(SAMSequenceRecord samSequenceRecord : dictionary().getSequences())
         {
             final String chromosome = samSequenceRecord.getSequenceName();
 
@@ -201,10 +217,11 @@ public class SageAppendApplication
                 if(regionVariants.isEmpty())
                     continue;
 
-                regionTasks.add(new RegionAppendTask(i, region, regionVariants, mConfig, mRefGenome, recalibrationMap, mFragmentLengths));
+                regionTasks.add(new RegionAppendTask(
+                        i, region, regionVariants, mConfig, mRefGenome, recalibrationMap, mFragmentLengths, msiJitterCalcs));
             }
 
-            final List<Callable> callableList = regionTasks.stream().collect(Collectors.toList());
+            final List<Callable<Void>> callableList = regionTasks.stream().collect(Collectors.toList());
             if(!TaskExecutor.executeTasks(callableList, mConfig.Common.Threads))
             {
                 System.exit(1);
@@ -227,10 +244,11 @@ public class SageAppendApplication
 
     private boolean validateInputHeader(VCFHeader header)
     {
-        double oldVersion = sageVersion(header);
-        if(Doubles.lessThan(oldVersion, MIN_PRIOR_VERSION))
+        Version version = sageVersion(header);
+
+        if(version.compareTo(MIN_PRIOR_VERSION) < 0)
         {
-            SG_LOGGER.error("Sage VCF version({}) older than required({})", oldVersion, MIN_PRIOR_VERSION);
+            SG_LOGGER.error("Sage VCF version({}) older than required({})", version, MIN_PRIOR_VERSION);
             return false;
         }
 
@@ -250,29 +268,26 @@ public class SageAppendApplication
             }
         }
 
-        appendHeader(header);
+        addGenotypeHeader(header); // called again in case new genotype fields are added and set in this version
+        addAppendHeader(header);
 
         return true;
     }
 
-    private static double sageVersion(@NotNull final VCFHeader header)
+    private static void addAppendHeader(final VCFHeader header)
     {
-        VCFHeaderLine oldVersion = header.getMetaDataLine(VERSION_META_DATA);
+        header.addMetaDataLine(new VCFFormatHeaderLine(LPS_APPEND_INFO, 1, VCFHeaderLineType.String, LPS_APPEND_INFO_DESC));
+    }
 
-        if(oldVersion == null)
-            return 0;
 
-        String[] versionComponents = oldVersion.getValue().split("\\.", -1);
+    private static Version sageVersion(@NotNull final VCFHeader header)
+    {
+        VCFHeaderLine version = header.getMetaDataLine(VERSION_META_DATA);
 
-        try
-        {
-            return Double.parseDouble(versionComponents[0]) + Double.parseDouble(versionComponents[1]);
-        }
-        catch(Exception e)
-        {
-            SG_LOGGER.error("failed to parse Sage version: {}", oldVersion.getValue());
-            return 0;
-        }
+        if(version == null)
+            return Version.parse("0");
+
+        return Version.parse(version.getValue());
     }
 
     private static Set<String> existingSamples(final VCFHeader header)
@@ -292,7 +307,6 @@ public class SageAppendApplication
         tumorReader.close();
         return dictionary;
     }
-
 
     public static void main(String[] args)
     {

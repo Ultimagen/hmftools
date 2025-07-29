@@ -1,27 +1,28 @@
 package com.hartwig.hmftools.compar;
 
-import static java.lang.String.format;
-
-import static com.hartwig.hmftools.common.drivercatalog.DriverType.AMP;
-import static com.hartwig.hmftools.common.drivercatalog.DriverType.DEL;
-import static com.hartwig.hmftools.common.drivercatalog.DriverType.PARTIAL_AMP;
+import static com.hartwig.hmftools.common.driver.DriverType.AMP;
+import static com.hartwig.hmftools.common.driver.DriverType.DEL;
+import static com.hartwig.hmftools.common.driver.DriverType.PARTIAL_AMP;
+import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
 import static com.hartwig.hmftools.compar.common.Category.GENE_COPY_NUMBER;
 import static com.hartwig.hmftools.compar.common.CommonUtils.buildComparers;
-import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
+import static com.hartwig.hmftools.compar.common.MismatchType.INVALID_ERROR;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.hartwig.hmftools.common.drivercatalog.DriverCatalogFile;
+import com.hartwig.hmftools.common.driver.DriverCatalogFile;
 import com.hartwig.hmftools.compar.common.FileSources;
+import com.hartwig.hmftools.compar.common.InvalidDataItem;
 import com.hartwig.hmftools.compar.common.Mismatch;
 import com.hartwig.hmftools.compar.purple.GeneCopyNumberComparer;
 
-public class ComparTask implements Callable
+public class ComparTask implements Callable<Void>
 {
     private final int mTaskId;
     private final ComparConfig mConfig;
@@ -43,7 +44,7 @@ public class ComparTask implements Callable
     public List<String> getSampleIds() { return mSampleIds; }
 
     @Override
-    public Long call()
+    public Void call()
     {
         for(int i = 0; i < mSampleIds.size(); ++i)
         {
@@ -62,7 +63,7 @@ public class ComparTask implements Callable
             CMP_LOGGER.info("{}: tasks complete for {} samples", mTaskId, mSampleIds.size());
         }
 
-        return (long)0;
+        return null;
     }
 
     private void processSample(final String sampleId)
@@ -77,7 +78,7 @@ public class ComparTask implements Callable
             {
                 if(mConfig.runCopyNumberGeneComparer() && comparer.category() == GENE_COPY_NUMBER)
                 {
-                    ((GeneCopyNumberComparer)comparer).addDriverGenes(loadCombinedCopyNumberDriverGenes(sampleId));
+                    ((GeneCopyNumberComparer) comparer).addDriverGenes(loadCombinedCopyNumberDriverGenes(sampleId));
                 }
 
                 boolean status = comparer.processSample(sampleId, mismatches);
@@ -90,6 +91,9 @@ public class ComparTask implements Callable
                 CMP_LOGGER.error("sample({}) failed processing: {}", sampleId, e.toString());
                 e.printStackTrace();
                 ++failedTypes;
+
+                InvalidDataItem invalidDataItem = new InvalidDataItem(comparer.category());
+                mismatches = List.of(new Mismatch(invalidDataItem, null, INVALID_ERROR, Collections.emptyList()));
             }
 
             mWriter.writeSampleMismatches(sampleId, comparer, mismatches);
@@ -113,8 +117,9 @@ public class ComparTask implements Callable
         for(String sourceName : mConfig.SourceNames)
         {
             String sourceSampleId = mConfig.sourceSampleId(sourceName, sampleId);
+            String sourceGermlineSampleId = mConfig.sourceGermlineSampleId(sourceName, sampleId);
 
-            FileSources fileSources = FileSources.sampleInstance(mConfig.FileSources.get(sourceName), sourceSampleId);
+            FileSources fileSources = FileSources.sampleInstance(mConfig.FileSources.get(sourceName), sourceSampleId, sourceGermlineSampleId);
 
             try
             {

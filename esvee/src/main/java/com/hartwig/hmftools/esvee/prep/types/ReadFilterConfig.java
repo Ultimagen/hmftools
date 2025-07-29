@@ -2,8 +2,8 @@ package com.hartwig.hmftools.esvee.prep.types;
 
 import static java.lang.Math.min;
 
-import static com.hartwig.hmftools.esvee.common.SvConstants.LOW_BASE_QUAL_THRESHOLD;
 import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_INDEL_LENGTH;
+import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_MAP_QUALITY;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.DEFAULT_READ_LENGTH;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.MAX_SUPPORT_FRAGMENT_DISTANCE;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.DEFAULT_MAX_FRAGMENT_LENGTH;
@@ -11,7 +11,6 @@ import static com.hartwig.hmftools.esvee.prep.PrepConstants.MIN_ALIGNMENT_BASES;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.MIN_INSERT_ALIGNMENT_OVERLAP;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.MIN_INSERT_LENGTH_SUPPORT;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.MIN_JUNCTION_SUPPORT;
-import static com.hartwig.hmftools.esvee.prep.PrepConstants.MIN_MAP_QUALITY;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.MIN_SOFT_CLIP_HIGH_QUAL_PERC;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.MIN_SOFT_CLIP_LENGTH;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.MIN_SUPPORTING_READ_DISTANCE;
@@ -28,7 +27,6 @@ public class ReadFilterConfig
     public final int MinInsertAlignmentOverlap;
     public final int MinIndelLength;
     public final int MinSoftClipLength;
-    public final int MinSoftClipHighQual;
     public final double MinSoftClipHighQualPerc;
 
     // supporting read config
@@ -38,8 +36,8 @@ public class ReadFilterConfig
     // final junction filtering
     public final int MinJunctionSupport;
 
-    private int mFragmentLengthMin; // as set by the distribution min and max percentiles
-    private int mFragmentLengthMax;
+    private int mObservedFragLengthMin; // as set by the distribution min and max percentiles
+    private int mObservedFragLengthMax;
     private int mMaxSupportingFragmentDistance;
 
     private static final String CFG_MIN_ALIGN_BASES = "min_align_bases";
@@ -47,7 +45,7 @@ public class ReadFilterConfig
 
     public ReadFilterConfig(
             final int minAlignmentBases, final int minMapQuality, final int minInsertAlignmentOverlap, final int minSoftClipLength,
-            final int minSoftClipHighQual, final double minSoftClipHighQualPerc, final int minSupportingReadDistance,
+            final double minSoftClipHighQualPerc, final int minSupportingReadDistance,
             final int minIndelLength, final int minJunctionSupport)
     {
         MinAlignmentBases = minAlignmentBases;
@@ -55,7 +53,6 @@ public class ReadFilterConfig
         MinInsertAlignmentOverlap = minInsertAlignmentOverlap;
         MinSoftClipLength = minSoftClipLength;
         MinIndelLength = minIndelLength;
-        MinSoftClipHighQual = minSoftClipHighQual;
         MinSoftClipHighQualPerc = minSoftClipHighQualPerc;
         MinSupportingReadDistance = minSupportingReadDistance;
 
@@ -63,19 +60,19 @@ public class ReadFilterConfig
         MinJunctionSupport = minJunctionSupport;
 
         mMaxSupportingFragmentDistance = DEFAULT_MAX_FRAGMENT_LENGTH;
-        mFragmentLengthMax = DEFAULT_MAX_FRAGMENT_LENGTH;
-        mFragmentLengthMin = DEFAULT_READ_LENGTH;
+        mObservedFragLengthMax = DEFAULT_MAX_FRAGMENT_LENGTH;
+        mObservedFragLengthMin = DEFAULT_READ_LENGTH;
     }
 
     public void setFragmentLengths(int minLength, int maxLength)
     {
-        mFragmentLengthMin = minLength;
-        mFragmentLengthMax = maxLength;
-        mMaxSupportingFragmentDistance = min(mFragmentLengthMax, MAX_SUPPORT_FRAGMENT_DISTANCE);
+        mObservedFragLengthMin = minLength;
+        mObservedFragLengthMax = maxLength;
+        mMaxSupportingFragmentDistance = min(mObservedFragLengthMax, MAX_SUPPORT_FRAGMENT_DISTANCE);
     }
 
-    public int fragmentLengthMax() { return mFragmentLengthMax; }
-    public int fragmentLengthMin() { return mFragmentLengthMin; }
+    public int observedFragLengthMax() { return mObservedFragLengthMax; }
+    public int observedFragLengthMin() { return mObservedFragLengthMin; }
     public int maxSupportingFragmentDistance() { return mMaxSupportingFragmentDistance; }
 
     public static ReadFilterConfig from(final ConfigBuilder configBuilder)
@@ -85,7 +82,6 @@ public class ReadFilterConfig
                 MIN_MAP_QUALITY,
                 MIN_INSERT_ALIGNMENT_OVERLAP,
                 MIN_SOFT_CLIP_LENGTH,
-                LOW_BASE_QUAL_THRESHOLD,
                 MIN_SOFT_CLIP_HIGH_QUAL_PERC,
                 MIN_SUPPORTING_READ_DISTANCE,
                 MIN_INDEL_LENGTH,

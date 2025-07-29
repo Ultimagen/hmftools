@@ -1,8 +1,8 @@
 package com.hartwig.hmftools.linx.chaining;
 
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.isStart;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.isStart;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DEL;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.INF;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
@@ -283,7 +283,7 @@ public class ChainFinder
     {
         return mUniqueChains;
     }
-    public double getValidAllelePloidySegmentPerc() { return mClusterJcnLimits.getValidAlleleJcnSegmentPerc(); }
+    public double getValidAlleleCopyNumberSegmentPerc() { return mClusterJcnLimits.getValidAlleleJcnSegmentPerc(); }
     public final long[] calcRangeData() { return mClusterJcnLimits.calcRangeData(); }
     public final ChainDiagnostics getDiagnostics() { return mDiagnostics; }
 

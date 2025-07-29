@@ -2,10 +2,14 @@ package com.hartwig.hmftools.esvee.assembly.types;
 
 import static java.lang.String.format;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.StringJoiner;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.esvee.assembly.read.Read;
 
 public class RepeatInfo
 {
@@ -20,8 +24,10 @@ public class RepeatInfo
         Count = count;
     }
 
+    public int lastIndex() { return Index + length() - 1; }
     public int postRepeatIndex() { return Index + length(); }
     public int length() { return Count * Bases.length(); }
+    public int baseLength() { return Bases.length(); }
 
     public boolean matchesType(final RepeatInfo other) { return Bases.equals(other.Bases); }
 
@@ -82,20 +88,25 @@ public class RepeatInfo
             }
         }
 
-        return repeats;
+        return repeats != null ? repeats : Collections.emptyList();
     }
 
-    public static String repeatsAsString(final List<RepeatInfo> repeats)
+    public static List<RepeatInfo> findRepeats(final byte[] bases, int startOffset, int endOffset)
     {
-        if(repeats.isEmpty())
-            return "";
+        if(startOffset == 0 && endOffset == 0)
+            return findRepeats(bases);
 
-        StringJoiner sj = new StringJoiner(" ");
-        repeats.forEach(x -> sj.add(format("%dx%s", x.Count, x.Bases)));
+        byte[] extensionBases = Arrays.copyOfRange(bases, startOffset, bases.length - endOffset);
+        List<RepeatInfo> repeats = RepeatInfo.findRepeats(extensionBases);
 
-        return format("%d %s", repeats.size(), sj);
+        if(startOffset == 0)
+            return repeats;
+
+        // re-apply the offset skipped in the search
+        return repeats.stream().map(x -> new RepeatInfo(x.Index + startOffset, x.Bases, x.Count)).collect(Collectors.toList());
     }
 
+    // see Sage for a flexible repeat-length routine to find these
     private static final int DUAL_LENGTH = 2;
     private static final int THREE_LENGTH = 3;
     private static final int FOUR_LENGTH = 4;
@@ -217,6 +228,115 @@ public class RepeatInfo
         return new RepeatInfo(index, repeat, repeatLength);
     }
 
+    // unused except in unit tests
+    public static RepeatInfo findSingleOrDualRepeat(final byte[] bases, int indexStart, boolean searchForwards)
+    {
+        int i = indexStart;
+        byte repeatBase = bases[i];
+
+        i += searchForwards ? 1 : -1;
+        int repeatCount = 1;
+
+        while(i >= 0 && i < bases.length - 1)
+        {
+            if(bases[i] != repeatBase)
+                break;
+
+            ++repeatCount;
+            i += searchForwards ? 1 : -1;
+        }
+
+        if(repeatCount >= MIN_SINGLE_REPEAT)
+            return new RepeatInfo(indexStart, String.valueOf((char)repeatBase), repeatCount);
+
+        // search for dual repeats at the current base or one onwards
+        return findDualRepeat(bases, indexStart, searchForwards);
+    }
+
+    public static RepeatInfo findDualRepeat(final byte[] bases, int indexStart, boolean searchForwards)
+    {
+        // search for dual repeats
+        byte repeatBase, repeatBase2;
+
+        if(searchForwards)
+        {
+            if(indexStart >= bases.length - 2)
+                return null;
+
+            repeatBase = bases[indexStart];
+            repeatBase2 = bases[indexStart + 1];
+
+        }
+        else
+        {
+            if(indexStart == 0)
+                return null;
+
+            repeatBase = bases[indexStart - 1];
+            repeatBase2 = bases[indexStart];
+        }
+
+        int repeatCount = 1;
+        int i = searchForwards ? indexStart + 2 : indexStart - 2;
+
+        while(i >= 1 && i < bases.length - 2)
+        {
+            if(searchForwards)
+            {
+                if(bases[i] != repeatBase || bases[i + 1] != repeatBase2)
+                    break;
+
+                i += 2;
+            }
+            else
+            {
+                if(bases[i - 1] != repeatBase || bases[i] != repeatBase2)
+                    break;
+
+                i += -2;
+            }
+
+            ++repeatCount;
+        }
+
+        if(repeatCount >= MIN_DUAL_REPEAT)
+        {
+            return new RepeatInfo(indexStart, String.valueOf((char)repeatBase) + (char)repeatBase2, repeatCount);
+        }
+
+        return null;
+    }
+
+    public static int getRepeatCount(final Read read, final RepeatInfo repeatInfo, int readIndexStart, boolean searchForward)
+    {
+        // count how many instance of the repeat are in this read
+        int repeatCount = 0;
+        int repeatLength = repeatInfo.baseLength();
+        int readIndex = readIndexStart;
+
+        if(!searchForward)
+            readIndex -= repeatLength - 1; // move to start of repeat
+
+        if(readIndex < 0 || readIndex >= read.basesLength() - repeatLength + 1)
+            return -1;
+
+        byte[] repeatBases = repeatInfo.Bases.getBytes();
+
+        while(readIndex >= 0 && readIndex < read.basesLength() - repeatLength + 1)
+        {
+            for(int j = 0; j < repeatLength; ++j)
+            {
+                if(read.getBases()[readIndex + j] != repeatBases[j])
+                    return repeatCount;
+            }
+
+            ++repeatCount;
+            readIndex += searchForward ? repeatLength : -repeatLength;
+        }
+
+        return repeatCount;
+    }
+
     public static String buildTrimmedRefBaseSequence(final JunctionAssembly assembly, final int maxSequenceLength)
     {
         if(assembly.repeatInfo().isEmpty())
@@ -315,5 +435,16 @@ public class RepeatInfo
         }
 
         return trimmedBasesLength;
+    }
+
+    public static String repeatsAsString(final List<RepeatInfo> repeats)
+    {
+        if(repeats.isEmpty())
+            return "";
+
+        StringJoiner sj = new StringJoiner(" ");
+        repeats.forEach(x -> sj.add(format("%dx%s", x.Count, x.Bases)));
+
+        return format("%d %s", repeats.size(), sj);
     }
 }

@@ -1,255 +1,360 @@
 package com.hartwig.hmftools.esvee.prep;
 
 import static java.lang.Math.abs;
-import static java.lang.Math.min;
+import static java.lang.Math.max;
 
-import static com.hartwig.hmftools.common.bam.SamRecordUtils.mateNegativeStrand;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.switchIndex;
-import static com.hartwig.hmftools.esvee.prep.PrepConstants.DISCORDANT_GROUP_MAX_DISTANCE;
+import static com.hartwig.hmftools.esvee.common.CommonUtils.isDiscordantFragment;
+import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_MAP_QUALITY;
+import static com.hartwig.hmftools.esvee.common.SvConstants.maxConcordantFragmentLength;
+import static com.hartwig.hmftools.esvee.prep.KnownHotspot.readGroupMatchesHotspot;
+import static com.hartwig.hmftools.esvee.prep.PrepConstants.DISCORDANT_GROUP_MAX_LOCAL_LENGTH;
+import static com.hartwig.hmftools.esvee.prep.PrepConstants.DISCORDANT_GROUP_MIN_ALIGN_SCORE;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.DISCORDANT_GROUP_MIN_FRAGMENTS;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.DISCORDANT_GROUP_MIN_FRAGMENTS_SHORT;
-import static com.hartwig.hmftools.esvee.prep.types.PrepRead.UNMAPPED_CHR;
+import static com.hartwig.hmftools.esvee.prep.PrepConstants.DISCORDANT_GROUP_MIN_MAP_QUAL;
+import static com.hartwig.hmftools.esvee.prep.ReadFilters.aboveRepeatTrimmedAlignmentThreshold;
+import static com.hartwig.hmftools.esvee.prep.types.DiscordantGroup.firstPrimaryRead;
+import static com.hartwig.hmftools.esvee.prep.types.DiscordantRemoteRegion.mergeRemoteRegions;
 
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.hartwig.hmftools.common.genome.region.Orientation;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
-import com.hartwig.hmftools.esvee.prep.types.GroupBoundary;
+import com.hartwig.hmftools.esvee.prep.types.DiscordantGroup;
+import com.hartwig.hmftools.esvee.prep.types.DiscordantRemoteRegion;
+import com.hartwig.hmftools.esvee.prep.types.DiscordantStats;
 import com.hartwig.hmftools.esvee.prep.types.JunctionData;
 import com.hartwig.hmftools.esvee.prep.types.PrepRead;
 import com.hartwig.hmftools.esvee.prep.types.ReadGroup;
 import com.hartwig.hmftools.esvee.prep.types.ReadType;
 import com.hartwig.hmftools.esvee.prep.types.RemoteJunction;
 
-public final class DiscordantGroups
+public class DiscordantGroups
 {
-    public static List<JunctionData> formDiscordantJunctions(
-            final ChrBaseRegion region, final List<ReadGroup> readGroups, int shortFragmentLength)
+    private final ChrBaseRegion mRegion;
+    private final int mMaxConcordantFragmentLength;
+    private final int mMinDiscordantFragmentLength;
+    private final boolean mTrackRemotes;
+    private final List<KnownHotspot> mKnownHotspots;
+
+    public DiscordantGroups(
+            final ChrBaseRegion region, int observedMaxFragmentLength, final List<KnownHotspot> knownHotspots, boolean trackRemotes)
+    {
+        mRegion = region;
+        mMaxConcordantFragmentLength = observedMaxFragmentLength;
+        mMinDiscordantFragmentLength = maxConcordantFragmentLength(observedMaxFragmentLength) * 2;
+        mKnownHotspots = knownHotspots;
+        mTrackRemotes = trackRemotes;
+    }
+
+    public List<JunctionData> formDiscordantJunctions(final List<ReadGroup> candidateReadGroups)
     {
         List<JunctionData> discordantJunctions = Lists.newArrayList();
-        Set<String> assignedGroups = Sets.newHashSet();
 
-        for(int i = 0; i < readGroups.size() - DISCORDANT_GROUP_MIN_FRAGMENTS;)
+        // each starting orientation is tested in turn since these need to be consistent to form a candidate discordant-only junction
+        for(int o = 0; o <= 1; ++o)
         {
-            ReadGroup group1 = readGroups.get(i);
+            Orientation orientation = o == 0 ? Orientation.FORWARD : Orientation.REVERSE;
 
-            if(assignedGroups.contains(group1.id()))
+            List<ReadGroup> readGroups = candidateReadGroups.stream()
+                    .filter(x -> firstPrimaryRead(x).orientation() == orientation).collect(Collectors.toList());
+
+            Set<String> assignedGroups = Sets.newHashSet();
+
+            // first sort the groups by their first primary read coordinates, which will be used to form discordant group boundaries
+            Collections.sort(readGroups, new ReadGroupSorter());
+
+            for(int i = 0; i < readGroups.size() - DISCORDANT_GROUP_MIN_FRAGMENTS + 1; )
             {
-                ++i;
-                continue;
-            }
+                ReadGroup firstGroup = readGroups.get(i);
 
-            PrepRead read1 = group1.reads().get(0);
-
-            GroupBoundary[] group1Boundaries = groupBoundaries(group1);
-            PrepRead[] boundaryReads = null;
-            GroupBoundary[] innerBoundaries = null;
-            List<ReadGroup> closeGroups = null;
-
-            int lastSkippedIndex = readGroups.size(); // used to set where the start the next search
-
-            for(int j = i + 1; j < readGroups.size(); ++j)
-            {
-                ReadGroup group2 = readGroups.get(j);
-
-                if(assignedGroups.contains(group2.id()))
-                    continue;
-
-                PrepRead read2 = group2.reads().get(0);
-
-                if(read2.orientation() != read1.orientation() || read2.mateOrientation() != read1.mateOrientation())
+                if(assignedGroups.contains(firstGroup.id()))
                 {
-                    lastSkippedIndex = min(j, lastSkippedIndex);
+                    ++i;
                     continue;
                 }
 
-                int group2Boundary = read2.orientation().isForward() ? read2.end() : read2.start();
+                DiscordantGroup discordantGroup = DiscordantGroup.fromReadGroup(firstGroup);
 
-                if(abs(group2Boundary - group1Boundaries[SE_START].Position) > DISCORDANT_GROUP_MAX_DISTANCE)
+                int j = i + 1;
+                for(; j < readGroups.size(); ++j)
                 {
-                    lastSkippedIndex = min(j, lastSkippedIndex);
-                    break;
+                    ReadGroup nextGroup = readGroups.get(j);
+
+                    if(assignedGroups.contains(nextGroup.id()))
+                        continue;
+
+                    PrepRead nextRead = firstPrimaryRead(nextGroup);
+
+                    if(nextRead.AlignmentStart > discordantGroup.Region.end())
+                        break;
+
+                    discordantGroup.tryAddReadGroup(nextGroup, nextRead);
                 }
 
-                GroupBoundary[] group2Boundaries = groupBoundaries(group2);
-
-                if(!regionsWithinRange(group1Boundaries, group2Boundaries))
+                if(isValidDiscordantGroup(discordantGroup))
                 {
-                    lastSkippedIndex = min(j, lastSkippedIndex);
-                    continue;
+                    addJunctions(discordantGroup, discordantJunctions);
+                    discordantGroup.readGroups().forEach(x -> assignedGroups.add(x.id()));
                 }
 
-                if(closeGroups == null)
-                {
-                    closeGroups = Lists.newArrayList(group1);
-                    boundaryReads = new PrepRead[] {read1, read1};
-                    innerBoundaries = new GroupBoundary[] { group1Boundaries[SE_START], group1Boundaries[SE_END] };
-                }
-
-                closeGroups.add(group2);
-
-                // widen with new group and record the reads at the innermost boundary
-                if(isCloserToJunction(innerBoundaries, group2Boundaries, SE_START))
-                {
-                    boundaryReads[SE_START] = read2;
-                    innerBoundaries[SE_START] = group2Boundaries[SE_START];
-                }
-
-                if(isCloserToJunction(innerBoundaries, group2Boundaries, SE_END))
-                {
-                    boundaryReads[SE_END] = read2;
-                    innerBoundaries[SE_END] = group2Boundaries[SE_END];
-                }
-            }
-
-            if(closeGroups != null && hasSufficientUnassignedFragments(closeGroups, innerBoundaries, shortFragmentLength))
-            {
-                addJunctions(closeGroups, innerBoundaries, boundaryReads, region, discordantJunctions);
-                closeGroups.forEach(x -> assignedGroups.add(x.id()));
-
-                // jump the first skipped index to avoid reassessing groups already added
-                i = lastSkippedIndex == readGroups.size() ? i + 1 : lastSkippedIndex;
-            }
-            else
-            {
-                ++i;
+                i = j; // move to the first group not added
             }
         }
 
         return discordantJunctions;
     }
 
-    private static boolean hasSufficientUnassignedFragments(
-            final List<ReadGroup> readGroups, final GroupBoundary[] innerBoundaries, int shortFragmentLength)
+    private boolean isValidDiscordantGroup(final DiscordantGroup discordantGroup)
     {
-        boolean isShortLocalDel = innerBoundaries[SE_START].Chromosome.equals(innerBoundaries[SE_END].Chromosome)
-                && innerBoundaries[SE_START].Orient != innerBoundaries[SE_END].Orient
-                && abs(innerBoundaries[SE_END].Position - innerBoundaries[SE_START].Position) < shortFragmentLength * 2;
+        if(discordantGroup.readGroups().size() < DISCORDANT_GROUP_MIN_FRAGMENTS)
+            return false;
 
-        int minFragments = isShortLocalDel ? DISCORDANT_GROUP_MIN_FRAGMENTS_SHORT : DISCORDANT_GROUP_MIN_FRAGMENTS;
-        return readGroups.size() >= minFragments && readGroups.stream().filter(x -> !x.hasJunctionPositions()).count() >= minFragments;
-    }
+        // only consider junctions from groups within this region
+        if(!mRegion.overlaps(discordantGroup.Region))
+            return false;
 
-    private static void addJunctions(
-            final List<ReadGroup> readGroups, final GroupBoundary[] innerBoundaries, final PrepRead[] boundaryReads,
-            final ChrBaseRegion region, final List<JunctionData> discordantJunctions)
-    {
-        for(int se = SE_START; se <= SE_END; ++se)
+        // only consider pairings which are either local within the defined distance limit or in a known fusion region
+
+        // check that at least one remote region also has sufficient reads
+        List<DiscordantRemoteRegion> remoteRegions = discordantGroup.remoteRegions();
+
+        mergeRemoteRegions(remoteRegions);
+
+        Collections.sort(remoteRegions, Comparator.comparingInt(x -> -x.readCount()));
+
+        if(remoteRegions.get(0).readCount() < DISCORDANT_GROUP_MIN_FRAGMENTS)
+            return false;
+
+        boolean aboveMinMapQual = false;
+        boolean aboveMinAlignScore = false;
+
+        for(ReadGroup readGroup : discordantGroup.readGroups())
         {
-            // only create junctions from groups within this region
-            if(!region.containsPosition(innerBoundaries[se].Chromosome, innerBoundaries[se].Position))
-                continue;
+            PrepRead read = firstPrimaryRead(readGroup);
 
-            JunctionData junctionData = new JunctionData(innerBoundaries[se].Position, innerBoundaries[se].Orient, boundaryReads[se]);
-            discordantJunctions.add(junctionData);
+            aboveMinMapQual |= read.mapQuality() >= DISCORDANT_GROUP_MIN_MAP_QUAL;
 
-            junctionData.markDiscordantGroup();
+            aboveMinAlignScore |= aboveRepeatTrimmedAlignmentThreshold(read, DISCORDANT_GROUP_MIN_ALIGN_SCORE, false);
 
-            for(ReadGroup readGroup : readGroups)
-            {
-                junctionData.SupportingGroups.add(readGroup);
-                readGroup.addJunctionPosition(junctionData);
-
-                readGroup.reads().forEach(x -> x.setReadType(ReadType.SUPPORT, true));
-                // readGroup.reads().forEach(x -> junctionData.addReadType(x, ReadType.SUPPORT)); // no need
-            }
-
-            int seOther = switchIndex(se);
-
-            junctionData.addRemoteJunction(new RemoteJunction(
-                    innerBoundaries[seOther].Chromosome, innerBoundaries[seOther].Position, innerBoundaries[seOther].Orient));
+            if(aboveMinAlignScore && aboveMinMapQual)
+                break;
         }
-    }
 
-    public static boolean isDiscordantGroup(final ReadGroup readGroup, final int minFragmentLength, final int maxFragmentLength)
-    {
-        /* added to support unpaired reads but prevents a single read spanning partitions from forming a discordant group
-        if(readGroup.reads().stream().filter(x -> !x.isSupplementaryAlignment()).count() < 2)
-            return false;
-        */
-
-        // only the first read is used and so only that is checked
-        return isDiscordantRead(readGroup.reads().get(0), minFragmentLength, maxFragmentLength);
-    }
-
-    private static boolean isDiscordantRead(final PrepRead read, final int minFragmentLength, final int maxFragmentLength)
-    {
-        if(read.Chromosome.equals(UNMAPPED_CHR) || read.MateChromosome.equals(UNMAPPED_CHR))
+        if(!aboveMinAlignScore || !aboveMinMapQual)
             return false;
 
-        if(read.fragmentInsertSize() < minFragmentLength || read.fragmentInsertSize() > maxFragmentLength)
-            return true;
-
-        if(!read.Chromosome.equals(read.MateChromosome))
-            return true;
-
-        if(read.record().getReadNegativeStrandFlag() == mateNegativeStrand(read.record()))
-            return true;
+        for(DiscordantRemoteRegion remoteRegion : remoteRegions)
+        {
+            if(hasRemoteRequiredFragments(discordantGroup, remoteRegion))
+                return true;
+        }
 
         return false;
     }
 
-    private static boolean isCloserToJunction(final GroupBoundary[] current, final GroupBoundary[] test, int seIndex)
+    private void addJunctions(final DiscordantGroup discordantGroup, final List<JunctionData> discordantJunctions)
     {
-        if(current[seIndex].Orient.isForward())
-        {
-            return test[seIndex].Position > current[seIndex].Position;
-        }
-        else
-        {
-            return test[seIndex].Position < current[seIndex].Position;
-        }
-    }
+        // define the junction point from the inner most read from the remote region with the most support
+        DiscordantRemoteRegion mainRemoteRegion = discordantGroup.remoteRegions().get(0);
 
-    private static boolean regionsWithinRange(final GroupBoundary[] boundaries1, final GroupBoundary[] boundaries2)
-    {
-        for(int se = SE_START; se <= SE_END; ++se)
-        {
-            if(!boundaries1[se].Chromosome.equals(boundaries2[se].Chromosome))
-                return false;
+        PrepRead innerRead = null;
+        int innerPosition = 0;
 
-            if(!positionWithin(
-                    boundaries2[se].Position,
-                    boundaries1[se].Position - DISCORDANT_GROUP_MAX_DISTANCE,
-                    boundaries1[se].Position + DISCORDANT_GROUP_MAX_DISTANCE))
+        for(ReadGroup readGroup : mainRemoteRegion.ReadGroups)
+        {
+            PrepRead read = firstPrimaryRead(readGroup);
+
+            if(discordantGroup.Orient.isForward())
             {
-                return false;
+                if(innerRead == null || read.AlignmentEnd > innerRead.AlignmentEnd)
+                {
+                    innerRead = read;
+                    innerPosition = read.AlignmentEnd;
+                }
+            }
+            else
+            {
+                if(innerRead == null || read.AlignmentStart < innerRead.AlignmentStart)
+                {
+                    innerRead = read;
+                    innerPosition = read.AlignmentStart;
+                }
             }
         }
 
-        return true;
-    }
+        JunctionData junctionData = new JunctionData(innerPosition, discordantGroup.Orient, innerRead);
+        discordantGroup.setInnerRead(innerRead);
 
-    private static GroupBoundary[] groupBoundaries(final ReadGroup readGroup)
-    {
-        PrepRead read = readGroup.reads().get(0);
+        discordantJunctions.add(junctionData);
 
-        GroupBoundary boundary1 = new GroupBoundary(
-                read.Chromosome, read.orientation().isForward() ? read.end() : read.start(),
-                read.orientation());
+        junctionData.markDiscordantGroup();
 
-        GroupBoundary boundary2;
+        Set<String> excludedReadIds = Sets.newHashSet();
 
-        if(readGroup.size() == 2)
+        int minReadPosStart, minReadPosEnd;
+
+        if(discordantGroup.Orient.isForward())
         {
-            PrepRead read2 = readGroup.reads().get(1);
-            boundary2 = new GroupBoundary(
-                    read2.Chromosome, read2.orientation().isForward() ? read2.end() : read2.start(),
-                    read2.orientation());
+            minReadPosStart = max(1, innerPosition - mMaxConcordantFragmentLength);
+            minReadPosEnd = innerPosition;
         }
         else
         {
-            boundary2 = new GroupBoundary(
-                    read.MateChromosome,
-                    read.mateOrientation().isForward() ? read.MatePosStart + read.record().getReadLength() : read.MatePosStart,
-                    read.mateOrientation());
+            minReadPosStart = innerPosition;
+            minReadPosEnd = innerPosition + mMaxConcordantFragmentLength;;
         }
 
-        return new GroupBoundary[] { boundary1, boundary2 };
+        for(ReadGroup readGroup : discordantGroup.readGroups())
+        {
+            // reads must be within the observed max concordant fragment length to be potentially relevant for this group
+            if(discordantGroup.Orient.isForward())
+            {
+                if(readGroup.reads().stream().noneMatch(x -> positionWithin(x.AlignmentStart, minReadPosStart, minReadPosEnd)))
+                {
+                    excludedReadIds.add(readGroup.id());
+                    continue;
+                }
+            }
+            else
+            {
+                if(readGroup.reads().stream().noneMatch(x -> positionWithin(x.AlignmentEnd, minReadPosStart, minReadPosEnd)))
+                {
+                    excludedReadIds.add(readGroup.id());
+                    continue;
+                }
+            }
+
+            junctionData.addSupportingGroup(readGroup);
+            readGroup.addJunctionPosition(junctionData);
+
+            readGroup.reads().forEach(x -> x.setReadType(ReadType.SUPPORT, true));
+        }
+
+        // filter out remote regions outside the discordant range above
+        discordantGroup.purgeReads(excludedReadIds);
+
+        // ensure all read groups are kept, even if the remote reads may not be
+        discordantGroup.readGroups().forEach(x -> x.markHasRemoteJunctionReads());
+
+        List<DiscordantRemoteRegion> remoteRegions = discordantGroup.remoteRegions();
+
+        // create junctions from remote regions which satisfy the required fragment count
+        for(DiscordantRemoteRegion remoteRegion : remoteRegions)
+        {
+            if(mTrackRemotes || remoteRegion == mainRemoteRegion)
+            {
+                RemoteJunction remoteJunction = new RemoteJunction(remoteRegion.Chromosome, remoteRegion.start(), Orientation.FORWARD);
+                remoteJunction.Fragments = remoteRegion.readCount();
+                junctionData.addRemoteJunction(remoteJunction);
+            }
+
+            if(!hasRemoteRequiredFragments(discordantGroup, remoteRegion))
+                continue;
+
+            int remoteJunctionPosition = remoteRegion.Orient.isForward() ? remoteRegion.end() : remoteRegion.start();
+
+            // add remote regions as junctions even if they will be assessed earlier or later in this same partition
+            JunctionData remoteJunctionData = new JunctionData(
+                    remoteJunctionPosition, remoteRegion.Orient, remoteRegion.ReadGroups.get(0).reads().get(0));
+
+            discordantJunctions.add(remoteJunctionData);
+
+            remoteJunctionData.markDiscordantGroup();
+
+            for(ReadGroup readGroup : remoteRegion.ReadGroups)
+            {
+                remoteJunctionData.addSupportingGroup(readGroup);
+                readGroup.addJunctionPosition(remoteJunctionData);
+
+                readGroup.reads().forEach(x -> x.setReadType(ReadType.SUPPORT, true));
+            }
+
+            if(mTrackRemotes || remoteRegion == mainRemoteRegion)
+            {
+                RemoteJunction remoteJunction = new RemoteJunction(
+                        discordantGroup.Region.Chromosome, discordantGroup.innerPosition(), discordantGroup.Orient);
+                remoteJunction.Fragments = discordantGroup.readGroups().size();
+                remoteJunctionData.addRemoteJunction(remoteJunction);
+            }
+        }
     }
+
+    private boolean hasRemoteRequiredFragments(final DiscordantGroup discordantGroup, final DiscordantRemoteRegion remoteRegion)
+    {
+        boolean isShortLocal = false;
+
+        if(discordantGroup.Region.Chromosome.equals(remoteRegion.Chromosome))
+        {
+            int minDistance = remoteRegion.start() > discordantGroup.Region.end() ?
+                    remoteRegion.start() - discordantGroup.Region.end() : discordantGroup.Region.start() - remoteRegion.end();
+
+            isShortLocal = minDistance <= mMinDiscordantFragmentLength;
+        }
+
+        if(isShortLocal)
+            return remoteRegion.readCount() >= DISCORDANT_GROUP_MIN_FRAGMENTS_SHORT;
+        else
+            return remoteRegion.readCount() >= DISCORDANT_GROUP_MIN_FRAGMENTS;
+    }
+
+    public boolean isDiscordantGroup(final ReadGroup readGroup)
+    {
+        PrepRead firstRead = readGroup.reads().stream().filter(x -> !x.isSupplementaryAlignment()).findFirst().orElse(null);
+
+        if(firstRead == null)
+            return false;
+
+        return isDiscordantFragment(firstRead.record(), mMinDiscordantFragmentLength, null);
+    }
+
+    public boolean isRelevantDiscordantGroup(final ReadGroup readGroup)
+    {
+        boolean hasNonSupp = false;
+        boolean hasPassingMapQual = false;
+
+        for(PrepRead read : readGroup.reads())
+        {
+            hasNonSupp |= !read.isSupplementaryAlignment();
+            hasPassingMapQual |= read.record().getMappingQuality() >= MIN_MAP_QUALITY;
+        }
+
+        if(!hasNonSupp || !hasPassingMapQual)
+            return false;
+
+        // only the first read is used and so only that is checked
+        PrepRead firstRead = readGroup.reads().stream().filter(x -> !x.isSupplementaryAlignment()).findFirst().orElse(null);
+
+        if(firstRead == null)
+            return false;
+
+        // must then either be in a known hotspot pair or a local DEL or DUP within the required distance
+        if(readGroupMatchesHotspot(mKnownHotspots, readGroup))
+            return true;
+
+        // must be local and a DEL or DUP
+        if(!firstRead.Chromosome.equals(firstRead.MateChromosome) || firstRead.orientation() == firstRead.mateOrientation())
+            return false;
+
+        int length = abs(firstRead.AlignmentStart - firstRead.record().getMateAlignmentStart());
+        return length <= DISCORDANT_GROUP_MAX_LOCAL_LENGTH;
+    }
+
+    private static class ReadGroupSorter implements Comparator<ReadGroup>
+    {
+        public int compare(final ReadGroup first, final ReadGroup second)
+        {
+            PrepRead firstRead = firstPrimaryRead(first);
+            PrepRead secondRead = firstPrimaryRead(second);
+            return Integer.compare(firstRead.AlignmentStart, secondRead.AlignmentStart);
+        }
+    }
+
 }

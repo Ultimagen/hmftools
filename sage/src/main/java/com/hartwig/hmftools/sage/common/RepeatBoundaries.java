@@ -87,8 +87,12 @@ public class RepeatBoundaries
 
             for(RepeatInfo repeat : allRepeats)
             {
-                if(maxRepeat == null || repeat.Count > maxRepeat.Count)
+                if(maxRepeat == null || repeat.Count > maxRepeat.Count
+                || (repeat.Count == maxRepeat.Count && repeat.Bases.length() > maxRepeat.Bases.length()))
+                {
+                    // take highest count or if equal the longest repeat unit
                     maxRepeat = repeat;
+                }
 
                 if(positionWithin(requiredIndexStart, repeat.Index, repeat.endIndex()))
                 {
@@ -212,7 +216,7 @@ public class RepeatBoundaries
 
     private static int findPostRepeatIndex(final RepeatInfo repeat, final byte[] bases, boolean searchDown)
     {
-        // extend the current repeat with any part of it found and then add 1 additional non-repeat basr
+        // extend the current repeat with any part of it found and then add 1 additional non-repeat base
         int partialBaseMatch = 0;
 
         if(searchDown)

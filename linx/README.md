@@ -24,9 +24,6 @@ Whilst Linx is designed primarily for somatic SV, it can also be run in a more l
 * [Visualisation](#visualisation)  
 * [Version History](#version-history)
 
-## Installation
-The latest version of Linx can be downloaded from the [Hartwig releases page](https://github.com/hartwigmedical/hmftools/releases/)
-
 ## Configuration
 ### Core configuration
 All values are optional unless otherwise specified.
@@ -43,11 +40,7 @@ fragile_site_file | Linx has in-built default set of known fragile sites, but ov
 line_element_file | Linx has in-built default set of LINE source regions, but override as required (format: Chromosome,PosStart,PosEnd)
 ensembl_data_dir | Directory for Ensembl reference files
 
-Reference files are available for ref genome 37 and 38 [HMFTools-Resources > DNA Pipeline](https://console.cloud.google.com/storage/browser/hmf-public/HMFtools-Resources/dna_pipeline/):
-- DriverGenePanel: HMF driver genes (in resources 'common')
-- KnownFusions: HMF known fusion data (in resources 'sv')
-- Linx: fragile sites and LINE source regions (in resources 'sv')
-- Ensembl: cached Ensembl files (in resources 'common')
+All resource files for this tool and the WiGiTs pipeline are available for download via the [HMF Resource page](../pipeline/README_RESOURCES.md).
  
 ### Example Usage
 This is a typical command to run LINX for a single sample from PURPLE output.
@@ -280,10 +273,10 @@ Ultimately we classify each cluster into 1 of 7 major event categories:
 
 Event Category | Description
 ---|---
-SIMPLE | Single junction cluster which forms a local deletion, tandem duplication or unbalanced translocation
+SIMPLE | Single junction cluster which forms a local deletion, tandem duplication, or unbalanced translocation.  May have a short inserted sequence
 RECIPROCAL | Reciprocal inversion or translocation events forming from 2 concurrent breaks interacting with each other
-TEMPLATED INSERTION | DEL or DUP or unbalanced translocation (‘chain’) with templated insertion
-INSERTION | SV that are formed by the insertion of a templated piece of DNA normally via a mobile element insertion.
+TEMPLATED INSERTION | DEL or DUP or unbalanced translocation (‘chain’) with longer templated insertions
+INSERTION | Mobile element insertion
 DOUBLE_MINUTE | Any 1 or 2 variant cluster where all variants form part of an ecDNA ring
 COMPLEX | Clusters with 3 or more variants that cannot be resolved into one of the above categories
 INCOMPLETE | 1 or 2 breakpoint clusters which are inconsistent, but cannot be clustered further OR clusters which are inferred from copy number changes only
@@ -697,8 +690,6 @@ Each breakend is additionally annotated for the transcript with the following in
 - exon total count: The total number of exons in the transcript (for reference)
 - transcript biotype: The ensembl biotype of the transcript
 
-
-
 #### Known pathogenic fusions and promiscuous partners
 Configuration of pathogenic fusions impacts Linx in 2 ways:
 Some criteria for fusion calling are relaxed for known fusions due to the high prior likelihood of pathogenic fusions
@@ -753,7 +744,7 @@ Linx also has special rules to support unusual biology for a handful of known pa
 - For CIC_DUX4 and IGH_DUX4, the DUX4 end may map to a number of different chromosomal regions, including the telomeric ends of both chromosomes 10q and 4q and the 37 alt contig GL000228.1.
 - For RP11-356O9.1_ETV1 fusion (pathogenic in Prostate cancer) the breakend on the 5’ side breakend is permitted to be up to 20kb downstream of RP11-356O9.1.
 - In the case of IGH-BCL2 (common in Folicular Lymphomas) & IGH-MYC, Linx also looks for fusions in the 3’UTR region and up to 50k bases downstream of BCL2 (and 500k bases downstream of MYC) facing in the upstream orientation towards the gene [ref: http://atlasgeneticsoncology.org/Genes/BCL2ID49.html ].  In the case of IGH-MYC we also allow an extended distance upstream of 250kb in case the enhancer is fused upstream of MYC.
-- TERT and C19MC promoter regions are promiscuous targets for enhancer rearrangements. Any breakpoint with the correct orientation within a specified distance upstream of these genes is called as a a PROMISCUOUS_ENHANCER_TARGET. 
+- TERT and C19MC promoter regions are promiscuous targets for enhancer rearrangements. Any breakpoint with the correct orientation within a specified distance up or downstream of these genes is called as a PROMISCUOUS_ENHANCER_TARGET. 
 
 ##### Prioritise genes and transcripts
 Each candidate chained splice acceptor and splice donor fusion pair may have multiple gene fusion transcripts on both the 5’ gene and 3’ gene that meet the above criteria. Occasionally genes may also share a splice acceptor or splice donor in which case the transcripts of that groups of genes are considered together. Linx prioritizes the potential transcript candidates and choose a single pair of 5’ and 3’ transcripts via the following criteria in order of priority:
@@ -765,7 +756,8 @@ Each candidate chained splice acceptor and splice donor fusion pair may have mul
 - No exons are skipped
 - Best 3’ partner transcript, ranked by canonical and then longest (non NMD) protein coding
 - Best 5’ partner transcript ranked by canonical, then longest protein coding, then longest
-- If multiple chains link the same 2 genes then they are prioritised again according to the above logic.
+
+If multiple chains link the same 2 genes then they are prioritised again according to the above logic and then by junction copy number.
 
 For IG enhancer rearrangements, the canonical transcript is reported for all 3' gene partners.
 

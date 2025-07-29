@@ -9,20 +9,19 @@ import java.util.Collections;
 import java.util.List;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
 import com.hartwig.hmftools.common.qual.BaseQualAdjustment;
 
 import htsjdk.samtools.SAMRecord;
 
 public class BaseBuilder
 {
-    private final RefGenomeInterface mRefGenome;
+    private final RefGenome mRefGenome;
     private final ConsensusStatistics mConsensusStats;
 
     // cached for the majority of successive reads being on the same chromosome, to protect against ref genome base requests beyond limits
     private int mChromosomeLength;
 
-    public BaseBuilder(final RefGenomeInterface refGenome, final ConsensusStatistics consensusStats)
+    public BaseBuilder(final RefGenome refGenome, final ConsensusStatistics consensusStats)
     {
         mRefGenome = refGenome;
         mConsensusStats = consensusStats;
@@ -31,7 +30,7 @@ public class BaseBuilder
 
     public void setChromosomLength(int chromosomeLength) { mChromosomeLength = chromosomeLength; }
     public int chromosomeLength() { return mChromosomeLength; }
-    public RefGenomeInterface refGenome() { return mRefGenome; }
+    public RefGenome refGenome() { return mRefGenome; }
 
     public static final byte NO_BASE = 0;
     public static final int INVALID_POSITION = -1;
@@ -187,7 +186,7 @@ public class BaseBuilder
 
         mConsensusStats.registerDualStrandMismatchReadGroup(readCount);
 
-        byte refBase = mRefGenome.getBaseString(chromosome, position, position).getBytes()[0];
+        byte refBase = mRefGenome.getRefBase(chromosome, position);
         boolean firstIsRef = firstBaseAndQual[0] == refBase;
         boolean secondIsRef = secondBaseAndQual[0] == refBase;
 
@@ -276,7 +275,6 @@ public class BaseBuilder
 
         byte maxBase = distinctBases.get(0);
         boolean maxIsRef = false;
-        int maxQual = maxQuals.get(0);
         int maxQualTotal = qualTotals.get(0);
 
         for(int i = 1; i < distinctBases.size(); ++i)
@@ -284,22 +282,20 @@ public class BaseBuilder
             if(qualTotals.get(i) > maxQualTotal)
             {
                 maxQualTotal = qualTotals.get(i);
-                maxQual = maxQuals.get(i);
                 maxBase = distinctBases.get(i);
             }
             else if(chromosome != null && qualTotals.get(i) >= maxQualTotal && !maxIsRef && position != INVALID_POSITION)
             {
                 // chromosome will be null for unmapped reads
-                String refBase = mRefGenome.getBaseString(chromosome, position, position);
+                byte refBase = mRefGenome.getRefBase(chromosome, position);
 
-                if(maxBase == refBase.getBytes()[0])
+                if(maxBase == refBase)
                 {
                     maxIsRef = true;
                 }
-                else if(distinctBases.get(i) == refBase.getBytes()[0])
+                else if(distinctBases.get(i) == refBase)
                 {
                     maxQualTotal = qualTotals.get(i);
-                    maxQual = maxQuals.get(i);
                     maxBase = distinctBases.get(i);
                     maxIsRef = true;
                 }
@@ -335,6 +331,9 @@ public class BaseBuilder
 
     public static boolean isDualStrandAndIsFirstInPair(final List<SAMRecord> reads, final boolean[] isFirstInPairOut)
     {
+        if(!reads.get(0).getReadPairedFlag())
+            return false;
+
         boolean isDualStrand = false;
 
         for(int i = 0; i < reads.size(); ++i)

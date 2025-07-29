@@ -1,13 +1,17 @@
 package com.hartwig.hmftools.esvee.prep;
 
+import static java.lang.Math.min;
+
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_EXTENSION;
+import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_VARIANT_LENGTH;
 
 import com.hartwig.hmftools.common.sv.LineElements;
 
 public final class PrepConstants
 {
-    public static final String PREP_JUNCTIONS_FILE_ID = "junctions" + TSV_EXTENSION;
-    public static final String PREP_FRAG_LENGTH_FILE_ID = "fragment_lengths" + TSV_EXTENSION;
+    public static final String PREP_JUNCTION_FILE_ID = "junction" + TSV_EXTENSION;
+    public static final String PREP_FRAG_LENGTH_FILE_ID = "fragment_length" + TSV_EXTENSION;
+    public static final String PREP_DISC_STATS_FILE_ID = "disc_stats" + TSV_EXTENSION;
 
     // common fields
     public static final String FLD_JUNCTION_FRAGS = "JunctionFrags";
@@ -15,17 +19,20 @@ public final class PrepConstants
     public static final String FLD_EXACT_SUPPORT_FRAGS = "ExactSupportFrags";
     public static final String FLD_OTHER_SUPPORT_FRAGS = "OtherSupportFrags";
     public static final String FLD_HOTSPOT_JUNCTION = "Hotspot";
+    public static final String FLD_EXTRA_INFO = "ExtraInfo";
 
     // region processing
-    public static final int DEFAULT_CHR_PARTITION_SIZE = 1000000;
+    public static final int DEFAULT_CHR_PARTITION_SIZE = 1_000_000;
 
     public static final int DEFAULT_READ_LENGTH = 151;
 
     // candidate junction fragments
     public static final int MIN_ALIGNMENT_BASES = 50;
-    public static final int MIN_MAP_QUALITY = 20;
+    public static final int MIN_CALC_ALIGNMENT_SCORE = 40;
+    public static final int MIN_CALC_ALIGNMENT_LOWER_SCORE = 35;
+    public static final int MIN_ALIGNMENT_SCORE_DIFF = 15;
     public static final int MIN_INSERT_ALIGNMENT_OVERLAP = 5;
-    public static final int MIN_SOFT_CLIP_LENGTH = 30;
+    public static final int MIN_SOFT_CLIP_LENGTH = MIN_VARIANT_LENGTH;
     public static final int MIN_LINE_SOFT_CLIP_LENGTH = LineElements.LINE_POLY_AT_TEST_LEN;
     public static final double MIN_SOFT_CLIP_HIGH_QUAL_PERC = 0.75;
     public static final int MAX_SOFT_CLIP_LOW_QUAL_COUNT = 5;
@@ -42,10 +49,18 @@ public final class PrepConstants
     public static final int MAX_HIGH_QUAL_BASE_MISMATCHES = 1;
     public static final double MIN_EXACT_BASE_PERC = 0.25;
 
+    // depth tracking and filter
+    public static final int DEPTH_WINDOW_SIZE = 1000;
+    public static final double DEPTH_MIN_SUPPORT_RATIO = 0.005;
+    public static final double DEPTH_MIN_SUPPORT_RATIO_DISCORDANT = 0.01;
+    public static final double DEPTH_MIN_CHECK = 2 / DEPTH_MIN_SUPPORT_RATIO_DISCORDANT;
+
     // discordant groups
     public static final int DISCORDANT_GROUP_MIN_FRAGMENTS = 3;
     public static final int DISCORDANT_GROUP_MIN_FRAGMENTS_SHORT = 5;
-    public static final int DISCORDANT_GROUP_MAX_DISTANCE = 500;
+    public static final int DISCORDANT_GROUP_MAX_LOCAL_LENGTH = 1_000_000;
+    public static final int DISCORDANT_GROUP_MIN_MAP_QUAL = 40;
+    public static final int DISCORDANT_GROUP_MIN_ALIGN_SCORE = 75;
 
     // final junction filtering
     public static final int MIN_HOTSPOT_JUNCTION_SUPPORT = 1;

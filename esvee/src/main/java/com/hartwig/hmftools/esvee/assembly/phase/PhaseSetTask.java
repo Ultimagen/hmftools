@@ -1,6 +1,8 @@
 package com.hartwig.hmftools.esvee.assembly.phase;
 
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
+import static java.lang.String.format;
+
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -8,30 +10,28 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.esvee.AssemblyConfig;
+import com.hartwig.hmftools.esvee.assembly.AssemblyConfig;
 import com.hartwig.hmftools.esvee.assembly.read.BamReader;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 import com.hartwig.hmftools.esvee.assembly.types.PhaseGroup;
-import com.hartwig.hmftools.esvee.assembly.types.PhaseSet;
 import com.hartwig.hmftools.esvee.assembly.types.ThreadTask;
+import com.hartwig.hmftools.common.perf.TaskQueue;
 
 public class PhaseSetTask extends ThreadTask
 {
     private final AssemblyConfig mConfig;
-    private final Queue<PhaseGroup> mPhaseGroups;
-    private final int mPhaseGroupCount;
+    private final TaskQueue mPhaseGroups;
 
-    private final RemoteRegionAssembler mRemoteRegionAssembler;
+    private final RemoteReadExtractor mRemoteReadExtractor;
 
-    public PhaseSetTask(final AssemblyConfig config, final BamReader bamReader, final Queue<PhaseGroup> phaseGroups)
+    public PhaseSetTask(final AssemblyConfig config, final BamReader bamReader, TaskQueue phaseGroups)
     {
         super("PhaseSets");
 
         mConfig = config;
         mPhaseGroups = phaseGroups;
-        mPhaseGroupCount = mPhaseGroups.size();
 
-        mRemoteRegionAssembler = new RemoteRegionAssembler(config.RefGenome, bamReader);
+        mRemoteReadExtractor = new RemoteReadExtractor(bamReader);
     }
 
     public static List<PhaseSetTask> createThreadTasks(
@@ -43,9 +43,11 @@ public class PhaseSetTask extends ThreadTask
         Queue<PhaseGroup> phaseGroupQueue = new ConcurrentLinkedQueue<>();
         phaseGroupQueue.addAll(phaseGroups);
 
+        TaskQueue taskQueue = new TaskQueue(phaseGroupQueue, "phase groups", 10000);
+
         for(int i = 0; i < taskCount; ++i)
         {
-            PhaseSetTask phaseSetTask = new PhaseSetTask(config, bamReaders.get(i), phaseGroupQueue);
+            PhaseSetTask phaseSetTask = new PhaseSetTask(config, bamReaders.get(i), taskQueue);
             phaseSetTasks.add(phaseSetTask);
             threadTasks.add(phaseSetTask);
         }
@@ -58,8 +60,6 @@ public class PhaseSetTask extends ThreadTask
         return phaseSetTasks;
     }
 
-    private static final int PHASE_GROUP_LOG_COUNT = 10000;
-
     @Override
     public void run()
     {
@@ -67,10 +67,7 @@ public class PhaseSetTask extends ThreadTask
         {
             try
             {
-                int remainingCount = mPhaseGroups.size();
-                int processedCount = mPhaseGroupCount - remainingCount;
-
-                PhaseGroup phaseGroup = mPhaseGroups.remove();
+                PhaseGroup phaseGroup = (PhaseGroup)mPhaseGroups.removeItem();
 
                 if(mConfig.PhaseProcessingLimit > 0 && phaseGroup.assemblyCount() > mConfig.PhaseProcessingLimit)
                     continue;
@@ -78,11 +75,11 @@ public class PhaseSetTask extends ThreadTask
                 mPerfCounter.start();
 
                 // where there are more than 2 assemblies, start with the ones with the most support and overlapping junction reads
-                PhaseSetBuilder phaseSetBuilder = new PhaseSetBuilder(mConfig.RefGenome, mRemoteRegionAssembler, phaseGroup);
+                PhaseSetBuilder phaseSetBuilder = new PhaseSetBuilder(mConfig.RefGenome, mRemoteReadExtractor, phaseGroup);
 
                 try
                 {
-                    phaseSetBuilder.buildPhaseSets();
+                    phaseSetBuilder.run();
                 }
                 catch(Exception e)
                 {
@@ -97,22 +94,7 @@ public class PhaseSetTask extends ThreadTask
                     System.exit(1);
                 }
 
-                // now that all support has been added, set the supporting read indices for each assembly
-                phaseGroup.assemblies().forEach(x -> x.setReadIndices());
-
-                // also set phase set IDs
-                int phaseSetId = 0;
-                for(PhaseSet phaseSet : phaseGroup.phaseSets())
-                {
-                    phaseSet.setId(phaseSetId++);
-                }
-
-                stopCheckLog(phaseGroup.toString(), mConfig.PerfLogTime);
-
-                if(processedCount > 0 && (processedCount % PHASE_GROUP_LOG_COUNT) == 0)
-                {
-                    SV_LOGGER.debug("processed {} phase groups, remaining({})", processedCount, remainingCount);
-                }
+                stopCheckLog(format("phaseGroupId(%d) assemblies(%d)", phaseGroup.id(), phaseGroup.assemblyCount()), mConfig.PerfLogTime);
             }
             catch(NoSuchElementException e)
             {
@@ -127,5 +109,5 @@ public class PhaseSetTask extends ThreadTask
         }
     }
 
-    public int totalRemoteReadsMatched() { return mRemoteRegionAssembler.totalRemoteReadsMatched(); }
+    public int totalRemoteReadsMatched() { return mRemoteReadExtractor.remoteReadsMatched(); }
 }

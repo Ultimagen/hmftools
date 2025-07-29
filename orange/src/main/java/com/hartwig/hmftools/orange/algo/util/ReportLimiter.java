@@ -15,7 +15,7 @@ import com.hartwig.hmftools.datamodel.orange.OrangeRecord;
 import com.hartwig.hmftools.datamodel.purple.ImmutablePurpleRecord;
 import com.hartwig.hmftools.datamodel.purple.PurpleRecord;
 
-import org.apache.commons.compress.utils.Lists;
+import com.google.common.collect.Lists;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -66,13 +66,13 @@ public final class ReportLimiter
                 .allSomaticCopyNumbers(max1(purple.allSomaticCopyNumbers()))
                 .allSomaticGeneCopyNumbers(max1(purple.allSomaticGeneCopyNumbers()))
                 .suspectGeneCopyNumbersWithLOH(max1(purple.suspectGeneCopyNumbersWithLOH()))
-                .allSomaticGainsLosses(max1(purple.allSomaticGainsLosses()))
-                .reportableSomaticGainsLosses(max1(purple.reportableSomaticGainsLosses()))
+                .allSomaticGainsDels(max1(purple.allSomaticGainsDels()))
+                .reportableSomaticGainsDels(max1(purple.reportableSomaticGainsDels()))
                 .nearReportableSomaticGains(max1(purple.nearReportableSomaticGains()))
-                .additionalSuspectSomaticGainsLosses(max1(purple.additionalSuspectSomaticGainsLosses()))
+                .additionalSuspectSomaticGainsDels(max1(purple.additionalSuspectSomaticGainsDels()))
                 .allGermlineDeletions(max1(purple.allGermlineDeletions()))
-                .allGermlineFullLosses(max1(purple.allGermlineFullLosses()))
-                .reportableGermlineFullLosses(max1(purple.reportableGermlineFullLosses()))
+                .allGermlineFullDels(max1(purple.allGermlineFullDels()))
+                .reportableGermlineFullDels(max1(purple.reportableGermlineFullDels()))
                 .allGermlineLossOfHeterozygosities(max1(purple.allGermlineLossOfHeterozygosities()))
                 .reportableGermlineLossOfHeterozygosities(max1(purple.reportableGermlineLossOfHeterozygosities()))
                 .build();

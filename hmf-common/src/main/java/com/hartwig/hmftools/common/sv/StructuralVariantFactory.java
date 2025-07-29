@@ -1,9 +1,12 @@
 package com.hartwig.hmftools.common.sv;
 
-import static com.hartwig.hmftools.common.sv.StructuralVariantType.BND;
-import static com.hartwig.hmftools.common.sv.SvUtils.SMALL_DELDUP_SIZE;
+import static java.lang.Math.abs;
+
+import static com.hartwig.hmftools.common.sv.SvUtils.formSvType;
+import static com.hartwig.hmftools.common.sv.SvUtils.isIndel;
+import static com.hartwig.hmftools.common.sv.SvUtils.isShortLocalDelDupIns;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.ALLELE_FRACTION;
-import static com.hartwig.hmftools.common.sv.SvVcfTags.ASSEMBLY_LINKS;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.ASM_LINKS;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.CIPOS;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.HOMSEQ;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.HOTSPOT;
@@ -11,13 +14,9 @@ import static com.hartwig.hmftools.common.sv.SvVcfTags.IHOMPOS;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.INFERRED;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.INSALN;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.MATE_ID;
-import static com.hartwig.hmftools.common.sv.SvVcfTags.RECOVERED;
-import static com.hartwig.hmftools.common.sv.SvVcfTags.RECOVERY_FILTER;
-import static com.hartwig.hmftools.common.sv.SvVcfTags.RECOVERY_METHOD;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH_PAIR;
-import static com.hartwig.hmftools.common.sv.SvVcfTags.SEGALEN;
-import static com.hartwig.hmftools.common.sv.SvVcfTags.SVTYPE;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SEG_ALIGN_LENGTH;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.TOTAL_FRAGS;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REPEAT_MASK_REPEAT_CLASS;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REPEAT_MASK_COVERAGE;
@@ -26,9 +25,10 @@ import static com.hartwig.hmftools.common.sv.SvVcfTags.REPEAT_MASK_REPEAT_TYPE;
 import static com.hartwig.hmftools.common.sv.VariantAltInsertCoords.BREAKEND_REGEX;
 import static com.hartwig.hmftools.common.sv.VariantAltInsertCoords.SINGLE_BREAKEND_BYTE;
 import static com.hartwig.hmftools.common.sv.VariantAltInsertCoords.SINGLE_BREAKEND_STR;
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.NEG_ORIENT;
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.POS_ORIENT;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_REV;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_FWD;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.getGenotypeAttributeAsDouble;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.getGenotypeAttributeAsInt;
 
 import java.util.HashSet;
@@ -40,7 +40,8 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.hartwig.hmftools.common.variant.filter.ExcludeCNVFilter;
+import com.hartwig.hmftools.common.genome.region.Orientation;
+import com.hartwig.hmftools.common.variant.filter.AlwaysPassFilter;
 import com.hartwig.hmftools.common.variant.filter.HumanChromosomeFilter;
 
 import org.jetbrains.annotations.Nullable;
@@ -50,7 +51,7 @@ import htsjdk.variant.variantcontext.VariantContext;
 import htsjdk.variant.variantcontext.filter.CompoundFilter;
 import htsjdk.variant.variantcontext.filter.VariantContextFilter;
 
-public class StructuralVariantFactory implements SvFactoryInterface
+public class StructuralVariantFactory
 {
     private final Map<String,VariantContext> mUnmatchedVariants;
     private final List<StructuralVariant> mCompleteVariants;
@@ -67,8 +68,14 @@ public class StructuralVariantFactory implements SvFactoryInterface
     {
         CompoundFilter compoundfilter = new CompoundFilter(true);
         compoundfilter.add(new HumanChromosomeFilter());
-        compoundfilter.add(new ExcludeCNVFilter());
         compoundfilter.add(filter);
+        return new StructuralVariantFactory(compoundfilter);
+    }
+
+    public static StructuralVariantFactory build()
+    {
+        CompoundFilter compoundfilter = new CompoundFilter(true);
+        compoundfilter.add(new AlwaysPassFilter());
         return new StructuralVariantFactory(compoundfilter);
     }
 
@@ -115,7 +122,7 @@ public class StructuralVariantFactory implements SvFactoryInterface
     public static byte parseSingleOrientation(final VariantContext context)
     {
         final String alt = context.getAlternateAllele(0).getDisplayString();
-        return alt.startsWith(SINGLE_BREAKEND_STR) ? NEG_ORIENT : POS_ORIENT;
+        return alt.startsWith(SINGLE_BREAKEND_STR) ? ORIENT_REV : ORIENT_FWD;
     }
 
     public static byte parseSvOrientation(final VariantContext context)
@@ -126,14 +133,13 @@ public class StructuralVariantFactory implements SvFactoryInterface
         if(!match.matches())
             return (byte)0;
 
-        return match.group(1).length() > 0 ? POS_ORIENT : NEG_ORIENT;
+        return match.group(1).length() > 0 ? ORIENT_FWD : ORIENT_REV;
     }
 
     public void addVariantContext(final VariantContext context)
     {
         if(mFilter.test(context))
         {
-            final StructuralVariantType type = type(context);
             if(isSingleBreakend(context))
             {
                 mCompleteVariants.add(createSingleBreakend(context));
@@ -157,15 +163,9 @@ public class StructuralVariantFactory implements SvFactoryInterface
 
     public List<VariantContext> unmatched() { return Lists.newArrayList(mUnmatchedVariants.values()); }
 
-    public void removeUnmatchedVariant(final String id) { mUnmatchedVariants.remove(id); }
-    public boolean hasUnmatchedVariant(final String id) { return mUnmatchedVariants.containsKey(id); }
-
-    public StructuralVariant createSV(final VariantContext first, final VariantContext second)
+    public StructuralVariant createSV(final VariantContext contextStart, final VariantContext contextEnd)
     {
-        final int start = first.getStart();
-        final int end = second.getStart();
-
-        final String alt = first.getAlternateAllele(0).getDisplayString();
+        final String alt = contextStart.getAlternateAllele(0).getDisplayString();
         final Matcher match = BREAKEND_REGEX.matcher(alt);
         if(!match.matches())
         {
@@ -173,73 +173,87 @@ public class StructuralVariantFactory implements SvFactoryInterface
         }
 
         // Local orientation determined by the positionin of the anchoring bases
-        final byte startOrientation = (match.group(1).length() > 0 ? POS_ORIENT : NEG_ORIENT);
+        byte startOrientation = (match.group(1).length() > 0 ? ORIENT_FWD : ORIENT_REV);
 
         // Other orientation determined by the direction of the brackets
-        final byte endOrientation = (match.group(2).equals("]") ? POS_ORIENT : NEG_ORIENT);
+        byte endOrientation = (match.group(2).equals("]") ? ORIENT_FWD : ORIENT_REV);
 
         // Grab the inserted sequence by removing 1 base from the reference anchoring bases
         String insertedSequence = match.group(1).length() > 0 ?
                 match.group(1).substring(1) : match.group(4).substring(0, match.group(4).length() - 1);
 
-        final boolean isSmallDelDup = first.getContig().equals(second.getContig())
-                && Math.abs(first.getStart() - second.getStart()) <= SMALL_DELDUP_SIZE
-                && startOrientation != endOrientation;
+        StructuralVariantType svType = StructuralVariantType.fromContext(contextStart);
 
-        final StructuralVariantLeg startLeg = setLegCommon(first, isSmallDelDup, startOrientation)
-                .position(start)
-                .homology(first.getAttributeAsString(HOMSEQ, ""))
-                .alleleFrequency(0.0)
-                .build();
+        VariantContext legContextStart = contextStart;
+        VariantContext legContextEnd = contextEnd;
 
-        final StructuralVariantLeg endLeg = setLegCommon(second, isSmallDelDup, endOrientation)
-                .position(end)
-                .homology(second.getAttributeAsString(HOMSEQ, ""))
-                .alleleFrequency(0.0)
-                .build();
-
-        StructuralVariantType inferredType = BND;
-        if(startLeg.chromosome().equals(endLeg.chromosome()))
+        // check for same-base DUP and need to switch context info
+        if(contextStart.getContig().equals(contextEnd.getContig()) && startOrientation != endOrientation
+                && contextStart.getStart() == contextEnd.getStart() && startOrientation == ORIENT_FWD)
         {
-            if(startLeg.orientation() == endLeg.orientation())
-            {
-                inferredType = StructuralVariantType.INV;
-            }
-            else if(startLeg.orientation() == -1)
-            {
-                inferredType = StructuralVariantType.DUP;
-            }
-            else if(insertedSequence != null && insertedSequence.length() > 0
-                    && Math.abs(endLeg.position() - startLeg.position()) <= 1)
-            {
-                inferredType = StructuralVariantType.INS;
-            }
-            else
-            {
-                inferredType = StructuralVariantType.DEL;
-            }
+            legContextStart = contextEnd;
+            legContextEnd = contextStart;
+            startOrientation = ORIENT_REV;
+            endOrientation = ORIENT_FWD;
         }
 
-        return setCommon(first)
-                .start(startLeg)
-                .end(endLeg)
-                .mateId(second.getID())
-                .insertSequence(insertedSequence)
-                .type(inferredType)
-                .filter(filters(first, second))
-                .startContext(first)
-                .endContext(second)
+        if(svType == null)
+        {
+            // infer from attributes
+            svType = formSvType(
+                    legContextStart.getContig(), legContextEnd.getContig(), legContextStart.getStart(), legContextEnd.getStart(),
+                    Orientation.fromByte(startOrientation), Orientation.fromByte(endOrientation), !insertedSequence.isEmpty());
+        }
+
+        int indelLength = isIndel(svType) ? abs(contextStart.getStart() - contextEnd.getStart()) : 0;
+        boolean isSmallDelDup = isShortLocalDelDupIns(svType, indelLength);
+
+        StructuralVariantLeg startLeg = setLegCommon(legContextStart, isSmallDelDup, startOrientation)
+                .position(legContextStart.getStart())
+                .homology(legContextStart.getAttributeAsString(HOMSEQ, ""))
                 .build();
+
+        StructuralVariantLeg endLeg = setLegCommon(legContextEnd, isSmallDelDup, endOrientation)
+                .position(legContextEnd.getStart())
+                .homology(legContextEnd.getAttributeAsString(HOMSEQ, ""))
+                .build();
+
+        ImmutableStructuralVariantImpl.Builder svBuilder = setCommon(contextStart);
+
+        svBuilder.start(startLeg)
+                .end(endLeg)
+                .mateId(legContextEnd.getID())
+                .insertSequence(insertedSequence)
+                .type(svType)
+                .filter(filters(legContextStart, legContextEnd))
+                .startContext(legContextStart)
+                .endContext(legContextEnd);
+
+        svBuilder.startLinkedBy(parseAssemblyLinks(legContextStart));
+        svBuilder.endLinkedBy(parseAssemblyLinks(legContextEnd));
+
+        return svBuilder.build();
+    }
+
+    private static String parseAssemblyLinks(final VariantContext variantContext)
+    {
+        return trimStringListValue(variantContext.getAttributeAsString(ASM_LINKS, ""));
+    }
+
+    public static String trimStringListValue(final String listValue)
+    {
+        if(listValue.isEmpty())
+            return listValue;
+
+        return listValue.replaceAll("\\[", "").replaceAll("]", "").replaceAll(" ", "");
     }
 
     public StructuralVariant createSingleBreakend(final VariantContext context)
     {
-        double af = context.getAttributeAsDouble(ALLELE_FRACTION, 0.0);
-
         final String alt = context.getAlternateAllele(0).getDisplayString();
 
         // local orientation determined by the positioning of the anchoring bases
-        final byte orientation = alt.startsWith(".") ? NEG_ORIENT : POS_ORIENT;
+        final byte orientation = alt.startsWith(".") ? ORIENT_REV : ORIENT_FWD;
         final int refLength = context.getReference().length();
 
         final String insertedSequence = orientation == -1 ?
@@ -247,7 +261,6 @@ public class StructuralVariantFactory implements SvFactoryInterface
 
         final StructuralVariantLeg startLeg = setLegCommon(context, false, orientation)
                 .homology("")
-                .alleleFrequency(af)
                 .build();
 
         return setCommon(context)
@@ -265,17 +278,13 @@ public class StructuralVariantFactory implements SvFactoryInterface
 
         double qualityScore = context.getPhredScaledQual();
 
+        String insSequenceAlignments = trimStringListValue(context.getAttributeAsString(INSALN, ""));
+
         builder.id(context.getID())
-                .recovered(context.getAttributeAsBoolean(RECOVERED, false))
                 .hotspot(context.getAttributeAsBoolean(HOTSPOT, false))
-                .recoveryMethod(context.getAttributeAsString(RECOVERY_METHOD, null))
-                .recoveryFilter(context.getAttributeAsStringList(RECOVERY_FILTER, "").stream().collect(Collectors.joining(",")))
                 .event("")
-                .startLinkedBy(context.getAttributeAsString(ASSEMBLY_LINKS, ""))
-                .endLinkedBy("")
-                .imprecise(false)
                 .qualityScore(qualityScore)
-                .insertSequenceAlignments(context.getAttributeAsString(INSALN, ""));
+                .insertSequenceAlignments(insSequenceAlignments);
 
        if(context.hasAttribute(REPEAT_MASK_REPEAT_CLASS))
         {
@@ -311,7 +320,7 @@ public class StructuralVariantFactory implements SvFactoryInterface
         builder.startOffset(ciLeft);
         builder.endOffset(ciRight);
 
-        List<Integer> alignedSegmentLengths = context.getAttributeAsIntList(SEGALEN, 0);
+        List<Integer> alignedSegmentLengths = context.getAttributeAsIntList(SEG_ALIGN_LENGTH, 0);
         int maxAnchorLength = alignedSegmentLengths.stream().mapToInt(x -> x.intValue()).max().orElse(0);
         builder.anchoringSupportDistance(maxAnchorLength);
 
@@ -352,7 +361,7 @@ public class StructuralVariantFactory implements SvFactoryInterface
             builder.normalReferenceFragmentCount(refFrags + (ignoreRefpair ? 0 : refPairFrags));
         }
 
-        if(context.getGenotype(tumorOrdinal) != null)
+        if(tumorOrdinal >= 0 && context.getGenotype(tumorOrdinal) != null)
         {
             Genotype genotype = context.getGenotype(tumorOrdinal);
 
@@ -361,6 +370,9 @@ public class StructuralVariantFactory implements SvFactoryInterface
             int refPairFrags = getGenotypeAttributeAsInt(genotype, REF_DEPTH_PAIR, 0);
             builder.tumorVariantFragmentCount(totalFrags);
             builder.tumorReferenceFragmentCount(refFrags + (ignoreRefpair ? 0 : refPairFrags));
+
+            double af = getGenotypeAttributeAsDouble(genotype, ALLELE_FRACTION, 0);
+            builder.alleleFrequency(af);
         }
 
         return builder;
@@ -383,10 +395,5 @@ public class StructuralVariantFactory implements SvFactoryInterface
             filters.add(PASS);
         }
         return filters.stream().sorted().collect(Collectors.joining(";"));
-    }
-
-    private static StructuralVariantType type(final VariantContext context)
-    {
-        return StructuralVariantType.fromAttribute((String) context.getAttribute(SVTYPE));
     }
 }

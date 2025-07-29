@@ -14,6 +14,7 @@ import com.hartwig.hmftools.common.genotype.GenotypeStatus;
 import com.hartwig.hmftools.common.variant.AllelicDepth;
 import com.hartwig.hmftools.common.variant.CodingEffect;
 import com.hartwig.hmftools.common.variant.Hotspot;
+import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.common.variant.VariantType;
 import com.hartwig.hmftools.common.variant.impact.VariantTranscriptImpact;
 import com.hartwig.hmftools.datamodel.purple.HotspotType;
@@ -43,8 +44,8 @@ public class PurpleVariantFactoryTest
                         "synonymous_variant",
                         false,
                         "c.2187C>T",
-                        "p.Ser729="
-                ));
+                        "p.Ser729=",
+                        "", 1, 1));
 
         PurpleVariantContext context = ImmutablePurpleVariantContext.builder()
                 .chromosome("chromosome")
@@ -62,6 +63,7 @@ public class PurpleVariantFactoryTest
                 .spliceRegion(true)
                 .worstCodingEffect(CodingEffect.UNDEFINED)
                 .otherImpacts(otherImpacts)
+                .tier(VariantTier.HOTSPOT)
                 .hotspot(Hotspot.HOTSPOT)
                 .reported(true)
                 .rnaDepth(null)
@@ -70,6 +72,7 @@ public class PurpleVariantFactoryTest
                 .minorAlleleCopyNumber(1.84)
                 .variantCopyNumber(2.02)
                 .biallelic(false)
+                .biallelicProbability(0.1)
                 .genotypeStatus(GenotypeStatus.UNKNOWN)
                 .repeatCount(2)
                 .subclonalLikelihood(1)
@@ -120,6 +123,7 @@ public class PurpleVariantFactoryTest
         assertEquals(1.84, purpleVariant.minorAlleleCopyNumber(), 0);
         assertEquals(2.02, purpleVariant.variantCopyNumber(), 0);
         assertFalse(purpleVariant.biallelic());
+        assertEquals(0.1, purpleVariant.biallelicProbability(), 0);
         assertEquals(PurpleGenotypeStatus.UNKNOWN, purpleVariant.genotypeStatus());
         assertEquals(2, purpleVariant.repeatCount());
         assertEquals(1, purpleVariant.subclonalLikelihood(), 0);
@@ -204,7 +208,7 @@ public class PurpleVariantFactoryTest
                 Strings.EMPTY,
                 false,
                 Strings.EMPTY,
-                Strings.EMPTY
-        );
+                Strings.EMPTY,
+                "", 1, 1);
     }
 }

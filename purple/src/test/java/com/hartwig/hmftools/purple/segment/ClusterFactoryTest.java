@@ -155,7 +155,7 @@ public class ClusterFactoryTest
         assertCluster(cluster, start, firstPosition, finalPosition, null, null);
     }
 
-    private static void assertCluster(@NotNull final Cluster cluster, int start, @Nullable Integer firstVariant, @Nullable Integer finalVariant,
+    private static void assertCluster(final Cluster cluster, int start, @Nullable Integer firstVariant, @Nullable Integer finalVariant,
             @Nullable Integer firstRatio, @Nullable Integer finalRatio)
     {
         assertEquals(start, cluster.start());
@@ -181,7 +181,7 @@ public class ClusterFactoryTest
     @NotNull
     private static CobaltRatio ratio(int position, double ratio)
     {
-        return PurpleTestUtils.cobalt(CHROM, position, ratio).build();
+        return PurpleTestUtils.cobalt(CHROM, position, ratio);
     }
 
     @NotNull
@@ -234,25 +234,25 @@ public class ClusterFactoryTest
     }
 
     @Nullable
-    private static Integer firstVariant(@NotNull Cluster cluster)
+    private static Integer firstVariant(final Cluster cluster)
     {
         return cluster.Variants.isEmpty() ? null : cluster.Variants.get(0).position();
     }
 
     @Nullable
-    private static Integer finalVariant(@NotNull Cluster cluster)
+    private static Integer finalVariant(final Cluster cluster)
     {
         return cluster.Variants.isEmpty() ? null : cluster.Variants.get(cluster.Variants.size() - 1).position();
     }
 
     @Nullable
-    private static Integer firstRatio(@NotNull Cluster cluster)
+    private static Integer firstRatio(final Cluster cluster)
     {
         return cluster.ratios().isEmpty() ? null : cluster.ratios().get(0).position();
     }
 
     @Nullable
-    private static Integer finalRatio(@NotNull Cluster cluster)
+    private static Integer finalRatio(final Cluster cluster)
     {
         return cluster.ratios().isEmpty() ? null : cluster.ratios().get(cluster.ratios().size() - 1).position();
     }

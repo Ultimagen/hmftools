@@ -13,6 +13,7 @@ import static com.hartwig.hmftools.esvee.assembly.types.RepeatInfo.findDualDualR
 import static com.hartwig.hmftools.esvee.assembly.types.RepeatInfo.findMultiBaseRepeat;
 import static com.hartwig.hmftools.esvee.assembly.types.RepeatInfo.findRepeats;
 import static com.hartwig.hmftools.esvee.assembly.types.RepeatInfo.findSingleBaseRepeat;
+import static com.hartwig.hmftools.esvee.assembly.types.RepeatInfo.findSingleOrDualRepeat;
 import static com.hartwig.hmftools.esvee.assembly.types.RepeatInfo.findTripleBaseRepeat;
 
 import static org.junit.Assert.assertEquals;
@@ -21,8 +22,6 @@ import static org.junit.Assert.assertNull;
 
 import java.util.List;
 
-import com.hartwig.hmftools.common.genome.region.Orientation;
-import com.hartwig.hmftools.common.test.SamRecordTestUtils;
 import com.hartwig.hmftools.esvee.assembly.types.Junction;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 import com.hartwig.hmftools.esvee.assembly.types.RepeatInfo;
@@ -143,17 +142,113 @@ public class SequenceTest
     }
 
     @Test
+    public void testSingleRepeatSequence()
+    {
+        //              012345678901234567890123
+        String bases = "ATTTTTACTGTGTGTGTCAAAAAT";
+
+        RepeatInfo repeatInfo = findSingleOrDualRepeat(bases.getBytes(), 1, true);
+
+        assertNotNull(repeatInfo);
+        assertEquals(5, repeatInfo.Count);
+        assertEquals("T", repeatInfo.Bases);
+
+        repeatInfo = findSingleOrDualRepeat(bases.getBytes(), 5, false);
+
+        assertNotNull(repeatInfo);
+        assertEquals(5, repeatInfo.Count);
+        assertEquals("T", repeatInfo.Bases);
+
+        // too few
+        repeatInfo = findSingleOrDualRepeat(bases.getBytes(), 4, true);
+        assertNull(repeatInfo);
+
+        repeatInfo = findSingleOrDualRepeat(bases.getBytes(), 20, false);
+        assertNull(repeatInfo);
+
+        // at the ends
+        repeatInfo = findSingleOrDualRepeat(bases.getBytes(), 21, true);
+        assertNull(repeatInfo);
+
+        repeatInfo = findSingleOrDualRepeat(bases.getBytes(), 2, false);
+        assertNull(repeatInfo);
+
+        // dual repeats
+        repeatInfo = findSingleOrDualRepeat(bases.getBytes(), 8, true);
+
+        assertNotNull(repeatInfo);
+        assertEquals("TG", repeatInfo.Bases);
+        assertEquals(4, repeatInfo.Count);
+
+        repeatInfo = findSingleOrDualRepeat(bases.getBytes(), 15, false);
+
+        assertNotNull(repeatInfo);
+        assertEquals("TG", repeatInfo.Bases);
+        assertEquals(4, repeatInfo.Count);
+    }
+
+    private static final int NO_MISMATCH_LIMIT = -1;
+
+    @Test
+    public void testSequenceRepeatComparisons()
+    {
+        // test where the repeat multiple is just sufficient to count for one of the sequences only
+
+        //                              10           20
+        //                   01234 567890 1234 5678 9012
+        String firstBases = "ACGTA CTCTCT ACGT GAGA ACGT";
+
+        String secondBases = "ACGTA CTCT ACGT GAGAGA ACGT";
+        //                    01234 5678 9012 345678 9012
+        //                                10          20
+
+        firstBases = firstBases.replaceAll(" ", "");
+        secondBases = secondBases.replaceAll(" ", "");
+
+        List<RepeatInfo> firstRepeats = findRepeats(firstBases.getBytes());
+        assertEquals(1, firstRepeats.size());
+
+        byte[] firstBaseQuals = buildDefaultBaseQuals(firstBases.length());
+
+        List<RepeatInfo> secondRepeats = findRepeats(secondBases.getBytes());
+        assertEquals(1, secondRepeats.size());
+
+        byte[] secondBaseQuals = buildDefaultBaseQuals(secondBases.length());
+
+        int mismatches = SequenceCompare.compareSequences(
+                firstBases.getBytes(), firstBaseQuals, 0, firstBaseQuals.length - 1, firstRepeats,
+                secondBases.getBytes(), secondBaseQuals, 0, secondBaseQuals.length - 1, secondRepeats,
+                NO_MISMATCH_LIMIT);
+
+        assertEquals(2, mismatches);
+
+        mismatches = SequenceCompare.compareSequences(
+                firstBases.getBytes(), firstBaseQuals, 0, firstBaseQuals.length - 1, firstRepeats,
+                secondBases.getBytes(), secondBaseQuals, 0, secondBaseQuals.length - 1, secondRepeats,
+                NO_MISMATCH_LIMIT, false, true);
+
+        assertEquals(2, mismatches);
+    }
+
+        @Test
     public void testSequenceComparisons()
     {
-        //                   0123456789012345678901234567890123456789
-        String firstBases = "ATTTTTAACTCTCTCTAAAGGCTGACGTATTCC";
+        //                                   10          20            30
+        //                    012345     6789012345 678 90 12345678   9012
+        String firstBases =  "ATTTTT     AACTCTCTCT AAA GG CTGACGTA   TTCC";
+
+        String secondBases = "ATTTTTTT   AACTCTCT   AAA    CTGACGTA G TTCC";
+        //                    0123456789 01234567   890    12345678 9 0123
+        //                               10           20              30
+
+        firstBases = firstBases.replaceAll(" ", "");
+        secondBases = secondBases.replaceAll(" ", "");
+
         List<RepeatInfo> firstRepeats = findRepeats(firstBases.getBytes());
         assertEquals(2, firstRepeats.size());
 
         byte[] firstBaseQuals = buildDefaultBaseQuals(firstBases.length());
 
-        //                    0123456789012345678901234567890123456789
-        String secondBases = "ATTTTTTTTTAACTCTCTAAACTGACGTAGTTCC";
         List<RepeatInfo> secondRepeats = findRepeats(secondBases.getBytes());
         assertEquals(2, secondRepeats.size());
 
@@ -163,7 +258,15 @@ public class SequenceTest
 
         int mismatches = SequenceCompare.compareSequences(
                 firstBases.getBytes(), firstBaseQuals, 0, firstBaseQuals.length - 1, firstRepeats,
-                secondBases.getBytes(), secondBaseQuals, 0, secondBaseQuals.length - 1, secondRepeats, -1);
+                secondBases.getBytes(), secondBaseQuals, 0, secondBaseQuals.length - 1, secondRepeats,
+                NO_MISMATCH_LIMIT);
+
+        assertEquals(4, mismatches);
+
+        mismatches = SequenceCompare.compareSequences(
+                firstBases.getBytes(), firstBaseQuals, 0, firstBaseQuals.length - 1, firstRepeats,
+                secondBases.getBytes(), secondBaseQuals, 0, secondBaseQuals.length - 1, secondRepeats,
+                NO_MISMATCH_LIMIT, false, true);
 
         assertEquals(4, mismatches);
 
@@ -180,7 +283,15 @@ public class SequenceTest
 
         mismatches = SequenceCompare.compareSequences(
                 firstBases.getBytes(), firstBaseQuals, 0, firstBaseQuals.length - 1, firstRepeats,
-                secondBases.getBytes(), secondBaseQuals, 0, secondBaseQuals.length - 1, secondRepeats, -1);
+                secondBases.getBytes(), secondBaseQuals, 0, secondBaseQuals.length - 1, secondRepeats,
+                NO_MISMATCH_LIMIT);
+
+        assertEquals(1, mismatches);
+
+        mismatches = SequenceCompare.compareSequences(
+                firstBases.getBytes(), firstBaseQuals, 0, firstBaseQuals.length - 1, firstRepeats,
+                secondBases.getBytes(), secondBaseQuals, 0, secondBaseQuals.length - 1, secondRepeats,
+                NO_MISMATCH_LIMIT, false, true);
 
         assertEquals(1, mismatches);
     }
@@ -188,8 +299,12 @@ public class SequenceTest
     @Test
     public void testLongerSequenceComparisons()
     {
+        //                              10        20            30        40         50            60            70          80        90
+        //                    012345678901234567890 1 2345678  901234567890123456789 012  345678 9 012 3 456 7 890123456 7 89012345678901
         String firstBases =  "TTTTTTGTATTAAGTCTAATA C TTTTTTT  AACTTAAGTGTAGATTTTTTT AAA  TGCTCC A TAA C GGT T TTATTTATA C GATTTTTGTCACTG";
-        String secondBases = "TTTTTTGTATTAAGTCTAATA G TTTTTTTT AACTTAAGTGTAGATTTTTT  AAAA TGCTCC G TAA T GGT G TTATTTATA T GATTTTTGTCACTGCT";
+        String secondBases = "TTTTTTGTATTAAGTCTAATA G TTTTTTTT AACTTAAGTGTAGATTTTTT  AAAA TGCTCC G TAA T GGT G TTATTTATA T GATTTTTGTCACTG";
+        //                    012345678901234567890 1 23456789 01234567890123456789  0123 456789 0 123 4 567 8 901234567 8 90123456789012
+        //                              10        20           30        40          50          60             70          80        90
 
         firstBases = firstBases.replaceAll(" ", "");
         secondBases = secondBases.replaceAll(" ", "");
@@ -208,7 +323,15 @@ public class SequenceTest
 
         int mismatches = SequenceCompare.compareSequences(
                 firstBases.getBytes(), firstBaseQuals, 0, firstBaseQuals.length - 1, firstRepeats,
-                secondBases.getBytes(), secondBaseQuals, 0, secondBaseQuals.length - 1, secondRepeats, -1);
+                secondBases.getBytes(), secondBaseQuals, 0, secondBaseQuals.length - 1, secondRepeats,
+                NO_MISMATCH_LIMIT);
+
+        assertEquals(8, mismatches);
+
+        mismatches = SequenceCompare.compareSequences(
+                firstBases.getBytes(), firstBaseQuals, 0, firstBaseQuals.length - 1, firstRepeats,
+                secondBases.getBytes(), secondBaseQuals, 0, secondBaseQuals.length - 1, secondRepeats,
+                NO_MISMATCH_LIMIT, false, true);
 
         assertEquals(8, mismatches);
     }
@@ -221,17 +344,13 @@ public class SequenceTest
         String extensionSequence = "ACGTTCGTAAAAAAGGGGGGACGTACGTCCCC";
         String refBaseSequence = "ACGTAGAGAGAGACGTCCCCACGG";
         String assemblySequence = refBaseSequence + extensionSequence;
-        byte[] baseQuals = SamRecordTestUtils.buildDefaultBaseQuals(assemblySequence.length());
+        byte[] baseQuals = buildDefaultBaseQuals(assemblySequence.length());
 
         Read read1 = createRead(READ_ID_GENERATOR.nextId(), 37, assemblySequence, "24M32S");
-        Read read1b = cloneRead(read1, READ_ID_GENERATOR.nextId());
 
-        String softClipRef = "GGGGGGGG";
-        Read read2 = createRead(
-                READ_ID_GENERATOR.nextId(), 41,
-                softClipRef + refBaseSequence + extensionSequence.substring(0, 20), "12S20M20S");
+        Read read2 = createRead(READ_ID_GENERATOR.nextId(), 38, assemblySequence.substring(1), "23M32S");
 
-        JunctionAssembly assembly = new JunctionAssembler(posJunction).processJunction(List.of(read1, read1b, read2)).get(0);
+        JunctionAssembly assembly = new JunctionAssembler(posJunction).processJunction(List.of(read1, read2)).get(0);
 
         assertEquals("ACGT_AG4_ACGT_C4_ACGG", assembly.refBasesRepeatedTrimmed()); // 4 + 4 + 4 + 2 + 4
         assertEquals(18, assembly.refBaseTrimLength());

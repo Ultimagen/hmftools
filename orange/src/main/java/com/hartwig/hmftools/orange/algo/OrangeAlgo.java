@@ -5,8 +5,10 @@ import static com.hartwig.hmftools.orange.OrangeApplication.LOGGER;
 import java.io.File;
 import java.io.IOException;
 import java.text.DecimalFormat;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -20,10 +22,9 @@ import com.hartwig.hmftools.common.doid.DiseaseOntology;
 import com.hartwig.hmftools.common.doid.DoidEntry;
 import com.hartwig.hmftools.common.doid.DoidNode;
 import com.hartwig.hmftools.common.doid.DoidParents;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGene;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGeneFile;
+import com.hartwig.hmftools.common.driver.panel.DriverGene;
+import com.hartwig.hmftools.common.driver.panel.DriverGeneFile;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
-import com.hartwig.hmftools.common.flagstat.FlagstatFile;
 import com.hartwig.hmftools.common.fusion.KnownFusionCache;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.hla.LilacSummaryData;
@@ -31,7 +32,8 @@ import com.hartwig.hmftools.common.isofox.IsofoxData;
 import com.hartwig.hmftools.common.isofox.IsofoxDataLoader;
 import com.hartwig.hmftools.common.linx.LinxData;
 import com.hartwig.hmftools.common.linx.LinxDataLoader;
-import com.hartwig.hmftools.common.metrics.WGSMetricsFile;
+import com.hartwig.hmftools.common.metrics.BamFlagStats;
+import com.hartwig.hmftools.common.metrics.BamMetricsSummary;
 import com.hartwig.hmftools.common.peach.PeachGenotype;
 import com.hartwig.hmftools.common.peach.PeachGenotypeFile;
 import com.hartwig.hmftools.common.pipeline.PipelineVersionFile;
@@ -68,7 +70,8 @@ import com.hartwig.hmftools.orange.algo.pave.PaveAlgo;
 import com.hartwig.hmftools.orange.algo.plot.DummyPlotManager;
 import com.hartwig.hmftools.orange.algo.plot.FileBasedPlotManager;
 import com.hartwig.hmftools.orange.algo.plot.PlotManager;
-import com.hartwig.hmftools.orange.algo.purple.GermlineGainLossFactory;
+import com.hartwig.hmftools.orange.algo.purple.ChromosomalRearrangementsDeterminer;
+import com.hartwig.hmftools.orange.algo.purple.GermlineGainDeletionFactory;
 import com.hartwig.hmftools.orange.algo.purple.GermlineLossOfHeterozygosityFactory;
 import com.hartwig.hmftools.orange.algo.purple.PurpleData;
 import com.hartwig.hmftools.orange.algo.purple.PurpleDataLoader;
@@ -184,7 +187,7 @@ public class OrangeAlgo
     public OrangeRecord run(@NotNull OrangeConfig config) throws Exception
     {
         Set<DoidNode> configuredPrimaryTumor = loadConfiguredPrimaryTumor(config);
-        String platinumVersion = determinePlatinumVersion(config);
+        String pipelineVersion = determinePipelineVersion(config);
         OrangeSample refSample = loadSampleData(config, false);
         OrangeSample tumorSample = loadSampleData(config, true);
 
@@ -199,16 +202,27 @@ public class OrangeAlgo
         List<SignatureAllocation> sigAllocations = loadSigAllocations(config);
         IsofoxData isofoxData = loadIsofoxData(config);
 
-        LinxInterpreter linxInterpreter = new LinxInterpreter(driverGenes, knownFusionCache);
+        LinxInterpreter linxInterpreter = new LinxInterpreter(
+                driverGenes,
+                knownFusionCache,
+                purpleData.allPassingSomaticStructuralVariants(),
+                purpleData.allPassingGermlineStructuralVariants(),
+                purpleData.allInferredSomaticStructuralVariants(),
+                purpleData.allInferredGermlineStructuralVariants(),
+                ensemblDataCache
+        );
+
         LinxRecord linx = linxInterpreter.interpret(linxData);
 
         PaveAlgo pave = new PaveAlgo(ensemblDataCache, !suppressGeneWarnings);
 
         PurpleVariantFactory purpleVariantFactory = new PurpleVariantFactory(pave);
-        GermlineGainLossFactory germlineGainLossFactory = new GermlineGainLossFactory(ensemblDataCache);
+        GermlineGainDeletionFactory germlineGainDeletionFactory = new GermlineGainDeletionFactory(ensemblDataCache);
         GermlineLossOfHeterozygosityFactory germlineLOHFactory = new GermlineLossOfHeterozygosityFactory(ensemblDataCache);
-        PurpleInterpreter purpleInterpreter =
-                new PurpleInterpreter(purpleVariantFactory, germlineGainLossFactory, germlineLOHFactory, driverGenes, linx, chord);
+        ChromosomalRearrangementsDeterminer chromosomalRearrangementsDeterminer =
+                ChromosomalRearrangementsDeterminer.createForRefGenomeVersion(config.refGenomeVersion());
+        PurpleInterpreter purpleInterpreter = new PurpleInterpreter(purpleVariantFactory, germlineGainDeletionFactory,
+                germlineLOHFactory, driverGenes, linx, chromosomalRearrangementsDeterminer, chord, config.convertGermlineToSomatic());
         PurpleRecord purple = purpleInterpreter.interpret(purpleData);
 
         ImmuneEscapeRecord immuneEscape = ImmuneEscapeInterpreter.interpret(purple, linx);
@@ -226,7 +240,7 @@ public class OrangeAlgo
             wildTypeGenes = WildTypeAlgo.determineWildTypeGenes(driverGenes,
                     purple.reportableSomaticVariants(),
                     purple.reportableGermlineVariants(),
-                    purple.reportableSomaticGainsLosses(),
+                    purple.reportableSomaticGainsDels(),
                     linx.reportableSomaticFusions(),
                     linx.somaticHomozygousDisruptions(),
                     linx.reportableSomaticBreakends());
@@ -244,7 +258,7 @@ public class OrangeAlgo
                 .experimentType(config.experimentType())
                 .configuredPrimaryTumor(ConversionUtil.mapToIterable(configuredPrimaryTumor, OrangeConversion::convert))
                 .refGenomeVersion(config.refGenomeVersion())
-                .platinumVersion(platinumVersion)
+                .pipelineVersion(pipelineVersion)
                 .refSample(refSample)
                 .tumorSample(tumorSample)
                 .germlineMVLHPerGene(mvlhPerGene)
@@ -252,7 +266,7 @@ public class OrangeAlgo
                 .linx(linx)
                 .wildTypeGenes(wildTypeGenes)
                 .isofox(isofox)
-                .lilac(OrangeConversion.convert(lilac, hasRefSample, config.rnaConfig() != null))
+                .lilac(lilac != null ? OrangeConversion.convert(lilac, hasRefSample, config.rnaConfig() != null) : null)
                 .immuneEscape(immuneEscape)
                 .virusInterpreter(virusInterpreter != null ? VirusInterpreter.interpret(virusInterpreter) : null)
                 .chord(chord != null ? OrangeConversion.convert(chord) : null)
@@ -313,25 +327,25 @@ public class OrangeAlgo
     }
 
     @Nullable
-    private static String determinePlatinumVersion(@NotNull OrangeConfig config) throws IOException
+    private static String determinePipelineVersion(@NotNull OrangeConfig config) throws IOException
     {
         String pipelineVersionFile = config.pipelineVersionFile();
         if(pipelineVersionFile == null)
         {
-            LOGGER.warn("No platinum version could be determined as pipeline version file was not passed");
+            LOGGER.warn("No pipeline version could be determined as pipeline version file was not passed");
             return null;
         }
 
-        String platinumVersion = PipelineVersionFile.majorDotMinorVersion(pipelineVersionFile);
-        if(platinumVersion != null)
+        String pipelineVersion = PipelineVersionFile.majorDotMinorVersion(pipelineVersionFile);
+        if(pipelineVersion != null)
         {
-            LOGGER.info("Determined platinum version to be 'v{}'", platinumVersion);
+            LOGGER.info("Determined pipeline version to be 'v{}'", pipelineVersion);
         }
         else
         {
-            LOGGER.warn("No platinum version could be determined as version could not be resolved from {}", pipelineVersionFile);
+            LOGGER.warn("No pipeline version could be determined as version could not be resolved from {}", pipelineVersionFile);
         }
-        return platinumVersion;
+        return pipelineVersion;
     }
 
     @Nullable
@@ -356,11 +370,11 @@ public class OrangeAlgo
         }
 
         String metricsFile = loadTumorSample ? config.tumorSampleWGSMetricsFile() : config.wgsRefConfig().refSampleWGSMetricsFile();
-        WGSMetrics metrics = OrangeConversion.convert(WGSMetricsFile.read(metricsFile));
+        WGSMetrics metrics = OrangeConversion.convert(BamMetricsSummary.read(metricsFile));
         LOGGER.info(" Loaded WGS metrics from {}", metricsFile);
 
         String flagstatFile = loadTumorSample ? config.tumorSampleFlagstatFile() : config.wgsRefConfig().refSampleFlagstatFile();
-        Flagstat flagstat = OrangeConversion.convert(FlagstatFile.read(flagstatFile));
+        Flagstat flagstat = OrangeConversion.convert(BamFlagStats.read(flagstatFile));
         LOGGER.info(" Loaded flagstat from {}", flagstatFile);
 
         return ImmutableOrangeSample.builder().metrics(metrics).flagstat(flagstat).build();
@@ -381,14 +395,14 @@ public class OrangeAlgo
             throws IOException
     {
         OrangeWGSRefConfig orangeWGSRefConfig = config.wgsRefConfig();
-        String sageGermlineGeneCoverageTsv = orangeWGSRefConfig != null ? orangeWGSRefConfig.sageGermlineGeneCoverageTsv() : null;
-        if(sageGermlineGeneCoverageTsv == null)
+        String germlineGeneCoverageTsv = orangeWGSRefConfig != null ? orangeWGSRefConfig.germlineGeneCoverageTsv() : null;
+        if(germlineGeneCoverageTsv == null)
         {
             LOGGER.info("Skipping loading of germline MVLH as no germline gene coverage has been provided");
             return null;
         }
 
-        Map<String, Double> mvlhPerGene = GermlineMVLHFactory.loadGermlineMVLHPerGene(sageGermlineGeneCoverageTsv, driverGenes);
+        Map<String, Double> mvlhPerGene = GermlineMVLHFactory.loadGermlineMVLHPerGene(germlineGeneCoverageTsv, driverGenes);
         LOGGER.info("Loaded MVLH data for {} genes", mvlhPerGene.keySet().size());
 
         return mvlhPerGene;
@@ -428,7 +442,7 @@ public class OrangeAlgo
                 purple.reportableSomaticVariants().size());
         LOGGER.info(" Loaded {} somatic copy numbers entries", purple.allSomaticCopyNumbers().size());
         LOGGER.info(" Loaded {} somatic gene copy numbers entries", purple.allSomaticGeneCopyNumbers().size());
-        LOGGER.info(" Loaded {} somatic structural variants", purple.allSomaticStructuralVariants().size());
+        LOGGER.info(" Loaded {} somatic structural variants", purple.allPassingSomaticStructuralVariants().size());
 
         if(referenceSample != null)
         {
@@ -441,7 +455,7 @@ public class OrangeAlgo
                     purple.allGermlineDeletions().size(),
                     purple.reportableGermlineDeletions().size());
 
-            LOGGER.info(" Loaded {} germline structural variants", purple.allGermlineStructuralVariants().size());
+            LOGGER.info(" Loaded {} germline structural variants", purple.allPassingGermlineStructuralVariants().size());
         }
         else
         {
@@ -532,9 +546,15 @@ public class OrangeAlgo
                 rna.isofoxAltSpliceJunctionCsv());
     }
 
-    @NotNull
+    @Nullable
     private static LilacSummaryData loadLilacData(@NotNull OrangeConfig config) throws IOException
     {
+        if(config.lilacResultTsv() == null || config.lilacQcTsv() == null)
+        {
+            LOGGER.info("Skipping loading LILAC results since LILAC input dir or tsvs were not provided");
+            return null;
+        }
+
         return LilacSummaryData.load(config.lilacQcTsv(), config.lilacResultTsv());
     }
 
@@ -581,7 +601,7 @@ public class OrangeAlgo
     private static CuppaData loadCuppaData(@NotNull OrangeConfig config) throws Exception
     {
         OrangeWGSRefConfig orangeWGSRefConfig = config.wgsRefConfig();
-        if(orangeWGSRefConfig == null)
+        if(orangeWGSRefConfig == null || orangeWGSRefConfig.cuppaVisDataTsv() == null)
         {
             return null;
         }
@@ -608,8 +628,8 @@ public class OrangeAlgo
         LOGGER.info("Loading PEACH from {}", new File(peachGenotypeTsv).getParent());
         List<PeachGenotype> peachGenotypes = PeachGenotypeFile.read(peachGenotypeTsv);
         LOGGER.info(" Loaded {} PEACH genotypes from {}", peachGenotypes.size(), config.wgsRefConfig().peachGenotypeTsv());
-
-        return peachGenotypes;
+        List<PeachGenotype> filterUGT1A1FromPeachGenotypes = peachGenotypes.stream().filter(genotype -> !genotype.gene().equals("UGT1A1")).toList();
+        return filterUGT1A1FromPeachGenotypes;
     }
 
     @Nullable
@@ -699,6 +719,15 @@ public class OrangeAlgo
         String purpleVariantCopyNumberPlot = plotManager.processPlotFile(purplePlotBasePath + ".somatic.png");
         String purplePurityRangePlot = plotManager.processPlotFile(purplePlotBasePath + ".purity.range.png");
         String purpleKataegisPlot = plotManager.processPlotFile(purplePlotBasePath + ".somatic.rainfall.png");
+
+        List<String> purplePlots = Arrays.asList(purpleInputPlot, purpleFinalCircosPlot, purpleClonalityPlot, purpleCopyNumberPlot,
+                purpleVariantCopyNumberPlot, purplePurityRangePlot, purpleKataegisPlot);
+
+        if(purplePlots.stream().anyMatch(Objects::isNull))
+        {
+            LOGGER.warn("Skipping making ORANGE report: missing one or more PURPLE plot paths, likely because the input sample(s) has no or extremely sparse data");
+            System.exit(0);
+        }
 
         String cuppaSummaryPlot = plotManager.processPlotFile(
                 (config.wgsRefConfig() != null) ? config.wgsRefConfig().cuppaSummaryPlot() : null

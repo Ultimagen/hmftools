@@ -6,10 +6,10 @@ import static java.lang.Math.min;
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.common.codon.Nucleotides.DNA_BASE_BYTES;
-import static com.hartwig.hmftools.common.genome.bed.BedFileReader.loadBedFileChrMap;
+import static com.hartwig.hmftools.common.region.BedFileReader.loadBedFileChrMap;
 import static com.hartwig.hmftools.common.qual.BaseQualAdjustment.probabilityToPhredQual;
 import static com.hartwig.hmftools.common.sage.SageCommon.generateBqrFilename;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.runThreadTasks;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.runThreadTasks;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
 import static com.hartwig.hmftools.sage.SageConstants.BQR_SAMPLE_SIZE;
 
@@ -32,7 +32,7 @@ import com.hartwig.hmftools.common.qual.BqrFile;
 import com.hartwig.hmftools.common.qual.BqrKey;
 import com.hartwig.hmftools.common.qual.BqrRecord;
 import com.hartwig.hmftools.common.region.PartitionUtils;
-import com.hartwig.hmftools.common.utils.r.RExecutor;
+import com.hartwig.hmftools.common.utils.RExecutor;
 import com.hartwig.hmftools.common.region.BaseRegion;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.common.variant.VariantType;
@@ -302,7 +302,7 @@ public class BaseQualityRecalibration
         if(triNucRate == 0 || (observedCount + altRefCount) == 0)
             return 0;
 
-        double calcProbability = triNucRate * observedCount / (observedCount + altRefCount);
+        double calcProbability = min(triNucRate * observedCount / (observedCount + altRefCount), 1.0);
         return probabilityToPhredQual(calcProbability);
     }
 

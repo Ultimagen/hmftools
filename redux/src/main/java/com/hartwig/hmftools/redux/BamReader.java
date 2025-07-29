@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
+import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.common.bam.BamSlicer;
 
@@ -29,10 +30,10 @@ public class BamReader
     private final List<BamFileReader> mActiveBamReaders;
     private final List<BamFileReader> mFinishedBamReaders;
 
-    public BamReader(final ReduxConfig config)
+    public BamReader(final List<String> inputBams, final String refGenomeFile)
     {
-        mInputBams = config.BamFiles;
-        mRefGenomeFile = config.RefGenomeFile;
+        mInputBams = inputBams;
+        mRefGenomeFile = refGenomeFile;
 
         mBamReaders = Lists.newArrayListWithCapacity(mInputBams.size());
         mActiveBamReaders = Lists.newArrayListWithCapacity(mInputBams.size());
@@ -92,7 +93,6 @@ public class BamReader
 
             if(topReader.finished())
             {
-                RD_LOGGER.trace("bam({}) finished", topReader.filename());
                 mFinishedBamReaders.add(topReader);
             }
             else
@@ -105,29 +105,6 @@ public class BamReader
                 return;
 
             topReader = mActiveBamReaders.get(0);
-        }
-    }
-
-    public void queryUnmappedReads(final Consumer<SAMRecord> consumer)
-    {
-        for(BamFileReader reader : mBamReaders)
-        {
-            reader.queryUnmapped(consumer);
-        }
-    }
-
-    public void queryNonHumanContigs(final Consumer<SAMRecord> consumer)
-    {
-        BamSlicer bamSlicer = new BamSlicer(0, true, true, true);
-        bamSlicer.setKeepUnmapped();
-
-        for(BamFileReader reader : mBamReaders)
-        {
-            List<ChrBaseRegion> nonHumanContigs = reader.nonHumanContigs();
-            for(ChrBaseRegion region : nonHumanContigs)
-            {
-                bamSlicer.slice(reader.mSamReader, region, consumer);
-            }
         }
     }
 
@@ -165,6 +142,13 @@ public class BamReader
 
         public void sliceRegion(final ChrBaseRegion region)
         {
+            // check that the region exists in the BAM to avoid logging an error
+            if(mSamReader.getFileHeader().getSequenceDictionary().getSequences().stream()
+                    .noneMatch(x -> x.getSequenceName().equals(region.Chromosome)))
+            {
+                return;
+            }
+
             final QueryInterval[] queryIntervals = BamSlicer.createIntervals(List.of(region), mSamReader.getFileHeader());
 
             if(queryIntervals == null)
@@ -202,17 +186,6 @@ public class BamReader
             }
         }
 
-        public void queryUnmapped(final Consumer<SAMRecord> consumer)
-        {
-            try(final SAMRecordIterator iterator = mSamReader.queryUnmapped())
-            {
-                while(iterator.hasNext())
-                {
-                    consumer.accept(iterator.next());
-                }
-            }
-        }
-
         public String filename() { return mFilename; }
 
         public SAMRecord current() { return mCurrentRecord; }
@@ -227,14 +200,6 @@ public class BamReader
                 return false;
 
             return currentPosition() > other.currentPosition();
-        }
-
-        public List<ChrBaseRegion> nonHumanContigs()
-        {
-            return mSamReader.getFileHeader().getSequenceDictionary().getSequences().stream()
-                    .filter(x -> !HumanChromosome.contains(x.getContig()))
-                    .map(x -> new ChrBaseRegion(x.getContig(), 1, x.getEnd()))
-                    .collect(Collectors.toList());
         }
 
         public String toString()

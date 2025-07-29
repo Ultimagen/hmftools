@@ -1,10 +1,9 @@
 package com.hartwig.hmftools.common.purple;
 
 import java.util.Collection;
-import java.util.Random;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.cobalt.ImmutableCobaltRatio;
+import com.hartwig.hmftools.common.cobalt.CobaltRatio;
 import com.hartwig.hmftools.common.sv.ImmutableStructuralVariantImpl;
 import com.hartwig.hmftools.common.sv.ImmutableStructuralVariantLegImpl;
 import com.hartwig.hmftools.common.sv.StructuralVariantType;
@@ -19,18 +18,18 @@ import htsjdk.variant.variantcontext.VariantContextBuilder;
 public class PurpleTestUtils
 {
 
-    public static ImmutableCobaltRatio.Builder cobalt(@NotNull final String chromosome, int position, double ratio)
+    public static CobaltRatio cobalt(@NotNull final String chromosome, int position, double ratio)
     {
-        return ImmutableCobaltRatio.builder()
-                .chromosome(chromosome)
-                .position(position)
-                .tumorReadDepth(0)
-                .referenceReadDepth(0)
-                .referenceGCRatio(1)
-                .referenceGCDiploidRatio(1)
-                .tumorGCRatio(ratio)
-                .referenceGcContent(0.5)
-                .tumorGcContent(0.5);
+        return new CobaltRatio(
+                chromosome,
+                position,
+                0, // referenceReadDepth
+                1, // referenceGCRatio
+                0.5, // referenceGcContent
+                1, // referenceGCDiploidRatio
+                0, // tumorReadDepth
+                ratio, // tumorGCRatio
+                0.5); // tumorGcContent
     }
 
     public static ImmutablePurpleCopyNumber.Builder createCopyNumber(
@@ -63,12 +62,10 @@ public class PurpleTestUtils
                 .insertSequenceAlignments(Strings.EMPTY)
                 .type(type)
                 .hotspot(false)
-                .recovered(false)
                 .qualityScore(0)
                 .start(createStartLeg(startChromosome, startPosition, type).alleleFrequency(startVaf).build())
                 .end(createEndLeg(endChromosome, endPosition, type).alleleFrequency(endVaf).build())
-                .startContext(dummyContext())
-                .imprecise(true);
+                .startContext(dummyContext());
     }
 
     public static ImmutableStructuralVariantImpl.Builder createStructuralVariant(
@@ -82,11 +79,9 @@ public class PurpleTestUtils
                 .type(type)
                 .qualityScore(0)
                 .hotspot(false)
-                .recovered(false)
                 .start(createStartLeg(startChromosome, startPosition, type).build())
                 .end(createEndLeg(endChromosome, endPosition, type).build())
-                .startContext(dummyContext())
-                .imprecise(true);
+                .startContext(dummyContext());
     }
 
     public static ImmutableStructuralVariantImpl.Builder createStructuralVariantSingleBreakend(
@@ -98,31 +93,21 @@ public class PurpleTestUtils
                 .insertSequenceAlignments(Strings.EMPTY)
                 .qualityScore(0)
                 .hotspot(false)
-                .recovered(false)
                 .type(StructuralVariantType.BND)
                 .start(createStartLeg(startChromosome, startPosition, StructuralVariantType.BND).alleleFrequency(startVaf).build())
-                .startContext(dummyContext())
-                .imprecise(false);
+                .startContext(dummyContext());
     }
 
     @NotNull
     public static ImmutableStructuralVariantLegImpl.Builder createStartLeg(final String startChromosome, final int startPosition,
             final StructuralVariantType type)
     {
-        final byte startOrientation;
-        switch(type)
+        final byte startOrientation = switch(type)
         {
-            case DUP:
-                startOrientation = -1;
-                break;
-            case BND:
-            case INV:
-                startOrientation = 1;
-                break;
-            default:
-                startOrientation = 1;
-                break;
-        }
+            case DUP -> -1;
+            case BND, INV -> 1;
+            default -> 1;
+        };
 
         return ImmutableStructuralVariantLegImpl.builder()
                 .chromosome(startChromosome)
@@ -135,20 +120,12 @@ public class PurpleTestUtils
     private static ImmutableStructuralVariantLegImpl.Builder createEndLeg(
             final String endChromosome, final int endPosition, final StructuralVariantType type)
     {
-        final byte endOrientation;
-        switch(type)
+        final byte endOrientation = switch(type)
         {
-            case DUP:
-                endOrientation = 1;
-                break;
-            case BND:
-            case INV:
-                endOrientation = 1;
-                break;
-            default:
-                endOrientation = -1;
-                break;
-        }
+            case DUP -> 1;
+            case BND, INV -> 1;
+            default -> -1;
+        };
 
         return ImmutableStructuralVariantLegImpl.builder()
                 .chromosome(endChromosome)

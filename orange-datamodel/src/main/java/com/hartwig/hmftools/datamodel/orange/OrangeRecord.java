@@ -44,7 +44,7 @@ public interface OrangeRecord
     OrangeRefGenomeVersion refGenomeVersion();
 
     @Nullable
-    String platinumVersion();
+    String pipelineVersion();
 
     @Nullable
     OrangeSample refSample();
@@ -67,7 +67,7 @@ public interface OrangeRecord
     @Nullable
     IsofoxRecord isofox();
 
-    @NotNull
+    @Nullable
     LilacRecord lilac();
 
     @NotNull

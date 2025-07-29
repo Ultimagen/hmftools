@@ -1,10 +1,10 @@
 package com.hartwig.hmftools.lilac.coverage;
 
+import static com.hartwig.hmftools.lilac.GeneCache.longGeneName;
 import static com.hartwig.hmftools.lilac.LilacConfig.LL_LOGGER;
 import static com.hartwig.hmftools.lilac.LilacConstants.MIN_WILDCARD_FRAGMENTS;
-import static com.hartwig.hmftools.lilac.LilacConstants.getAminoAcidExonBoundaries;
-import static com.hartwig.hmftools.lilac.LilacConstants.getNucleotideExonBoundaries;
-import static com.hartwig.hmftools.lilac.LilacConstants.longGeneName;
+import static com.hartwig.hmftools.lilac.ReferenceData.getAminoAcidExonBoundaries;
+import static com.hartwig.hmftools.lilac.ReferenceData.getNucleotideExonBoundaries;
 import static com.hartwig.hmftools.lilac.fragment.FragmentScope.HLA_Y;
 import static com.hartwig.hmftools.lilac.fragment.FragmentScope.NO_HET_LOCI;
 import static com.hartwig.hmftools.lilac.fragment.FragmentScope.UNMATCHED_AMINO_ACID;
@@ -17,12 +17,15 @@ import static com.hartwig.hmftools.lilac.seq.SequenceMatchType.WILD;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.hartwig.hmftools.lilac.evidence.AminoAcid;
+import com.hartwig.hmftools.lilac.evidence.Nucleotide;
 import com.hartwig.hmftools.lilac.fragment.Fragment;
 import com.hartwig.hmftools.lilac.hla.HlaAllele;
 import com.hartwig.hmftools.lilac.seq.HlaSequenceLoci;
@@ -118,10 +121,14 @@ public class FragmentAlleleMapper
 
             for(Map.Entry<String,Map<Integer,Set<String>>> geneEntry : mGeneAminoAcidHetLociMap.entrySet())
             {
-                if(!fragment.getGenes().contains(longGeneName(geneEntry.getKey())))
+                if(!fragment.genes().contains(longGeneName(geneEntry.getKey())))
                     continue;
 
-                if(fragment.getAminoAcidLoci().stream().anyMatch(x -> geneEntry.getValue().containsKey(x)))
+                if(fragment.aminoAcidsByLoci()
+                        .values()
+                        .stream()
+                        .mapToInt(AminoAcid::locus)
+                        .anyMatch(x -> geneEntry.getValue().containsKey(x)))
                 {
                     hasHetLoci = true;
                     break;
@@ -145,8 +152,12 @@ public class FragmentAlleleMapper
         // look first for nucleotide support at the exon boundaries, then for amino acid support - full or wild
         Map<String,List<Integer>> fragNucleotideLociMap = Maps.newHashMap();
 
-        mRefNucleotideHetLoci.entrySet().forEach(x -> fragNucleotideLociMap.put(
-                x.getKey(), fragment.getNucleotideLoci().stream().filter(y -> x.getValue().contains(y)).collect(Collectors.toList())));
+        mRefNucleotideHetLoci.entrySet().forEach(x -> fragNucleotideLociMap.put(x.getKey(), fragment.nucleotidesByLoci()
+                        .values()
+                        .stream()
+                        .map(Nucleotide::locus)
+                        .filter(y -> x.getValue().contains(y))
+                        .collect(Collectors.toList())));
 
         Map<HlaAllele, SequenceMatchType> nucleotideAlleleMatches = findNucleotideMatches(fragment, nucleotideSequences);
 
@@ -178,8 +189,10 @@ public class FragmentAlleleMapper
         }
 
         // otherwise look for matching nuc and amino-acid full matches
+        Set<HlaAllele> fullAminoAcidMatchSet = Sets.newHashSet(fullAminoAcidMatch);
+        Set<HlaAllele> homLociAminoAcidMatchSet = Sets.newHashSet(homLociAminoAcidMatch);
         List<HlaAllele> consistentFull = fullNucleotideMatch.stream()
-                .filter(x -> fullAminoAcidMatch.contains(x) || homLociAminoAcidMatch.contains(x)).collect(Collectors.toList());
+                .filter(x -> fullAminoAcidMatchSet.contains(x) || homLociAminoAcidMatchSet.contains(x)).collect(Collectors.toList());
 
         // otherwise down-grade the full matches to wild
         fullAminoAcidMatch.stream()
@@ -206,19 +219,23 @@ public class FragmentAlleleMapper
             String gene = entry.getKey();
             List<Integer> refNucleotideLoci = entry.getValue();
 
-            List<Integer> fragmentMatchedLoci = fragment.getNucleotideLoci().stream()
-                    .filter(y -> refNucleotideLoci.contains(y)).collect(Collectors.toList());
+            List<Integer> fragmentMatchedLoci = fragment.nucleotidesByLoci()
+                    .values()
+                    .stream()
+                    .map(Nucleotide::locus)
+                    .filter(y -> refNucleotideLoci.contains(y))
+                    .collect(Collectors.toList());
 
             // also check for support from low-qual reads at this same location
             List<Integer> missedNucleotideLoci = refNucleotideLoci.stream()
-                    .filter(x -> !fragment.getNucleotideLoci().contains(x)).collect(Collectors.toList());
+                    .filter(x -> !fragment.nucleotidesByLoci().containsKey(x)).collect(Collectors.toList());
 
             for(Integer missedLocus : missedNucleotideLoci)
             {
                 if(missedLocus >= mRefNucleotides.size())
                     continue;
 
-                String lowQualNucleotide = fragment.getLowQualNucleotide(missedLocus);
+                String lowQualNucleotide = fragment.getRawNucleotide(missedLocus);
 
                 if(lowQualNucleotide.isEmpty())
                     continue;
@@ -262,7 +279,7 @@ public class FragmentAlleleMapper
             if(existingMatch != null && existingMatch == FULL)
                 continue;
 
-            if(!fragment.getGenes().contains(allele.geneName()))
+            if(!fragment.genes().contains(allele.geneName()))
                 continue;
 
             List<Integer> fragNucleotideLoci = fragGeneLociMap.get(allele.Gene);
@@ -334,8 +351,9 @@ public class FragmentAlleleMapper
         {
             Map<Integer,Set<String>> hetLociSeqMap = geneEntry.getValue();
 
-            List<Integer> fragAminoAcidLoci = fragment.getAminoAcidLoci().stream()
-                    .filter(x -> hetLociSeqMap.containsKey(x)).collect(Collectors.toList());
+            NavigableSet<Integer> fragAminoAcidLoci = fragment.aminoAcidsByLoci().keySet().stream()
+                    .filter(x -> hetLociSeqMap.containsKey(x))
+                    .collect(Collectors.toCollection(Sets::newTreeSet));
 
             // also attempt to retrieve amino acids from low-qual nucleotides
             Map<Integer,String> missedAminoAcids = Maps.newHashMap();
@@ -359,8 +377,6 @@ public class FragmentAlleleMapper
                 }
             }
 
-            Collections.sort(fragAminoAcidLoci);
-
             final List<String> fragmentAminoAcids = Lists.newArrayListWithExpectedSize(fragAminoAcidLoci.size());
 
             for(Integer locus : fragAminoAcidLoci)
@@ -371,7 +387,7 @@ public class FragmentAlleleMapper
                     fragmentAminoAcids.add(fragment.aminoAcid(locus));
             }
 
-            fragGeneLociMap.put(geneEntry.getKey(), fragAminoAcidLoci);
+            fragGeneLociMap.put(geneEntry.getKey(), Lists.newArrayList(fragAminoAcidLoci));
             fragGeneSequenceMap.put(geneEntry.getKey(), fragmentAminoAcids);
         }
 
@@ -379,7 +395,7 @@ public class FragmentAlleleMapper
         {
             HlaAllele allele = sequence.Allele;
 
-            if(!fragment.getGenes().contains(allele.geneName()))
+            if(!fragment.genes().contains(allele.geneName()))
             {
                 alleleMatches.put(allele, NO_LOCI);
                 continue;
@@ -534,20 +550,8 @@ public class FragmentAlleleMapper
         }
     }
 
-    private static void removeUnsupportedWildcardAlleles(final List<HlaAllele> alleleList, final List<HlaAllele> unsupportedAlleles)
+    private static void removeUnsupportedWildcardAlleles(final Set<HlaAllele> alleleList, final List<HlaAllele> unsupportedAlleles)
     {
-        int index = 0;
-        while(index < alleleList.size())
-        {
-            if(unsupportedAlleles.contains(alleleList.get(index)))
-            {
-                alleleList.remove(index);
-            }
-            else
-            {
-                ++index;
-            }
-        }
+        alleleList.removeAll(unsupportedAlleles);
     }
-
 }

@@ -9,7 +9,6 @@ import static com.hartwig.hmftools.common.sequencing.SequencingType.ULTIMA;
 import static com.hartwig.hmftools.common.sequencing.UltimaBamUtils.ULTIMA_MAX_QUAL;
 import static com.hartwig.hmftools.common.sequencing.UltimaBamUtils.extractConsensusType;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
-import static com.hartwig.hmftools.sage.bqr.BqrConfig.useReadType;
 
 import java.util.Collection;
 import java.util.Map;
@@ -25,7 +24,7 @@ import com.hartwig.hmftools.common.bam.CigarHandler;
 import com.hartwig.hmftools.common.qual.BqrKey;
 import com.hartwig.hmftools.common.qual.BqrReadType;
 import com.hartwig.hmftools.common.sequencing.SequencingType;
-import com.hartwig.hmftools.common.utils.PerformanceCounter;
+import com.hartwig.hmftools.common.perf.PerformanceCounter;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.sage.SageConfig;
 import com.hartwig.hmftools.sage.common.RefSequence;
@@ -61,7 +60,6 @@ public class BqrRegionReader implements CigarHandler
     private int mReadCounter;
 
     private BqrReadType mCurrentReadType;
-    private final boolean mUseReadType;
     private final SequencingType mSequencingType;
 
     private static final CigarElement SINGLE = new CigarElement(1, CigarOperator.M);
@@ -82,9 +80,8 @@ public class BqrRegionReader implements CigarHandler
         mWriteReadData = mConfig.BQR.WriteReads;
         mWritePositionData = mConfig.BQR.WritePositions;
 
-        mUseReadType = useReadType(mConfig);
         mCurrentReadType = BqrReadType.NONE;
-        mSequencingType = mConfig.Sequencing.Type;
+        mSequencingType = mConfig.Sequencing;
 
         mBaseQualityData = null;
         mQualityCounts = Sets.newHashSet();
@@ -253,8 +250,7 @@ public class BqrRegionReader implements CigarHandler
 
         setShortFragmentBoundaries(record);
 
-        if(mUseReadType)
-            mCurrentReadType = extractReadType(record, mSequencingType);
+        mCurrentReadType = extractReadType(record, mSequencingType);
 
         CigarHandler.traverseCigar(record, this);
 

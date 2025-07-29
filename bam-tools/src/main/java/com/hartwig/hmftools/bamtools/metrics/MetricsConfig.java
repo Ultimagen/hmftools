@@ -7,6 +7,7 @@ import static com.hartwig.hmftools.bamtools.common.CommonUtils.DEFAULT_CHR_PARTI
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.PARTITION_SIZE;
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.REGIONS_FILE;
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.checkFileExists;
+import static com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache.addEnsemblDir;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.REF_GENOME;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.addRefGenomeFile;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.addRefGenomeVersion;
@@ -16,7 +17,7 @@ import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.from
 import static com.hartwig.hmftools.common.region.ChrBaseRegion.loadChrBaseRegions;
 import static com.hartwig.hmftools.common.region.SpecificRegions.addSpecificChromosomesRegionsConfig;
 import static com.hartwig.hmftools.common.bam.BamUtils.deriveRefGenomeVersion;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.addThreadOptions;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.addThreadOptions;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE_DESC;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.addLoggingOptions;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_EXTENSION;
@@ -24,7 +25,7 @@ import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.OUTPUT_DIR;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.OUTPUT_ID;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.addOutputOptions;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.parseOutputDir;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.parseThreads;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.parseThreads;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.LOG_READ_IDS;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.LOG_READ_IDS_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.PERF_DEBUG;
@@ -44,7 +45,8 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.hartwig.hmftools.common.genome.bed.BedFileReader;
+import com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig;
+import com.hartwig.hmftools.common.region.BedFileReader;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.metrics.BamMetricsSummary;
 import com.hartwig.hmftools.common.region.BaseRegion;
@@ -70,10 +72,13 @@ public class MetricsConfig
     public final Map<String,List<BaseRegion>> TargetRegions;
     public final boolean OnlyTargetRegions;
 
+    public final GeneCoverage GeneRegionCoverage;
+
     // metrics capture config
     public final boolean ExcludeZeroCoverage;
     public final boolean WriteOffTarget;
     public final int HighFragmentOverlapThreshold;
+    public final int PartitionReadCountCheck;
 
     public final String OutputDir;
     public final String OutputId;
@@ -96,10 +101,12 @@ public class MetricsConfig
 
     private static final String OFF_TARGET_FRAG_OVERLAP_THRESHOLD = "off_target_frag_overlap_threshold";
     private static final String WRITE_OFF_TARGET = "write_off_target";
+    private static final String PARTITION_READ_COUNT_CHECK = "partition_read_count_check";
 
     private static final int DEFAULT_MAP_QUAL_THRESHOLD = 20;
     private static final int DEFAULT_BASE_QUAL_THRESHOLD = 10;
     private static final int DEFAULT_MAX_COVERAGE = 250;
+    private static final int DEFAULT_PARTITION_READ_COUNT_CHECK = 1000000;
 
     public MetricsConfig(final ConfigBuilder configBuilder)
     {
@@ -133,6 +140,8 @@ public class MetricsConfig
 
         PartitionSize = configBuilder.getInteger(PARTITION_SIZE);
 
+        GeneRegionCoverage = new GeneCoverage(configBuilder);
+
         MapQualityThreshold = configBuilder.getInteger(MAP_QUAL_THRESHOLD);
         BaseQualityThreshold = configBuilder.getInteger(BASE_QUAL_THRESHOLD);
         MaxCoverage = configBuilder.getInteger(MAX_COVERAGE);
@@ -142,6 +151,7 @@ public class MetricsConfig
 
         TargetRegions = loadChrBaseRegions(configBuilder.getValue(REGIONS_FILE));
         OnlyTargetRegions = !TargetRegions.isEmpty() && configBuilder.hasFlag(ONLY_TARGET);
+        PartitionReadCountCheck = configBuilder.getInteger(PARTITION_READ_COUNT_CHECK);
 
         UnmappableRegions = Lists.newArrayList();
         loadUnmappableRegions();
@@ -213,12 +223,16 @@ public class MetricsConfig
         configBuilder.addInteger(MAP_QUAL_THRESHOLD, "Map quality threshold", DEFAULT_MAP_QUAL_THRESHOLD);
         configBuilder.addInteger(BASE_QUAL_THRESHOLD, "Base quality threshold", DEFAULT_BASE_QUAL_THRESHOLD);
         configBuilder.addInteger(MAX_COVERAGE, "Max coverage", DEFAULT_MAX_COVERAGE);
+        configBuilder.addInteger(PARTITION_READ_COUNT_CHECK, "Partition read count log", DEFAULT_PARTITION_READ_COUNT_CHECK);
 
         configBuilder.addFlag(ONLY_TARGET, "Only capture metrics within the specific regions file");
 
         configBuilder.addInteger(
                 OFF_TARGET_FRAG_OVERLAP_THRESHOLD,
                 "Write regions of high off-target fragment overlap if pile-up above threshold (0=disabled)", 0);
+
+        addEnsemblDir(configBuilder);
+        DriverGenePanelConfig.addGenePanelOption(configBuilder, false);
 
         configBuilder.addFlag(EXCLUDE_ZERO_COVERAGE, "Exclude bases with zero coverage");
         configBuilder.addFlag(WRITE_OFF_TARGET, "Write off-target data");
@@ -254,7 +268,9 @@ public class MetricsConfig
         LogReadIds = Collections.emptyList();
         UnmappableRegions = Collections.emptyList();
         TargetRegions = Maps.newHashMap();
+        GeneRegionCoverage = new GeneCoverage(null);
         OnlyTargetRegions = false;
+        PartitionReadCountCheck = 0;
 
         Threads = 0;
         PerfDebug = false;

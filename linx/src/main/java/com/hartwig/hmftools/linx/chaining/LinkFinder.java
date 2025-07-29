@@ -4,16 +4,16 @@ import static java.lang.Math.abs;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.NEG_ORIENT;
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.POS_ORIENT;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_REV;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_FWD;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DEL;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DUP;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.INF;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.INS;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
 import static com.hartwig.hmftools.linx.types.LinxConstants.MIN_TEMPLATED_INSERTION_LENGTH;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
 
 import java.util.List;
 import java.util.Map;
@@ -208,7 +208,11 @@ public class LinkFinder
 
     public static boolean haveLinkedAssemblies(final SvVarData var1, final SvVarData var2, boolean v1Start, boolean v2Start)
     {
-        return var1.getTIAssemblies(v1Start).stream().anyMatch(x -> var2.getTIAssemblies(v2Start).contains(x));
+        // Esvee sets the linked variant ID into the breakend, not a unique assembly ID as Gridss does
+        return var1.getAssemblyLinks(v1Start).stream()
+                .anyMatch(x -> v2Start ? x.equals(var2.getSvData().vcfIdStart()) : x.equals(var2.getSvData().vcfIdEnd()));
+
+        //return var1.getTIAssemblies(v1Start).stream().anyMatch(x -> var2.getTIAssemblies(v2Start).contains(x));
     }
 
     public static boolean isPossibleLink(final String chr1, int pos1, byte orient1, final String chr2, int pos2, byte orient2, int minDistance)
@@ -224,7 +228,7 @@ public class LinkFinder
         if(orient1 == orient2)
             return false;
 
-        return (pos1 <= pos2 - minDistance && orient1 == NEG_ORIENT) || (pos1 >= pos2 + minDistance && orient1 == POS_ORIENT);
+        return (pos1 <= pos2 - minDistance && orient1 == ORIENT_REV) || (pos1 >= pos2 + minDistance && orient1 == ORIENT_FWD);
     }
 
     public static int getMinTemplatedInsertionLength(SvBreakend breakend1, SvBreakend breakend2)

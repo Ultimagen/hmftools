@@ -9,8 +9,8 @@ import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_POSITION_S
 import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_POS_END;
 import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_POS_START;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedReader;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -76,7 +76,8 @@ public class ChrBaseRegion implements Cloneable, Comparable<ChrBaseRegion>
     public int baseLength() { return length() + 1; }
     public int length() { return mEnd - mStart; }
 
-    public boolean isValid() { return HumanChromosome.contains(Chromosome) && hasValidPositions(); }
+    public boolean isValid(boolean requireHuman) { return (!requireHuman || HumanChromosome.contains(Chromosome)) && hasValidPositions(); }
+    public boolean isValid() { return isValid(true); }
     public boolean hasValidPositions() { return mStart > 0 & mEnd >= mStart; }
 
     public BaseRegion baseRegion()
@@ -89,7 +90,7 @@ public class ChrBaseRegion implements Cloneable, Comparable<ChrBaseRegion>
         if(!Chromosome.equals(other.Chromosome))
             return false;
 
-        return positionsOverlap(mStart, mEnd, other.mStart, other.mEnd);
+        return positionsOverlap(mStart, mEnd, other.start(), other.end());
     }
 
     public boolean overlaps(final String chromosome, final int posStart, final int posEnd)
@@ -302,7 +303,10 @@ public class ChrBaseRegion implements Cloneable, Comparable<ChrBaseRegion>
 
             if(region.Chromosome.equals(nextRegion.Chromosome) && region.end() >= nextRegion.start() - 2)
             {
-                region.setEnd(nextRegion.end());
+                if(nextRegion.end() > region.end())
+                {
+                    region.setEnd(nextRegion.end());
+                }
                 regions.remove(index + 1);
             }
             else

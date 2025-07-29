@@ -1,41 +1,74 @@
 package com.hartwig.hmftools.lilac.fragment;
 
+import static com.hartwig.hmftools.lilac.LilacConstants.MIN_DEPTH_FILTER;
+import static com.hartwig.hmftools.lilac.LilacConstants.MIN_EVIDENCE_FACTOR;
+import static com.hartwig.hmftools.lilac.LilacConstants.MIN_HIGH_QUAL_EVIDENCE_FACTOR;
+import static com.hartwig.hmftools.lilac.fragment.AminoAcidFragmentPipeline.RAW_REF_NUCLEOTIDE_COUNTS;
+
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.SortedMap;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+import com.hartwig.hmftools.lilac.evidence.Nucleotide;
+import com.hartwig.hmftools.lilac.hla.HlaContext;
 import com.hartwig.hmftools.lilac.seq.SequenceCount;
 
 public final class NucleotideFragmentQualEnrichment
 {
-    public static List<Fragment> enrich(double minEvidence, double minHighQualEvidence, final List<Fragment> fragments, final List<Fragment> highQualFrags)
+    private NucleotideFragmentQualEnrichment() {}
+
+    public static List<Fragment> qualityFilterFragments(
+            final HlaContext context, final Collection<Fragment> fragments, final Iterable<Fragment> highQualFrags)
     {
         // fragments are all in nucleotide-space
 
-        // filter fragments so that each nucleotide has at least 1 base at or above the min-qual threshold, and
-        // X fragments (minEvidence) at that base with any qual
-        SequenceCount highQualCounts = SequenceCount.nucleotides(minHighQualEvidence, highQualFrags);
-        SequenceCount rawCounts = SequenceCount.nucleotides(minEvidence, fragments);
+        // filter fragments so that each nucleotide has at least a VAF above some threshold at or above the min-qual threshold, and
+        // VAF above some threshold (minEvidenceFactor) at that base with any qual, also automatically include nucleotidesthat have low
+        // raw depth
+        SequenceCount highQualCounts = SequenceCount.buildFromNucleotides(MIN_HIGH_QUAL_EVIDENCE_FACTOR, highQualFrags);
+        SequenceCount rawCounts = SequenceCount.buildFromNucleotides(MIN_EVIDENCE_FACTOR, fragments);
 
-        return fragments.stream().map(x -> enrich(x, highQualCounts, rawCounts)).collect(Collectors.toList());
+        SequenceCount rawNucleotideCounts = RAW_REF_NUCLEOTIDE_COUNTS.get(context.geneName());
+        return fragments.stream()
+                .map(x -> applyQualityFilter(x, highQualCounts, rawCounts, rawNucleotideCounts))
+                .collect(Collectors.toList());
     }
 
-    private static Fragment enrich(final Fragment fragment, final SequenceCount highQualityCount, final SequenceCount rawCount)
+    @VisibleForTesting
+    public static Fragment applyQualityFilter(final Fragment fragment, final SequenceCount highQualityCount, final SequenceCount rawCount,
+            final SequenceCount rawNucleotideCounts)
     {
-        final List<Integer> filteredIndices = Lists.newArrayList();
+        // checks whether all nucleotides have qual above the required level - if so return this fragment, otherwise build a
+        // new fragment just with these filtered loci
+        SortedMap<Integer, Nucleotide> nucleotidesByLoci = fragment.nucleotidesByLoci();
         boolean allPresent = true;
+        final List<Nucleotide> filteredNucleotides = Lists.newArrayListWithExpectedSize(nucleotidesByLoci.size());
 
-        for(int i = 0; i < fragment.getNucleotideLoci().size(); ++i)
+        for(Map.Entry<Integer, Nucleotide> entry : nucleotidesByLoci.entrySet())
         {
-            int lociIndex = fragment.getNucleotideLoci().get(i);
-            String fragmentNucleotide = fragment.getNucleotides().get(i);
-            List<String> highQualitySequences = highQualityCount.getMinCountSequences(lociIndex);
-            List<String> rawSequences = rawCount.getMinCountSequences(lociIndex);
-            List<String> allowedSequences = highQualitySequences.stream().filter(x -> rawSequences.contains(x)).collect(Collectors.toList());
+            int locus = entry.getKey();
+            Nucleotide nucleotide = entry.getValue();
+            if(rawNucleotideCounts.get(locus).size() < MIN_DEPTH_FILTER)
+            {
+                filteredNucleotides.add(nucleotide);
+                continue;
+            }
 
+            String fragmentNucleotide = entry.getValue().bases();
+
+            Set<String> highQualitySequences = Sets.newHashSet(highQualityCount.getMinEvidenceSequences(locus));
+            Set<String> rawSequences = Sets.newHashSet(rawCount.getMinEvidenceSequences(locus));
+            Set<String> allowedSequences = Sets.newHashSet(highQualitySequences);
+            allowedSequences.retainAll(rawSequences);
             if(allowedSequences.contains(fragmentNucleotide))
             {
-                filteredIndices.add(i);
+                filteredNucleotides.add(nucleotide);
             }
             else
             {
@@ -46,20 +79,8 @@ public final class NucleotideFragmentQualEnrichment
         if(allPresent)
             return fragment;
 
-        int filteredCount = filteredIndices.size();
-        final List<Integer> filteredLoci = Lists.newArrayListWithExpectedSize(filteredCount);
-        final List<Integer> filteredQuality = Lists.newArrayListWithExpectedSize(filteredCount);
-        final List<String> filteredNucleotides = Lists.newArrayListWithExpectedSize(filteredCount);
-
-        for(Integer index : filteredIndices)
-        {
-            filteredLoci.add(fragment.getNucleotideLoci().get(index));
-            filteredQuality.add(fragment.getNucleotideQuality().get(index));
-            filteredNucleotides.add(fragment.getNucleotides().get(index));
-        }
-
         Fragment newFragment = new Fragment(
-                fragment.reads().get(0), fragment.readGene(), fragment.getGenes(), filteredLoci, filteredQuality, filteredNucleotides);
+                fragment.reads().get(0), fragment.readGene(), fragment.genes(), filteredNucleotides);
 
         newFragment.addReads(fragment);
 

@@ -1,16 +1,25 @@
 # Redux
 
-The Redux component performs both UMI aware and UMI agnostic duplicate marking. 
-As the first component to run after alignment it also performs post-alignment improvements to the BAM, specifically by unmapping certain reads and deleting supplementary reads in specific problematic regions of the BAM
+The purpose of REDUX (**RE**calibrate **DE**duplicate **U**nmap e**X**tract) is to abstract any platform, library prep and aligner specific artefacts from the BAM.   A key aim of REDUX is to make it simple to adapt to different sequencing technologies or library preparation techniques. 
+ 
+REDUX currently performs 3 key tasks: 
 
-UMI are used to label each molecule in a sample with a unique sequence prior to PCR amplification.
+Feature  | Functionality | Why? 
+---|---|---
+Unmapping | Unmap reads that are aligned to a set of predefined problematic regions AND are either discordant, have long soft clipping or are in a region of extreme high depth. The reads are retained in the BAM and used by downstream tools. Supplementary reads that qualify for unmapping are deleted.<br/><br/>Overall, the problematic regions make up ~0.3% of the genome and lead to the ~3-6% of all reads being unmapped depending on genome version | There are 2 types of reads we want to unmap: <br/><br/> 1. Regions with recurrent very high depth – these are generally unmappable regions that have high discordant fragments.  Unmapping reduces false positive variant calling downstream and can drastically reduce runtime and memory usage.  ~98% of unmapped reads fall into this category  <br/> 2. Very long repeats – reads with long homopolymers or dinucleotide repeats may align randomly to arbitrary microsatellite locations based on idosyncratic sequencing errors.  Unmapping improves duplicate marking and detection of LINE insertions (which have a characteristic polyA insert which often is misalgined by BWA). 
+Duplicate marking and consensus | Mark duplicates based off fragment start and end positions and UMI (if available). Unlike many tools, supplementary reads are also deduplicated. <br/><br/> For any fragments found to be duplicates a single consensus fragment is formed and a consensus base and qual is calculated. | Amplification during library preparation or on-sequencer can cause duplicates of fragments. By marking duplicates, we avoid potential multiple counting of evidence from a single source fragment which reduces FP variant calling. <br/><br/> Forming a consensus read for every duplicated fragment ensures we choose the most likely base at each location and a representative base quality. 
+Microsatellite jitter rates | The rate of microsatellite errors is measured genome wide per {consensusType, repeatContext, repeatLength} and fit to a model. | Microsatellite jitter or stutter is a common error caused by PCR amplification and on-sequencer errors.  Some sequencing technologies have specific problems with homopolymers. The rate may be highly sample specific as it depends on the amount of and quality of the amplification process. The sample and context specific rate measured in REDUX is used to inform and improve variant calling in downstream tools 
 
-The usage of UMIs is recommended primarily for three scenarios:  
-* Counting of individual reads in low input samples
-* very deep sequencing of RNA-seq libraries (> 80 million reads per sample),  
-* detection of ultra-low frequency mutations in DNA sequencing.
+### Notes on REDUX compatibilty
 
-UMI/Duplicate analysis is also a highly useful QC tool for library complexity and error rates
+REDUX conforms fully to SAM specifications.   We have validated REDUX on DRAGEN and BWA-MEM / BWA-MEM2.   REDUX may also be run on BAMs with any prior duplicate marking and strip previous consensus results.  Please not that REDUX does require the mate CIGAR attribute to be set for all paired reads. If this is not set for some reason, this can be rectified using tools such as Picard FixMateInformation routine. 
+
+Whilst REDUX does unmap reads and delete supplemetaries, no primary read information is removed or lost when REDUX is run, and hence the orginal FASTQ is fully recoverable. If you wish a BAM to be converted to FASTQ, note that consensus reads must be deleted prior to conversion.  This functionality is included by default in our BAM2FASTQ tool 
+
+### Performance 
+ 
+On a 100x BAM on a 32 core machine REDUX completes in < 1 hour with a maximum memory usage of <10Gb.  
+
 
 ## Commands
 
@@ -20,10 +29,10 @@ java -jar redux.jar
     -input_bam SAMPLE_ID.lane_01.bam,SAMPLE_ID.lane_02.bam,SAMPLE_ID.lane_03.bam  
     -ref_genome /path_to_fasta_files/
     -ref_genome_version V37
-    -unmap_regions /ref_data/unmap_regions.37.tsv 
+    -unmap_regions /ref_data/unmap_regions.37.tsv
+    -ref_genome_msi_file /ref_data/msi_jitter_sites.37.tsv.gz 
     -write_stats 
-    -sambamba /path_to_sambamba/ 
-    -samtools /path_to_samtools/ 
+    -bamtool /path_to_samtools/ 
     -output_dir /path_to_output/
     -log_level DEBUG 
     -threads 24
@@ -40,13 +49,14 @@ ref_genome | Required | Path to reference genome files as used in alignment
 ref_genome_version | Required | V37 or V38
 form_consensus | Optional | Form a consensus read from duplicates
 unmap_regions | Optional | Regions of high depth, repeats or otherwise problematic for mapping
+bamtool | Required | Used for BAM sorting, concatenation and indexing
 threads | Optional | Number of threads, default = 1
-sambamba | Optional | Used to merge BAMs per thread when used with threads > 1
-samtools | Optional | Used to sort and index final output BAM
 output_dir | Optional | If not specified will write output same directory as input BAM
 output_id | Optional | Additonal file suffix
 read_output | Optional, default = NONE | Write detailed read info to CSV, types are: ALL, DUPLICATE, NONE
 write_stats | Optional | Writes a duplicate frequency TSV file
+ref_genome_msi_file | Optional | Path to file of microsatellite sites used for sample-specific jitter, require for Sage
+jitter_msi_only | Optional, default = false | Only runs to model sample-specific microsatellite jitter
 
 ### UMI Command
 
@@ -61,9 +71,8 @@ java -jar redux.jar
     -umi_enabled
     -umi_duplex
     -umi_duplex_delim + 
-    -umi_base_diff_stats 
-    -sambamba /path_to_sambamba/ 
-    -samtools /path_to_samtools/ 
+    -ref_genome_msi_file /path/to/msi_jitter_sites.37.tsv.gz
+    -bamtool /path_to_samtools/ 
     -output_dir /path_to_output/
     -log_level DEBUG 
     -threads 24
@@ -93,6 +102,8 @@ All supplementary and secondary reads with <10 bases aligned outside a problemat
 
 Note that when a read is unmapped or a supplementary is deleted, other reads in the read group pair are also updated to reflect the mates unmmaped status.  Removing / unmapping these reads simplifies and improve performance of variant calling downstream including in SAGE, COBALT and SV calling. 
 
+Note also that all supplementary reads with alignment score < 30 are unmapped.
+
 ### Deduplication
 
 There are 2 steps in the deduplication algorithm:
@@ -114,12 +125,53 @@ To construct the consensus fragment, the following logic is applied separately f
 - The consensus cigar is chosen as the cigar with the most support followed by the least soft clip and then arbitarily. 
 - Using the consensus cigar as the reference,  for each base assess each reads in the duplicate group and set the consensus base to the most supported base by sum of base qual. If 2 or more alleles have the same base qual support choose the reference first. 
 - For reads which differ by an indel from the consensus, ignore the differences, and ensure that the subsequent bases match the position in the consensus cigar.  Ignore any soft clip base that is not present in the consensus cigar. 
-- Set the base qual = max(supportedBaseQual) * [max(0,Sum(supportedBaseQual) - Sum(contraryBaseQual))] / Sum(supportedBaseQual) 
+- Set the base qual = roundedUp[median(supportedBaseQual)] * [max(0,Sum(supportedBaseQual) - Sum(contraryBaseQual))] / Sum(supportedBaseQual) 
 
 In the case of DUPLEX UMIs, the logic is applied to each strand individually and then again to merge the 2 strands.   When merging strands, if the consensus base on each strand is different and one matches the ref genome then the base is set to the ref genome, otherwise the highest qual base is chosen as per above.   
 
 The ‘CR’ flag is added to the bam to record the number of reads contributing to each consensus read. The ‘UT’ tag is also used to mark the UMI group as either ‘SINGLE’ or ‘DUAL_STRAND’ 
 
+### Microsatellite jitter modelling
+
+Different sequencing technologies, lab preperation techniques and sample-specific idiosyncracies can affect the rate of jitter error in microsatellite sites. As such, the magnitude and skew of errors are both modelled for use in downstream tools such as Sage.
+
+This process begins by considering reads that cover a given microsatellite repeat from the provided microsatellite repeats file. Such reads must satisfy the following conditions:
+* Mapping quality >= 50 
+* At least 5 aligned (i.e. inside M cigar element) flanking the microsatellite repeat on both sites
+* Each base associated with the microsatellite repeat is part of a M, I or D Cigar element
+* Any inserted bases should be multiples of the microsatellite repeat unit
+
+For each read, identify the insertion or deletion at the start of the microsatellite repeat which extends or contracts the repeat count, and this becomes the repeat unit count. Then for each microsatellite site,  the number of reads with repeat unit counts from ref_count-10 to ref_count+10 are determined. Then a site is considered to potentially contain an alt if any of the following are true:
+* 20% or more considered reads are rejected
+* Less than 20 non-rejected reads are accumulated
+* A site has a sufficiently high AF for a non-zero repeat count change:
+  * For ±1 repeat count: AF > 30%
+  * For ±2 repeat counts: AF > 25%
+  * For ±3 repeat counts: AF > 20%
+  * For ±4 repeat counts: AF > 15%
+  * For ±5 or more repeat counts: AF > 10%
+
+At this point, the per-site data is exported to `SAMPLE.repeat.tsv.gz`. The column `realVariant` specifies whether any of the above conditions are true - if so, this site is not considered any further.
+
+Other sites are aggregated by repeat unit and repeat count (from 4-20), producing a file which is exported as `SAMPLE.ms_table.tsv.gz`. This aggregated data is then used to produce a 6-parameter model for each repeat unit describing a series of asymmetric laplace distributions, which collectively model empirical jitter frequencies for any given repeat unit + repeat count. A file containing the 6 parameters for each repeat unit is exported as `SAMPLE.jitter_params.tsv`. The parameters can be interpreted as such:
+* `optimalScaleRepeat4` - represents the magnitude of jitter at repeat count = 4
+* `optimalScaleRepeat5` - represents the magnitude of jitter at repeat count = 5
+* `optimalScaleRepeat6` - represents the magnitude of jitter at repeat count = 6
+* `scaleFitGradient`, `scaleFitIntercept` - collectively describe a linear relationship between the repeat count and magnitude of jitter for repeat counts > 6
+* `scaleFitSkew` - describes the skew between delete and insert jitter. 1.0 represents a symmetric distribution
+
+The fitting process works as follows:
+* Each repeat unit + repeat count will end up with two jitter parameters, scale and skew
+* These parameters describe an modified asymmetric laplace distribution, normalised to sum to 1 over the range `[-5, 5]`
+* A loss function is defined, which minimises the difference between predicted and actual phred score (capped at 40) associated with jitter rates, with per-repeat count weights proportional to their frequency
+
+Then for each repeat unit, we do the following:
+1. For each repeat length 4-6, find the optimal scale and skew values using the loss function, with a small regularisation term that penalises highly skewed distributions
+   * If the total read count for any of these repeat lengths < 20000, we replace the optimal scale with a fallback value
+2. Repeat the process for each repeat length 7-15, adding an additional regularisation term penalising scale values deviating sharply from the previous length's value. Fallback scales are not used for these repeat lengths
+3. Fit a weighted least squares linear regression between repeat length and optimal scale from 7-15. The weight of a repeat length’s data point is proportional to the count of observations for that repeat length, capped at 20% of the total count from 7-15
+4. Assuming at least 2 counts from 7-15 have at least 20000 total read count and the gradient of the linear regression is positive, `scaleFitGradient` and `scaleFitIntercept` are set to the gradient and intercept of the regression, respectively. In this case, `scaleFitSkew` is set to a weighted average of the optimal skew values for each repeat length 7-15, where the weights for each repeat are the same ones specified in step 3
+   * If the above conditions are not both satisfied, we fall back to `scaleFitGradient=0.06`, and `scaleFitIntercept` is set such that a line with slope of `0.06` and intercept of `scaleFitIntercept` passes through the optimal scale associated with repeat length=6. `scaleFitSkew` is set based on an aggregate count of delete and insert jitter counts, unless at least one of these sums < 50, in which case it defaults to 1.0
 ## Performance and Settings
 
 When run wth multiple threads, a BAM will be written per thread and then merged and index at the end.
@@ -177,6 +229,13 @@ GCount  | Frequency of ‘G’ NT
 TCount  | Frequency of ‘T’ NT 
 NCount | Frequency of ‘N’ NT 
 
+### Microsatellite jitter modelling
+File Name | Details 
+---|---
+SAMPLE_ID.repeat.tsv.gz | Frequency of each repeat count for each site 
+SAMPLE_ID.ms_table.tsv.gz | Equivalent to `SAMPLE_ID.repeat.tsv.gz` after aggregating sites by repeat unit / ref repeat count and discarding potential alt sites
+SAMPLE_ID.jitter_params.tsv  | 6-parameter model parameterisation for each repeat unit
+
 ## Problematic regions file defintion
 
 Certain regions of the genome are consistently problematic and lead to frequently obvious mismapped regions which can cause several downstream intepretation problems in variant calling.   We specifically identify 2 types of such regions - very long repeats and regions which consistently align with much higher coverage across many WGS samples and create a bed file   
@@ -200,10 +259,10 @@ In hg38, 152 genes in total have some overlap with the problematic regions file,
 ## Known Issues / Future improvements
 
 **Duplicate marking**
-- **Read length for unpaired** - Currently this is not checked, and hence we tend to over collapse duplciates, but in some scenarios it may be valuable
+- **Read length for unpaired** - Currently this is not checked, and hence we tend to over collapse duplicates, but in some scenarios it may be valuable
 - **Reads with unmapped mates** – Currently marked as duplicates based on the coordinates (and UMI) of the aligned read only.  Could lead to over-clustering.
 - **Reads with mates with multiple similar local alignments** – These are currently under-clustered and lead to counting umi groups multiple times 
-- **Distinguish optical vs PCR duplicates** - Duplicates should be marked as ‘optical’ if the tile distance < opticalThreshold or otherwise as PCR duplicates. 
+- **Distinguish optical vs PCR duplicates** - Duplicates should be marked as ‘optical’ on Illumina if on the same run and lane and the tile difference is in {0,1,999,1000,1001}. For duplicate groups >2, require same tile + distance < 2500.  Investiage rules for other technologies
 - **Supplementary and Primary mixed up** - A fragment with a supplementary can be duplicated sometimes where there are the same 2 alignments for the read but the opposite alignment is marked as supplementary in each.  This leads us to fail to realise it is the same fragment
 
 **UMI matching** 
@@ -222,5 +281,10 @@ In hg38, 152 genes in total have some overlap with the problematic regions file,
 - REDUX should trinculeotide repeats of at least 30 length and all dinculeotide / single base repeats of  of 20-30 bases to the problematic regions file. 
 - REDUX should increase minimum 10 bases outside of problematic region to 20.
 - REDUX should unmap any read with discordant mate if 'repeat trimmed length' < 30 bases
+
+**Microsatellite jitter modelling**
+- For non-homopolymers, the empirical jitter model does not closely resemble an Asymmetric Laplace distribution for medium to large repeat counts. This mainfests as the model overstating the likelihood of 1xINS/DEL, and understating the likelihood of >=3xINS/DEL. Could change underlying model or add a wing boost
+- The empirical 4bp repeat / 5bp jitter data tends to be sparse and difficult to fit. To address this, we clump all 3bp/4bp/5bp microsatellite data together and fit as one microsatellite category
+- Empirical jitter is likely lower for non-SINGLE consensus fragments, as this would imply the jitter is consistent across the duplicate reads used to source the fragment. We could anticipate this by splitting parameterisation by consensus type
 
  ## Version History and Download Links

@@ -1,7 +1,7 @@
 package com.hartwig.hmftools.esvee.prep;
 
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.prep.SpanningReadCache.chrFromChrPartition;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.prep.types.WriteType.CACHE_BAM;
 
 import java.io.File;
@@ -17,18 +17,17 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.hartwig.hmftools.common.utils.TaskExecutor;
-import com.hartwig.hmftools.esvee.prep.types.ReadGroup;
-import com.hartwig.hmftools.esvee.prep.types.ReadGroupStatus;
+import com.hartwig.hmftools.common.bamops.BamMerger;
+import com.hartwig.hmftools.common.perf.TaskExecutor;
 import com.hartwig.hmftools.esvee.common.ReadIdTrimmer;
 import com.hartwig.hmftools.esvee.prep.types.PrepRead;
+import com.hartwig.hmftools.esvee.prep.types.ReadGroup;
+import com.hartwig.hmftools.esvee.prep.types.ReadGroupStatus;
 import com.hartwig.hmftools.esvee.prep.types.ReadType;
 
 import htsjdk.samtools.SAMFileHeader;
 import htsjdk.samtools.SAMFileWriter;
 import htsjdk.samtools.SAMFileWriterFactory;
-import htsjdk.samtools.SAMProgramRecord;
-import htsjdk.samtools.SAMReadGroupRecord;
 import htsjdk.samtools.SAMRecord;
 import htsjdk.samtools.SAMRecordIterator;
 import htsjdk.samtools.SamReader;
@@ -37,11 +36,11 @@ import htsjdk.samtools.SamReaderFactory;
 public class CandidateBamWriter
 {
     private final PrepConfig mConfig;
-    private final Map<String,SAMFileWriter> mCandidatesWriters;
-    private final Map<String,String> mCandidatesWriterBamFiles;
+    private final Map<String, SAMFileWriter> mCandidatesWriters;
+    private final Map<String, String> mCandidatesWriterBamFiles;
 
-    private final Map<String,Set<String>> mChrJunctionReadIds;
-    private ReadIdTrimmer mReadIdTrimmer;
+    private final Map<String, Set<String>> mChrJunctionReadIds;
+    private final ReadIdTrimmer mReadIdTrimmer;
 
     public CandidateBamWriter(final PrepConfig config)
     {
@@ -79,35 +78,12 @@ public class CandidateBamWriter
 
         if(writer == null)
         {
-            SamReader samReader = SamReaderFactory.makeDefault()
-                    .referenceSequence(new File(mConfig.RefGenomeFile)).open(new File(mConfig.bamFile()));
-
             String bamFile = String.format("%s_%s.bam", mConfig.formFilename(CACHE_BAM), read.Chromosome);
             mCandidatesWriterBamFiles.put(read.Chromosome, bamFile);
 
-            SAMFileHeader fileHeader = samReader.getFileHeader().clone();
+            SAMFileHeader fileHeader = BamMerger.buildCombinedHeader(mConfig.BamFiles, mConfig.RefGenomeFile);
+
             fileHeader.setSortOrder(SAMFileHeader.SortOrder.unsorted);
-
-            // add read group info if reads are from multiple input BAMs
-            if(mConfig.BamFiles.size() > 1)
-            {
-                for(int i = 1; i < mConfig.BamFiles.size(); ++i)
-                {
-                    SamReader nextReader = SamReaderFactory.makeDefault().referenceSequence(new File(mConfig.RefGenomeFile))
-                            .open(new File(mConfig.BamFiles.get(i)));
-
-                    for(SAMReadGroupRecord readGroupRecord : nextReader.getFileHeader().getReadGroups())
-                    {
-                        if(!fileHeader.getReadGroups().contains(readGroupRecord))
-                            fileHeader.addReadGroup(readGroupRecord);
-                    }
-
-                    final SAMProgramRecord nextProgramRecord = nextReader.getFileHeader().getProgramRecords().get(0);
-                    String newProgramId = String.format("%s.%d", nextProgramRecord.getId(), i);
-
-                    fileHeader.addProgramRecord(new SAMProgramRecord(newProgramId, nextProgramRecord));
-                }
-            }
 
             writer = new SAMFileWriterFactory().makeBAMWriter(fileHeader, false, new File(bamFile));
             mCandidatesWriters.put(read.Chromosome, writer);
@@ -128,7 +104,7 @@ public class CandidateBamWriter
 
         List<CandidateReadMatchTask> chromosomeTasks = Lists.newArrayList();
 
-        for(Map.Entry<String,Set<String>> entry : mChrJunctionReadIds.entrySet())
+        for(Map.Entry<String, Set<String>> entry : mChrJunctionReadIds.entrySet())
         {
             String chromosome = entry.getKey();
             Set<String> junctionReadIds = entry.getValue();
@@ -149,7 +125,7 @@ public class CandidateBamWriter
             chromosomeTasks.add(chrTask);
         }
 
-        final List<Callable> callableList = chromosomeTasks.stream().collect(Collectors.toList());
+        final List<Callable<Void>> callableList = chromosomeTasks.stream().collect(Collectors.toList());
 
         if(!TaskExecutor.executeTasks(callableList, mConfig.Threads))
             System.exit(1);
@@ -175,7 +151,7 @@ public class CandidateBamWriter
         }
     }
 
-    private class CandidateReadMatchTask implements Callable
+    private class CandidateReadMatchTask implements Callable<Void>
     {
         private final String mChromosome;
         private final SamReader mSamReader;
@@ -194,7 +170,7 @@ public class CandidateBamWriter
         private static final int READ_GROUP_FLUSH = 1000;
 
         @Override
-        public Long call()
+        public Void call()
         {
             SV_LOGGER.debug("chr({}) assigning candidates from {} junction fragments", mChromosome, mJunctionReadIds.size());
 
@@ -225,7 +201,7 @@ public class CandidateBamWriter
 
                     if(readGroups.size() >= READ_GROUP_FLUSH)
                     {
-                        mResultsWriter.writeReadGroup(readGroups);
+                        mResultsWriter.writeReadGroups(readGroups);
                         readGroups.clear();
                     }
                 }
@@ -237,11 +213,11 @@ public class CandidateBamWriter
                 }
             }
 
-            mResultsWriter.writeReadGroup(readGroups);
+            mResultsWriter.writeReadGroups(readGroups);
 
             SV_LOGGER.debug("chr({}) matched and wrote {} candidate reads", mChromosome, matchedCandidates);
 
-            return (long)0;
+            return null;
         }
     }
 

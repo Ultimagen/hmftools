@@ -2,25 +2,29 @@ package com.hartwig.hmftools.geneutils.fusion;
 
 import static java.lang.String.format;
 
+import static com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL;
+import static com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig.addGenePanelOption;
 import static com.hartwig.hmftools.common.fusion.FusionCommon.NEG_STRAND;
 import static com.hartwig.hmftools.common.fusion.FusionCommon.POS_STRAND;
 import static com.hartwig.hmftools.common.fusion.KnownFusionData.OVERRIDE_DOWN_DISTANCE;
 import static com.hartwig.hmftools.common.fusion.KnownFusionData.OVERRIDE_IG_RANGE;
 import static com.hartwig.hmftools.common.fusion.KnownFusionType.IG_KNOWN_PAIR;
 import static com.hartwig.hmftools.common.fusion.KnownFusionType.KNOWN_PAIR;
+import static com.hartwig.hmftools.common.fusion.KnownFusionType.PROMISCUOUS_ENHANCER_TARGET;
 import static com.hartwig.hmftools.common.genome.chromosome.HumanChromosome.lowerChromosome;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.addLoggingOptions;
-import static com.hartwig.hmftools.common.utils.config.ConfigUtils.setLogLevel;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileReaderUtils.createFieldsIndexMap;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.addOutputDir;
+import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDirSeparator;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.parseOutputDir;
 import static com.hartwig.hmftools.geneutils.common.CommonUtils.APP_NAME;
 import static com.hartwig.hmftools.geneutils.common.CommonUtils.GU_LOGGER;
 import static com.hartwig.hmftools.geneutils.common.CommonUtils.RESOURCE_REPO_DIR;
 import static com.hartwig.hmftools.geneutils.common.CommonUtils.RESOURCE_REPO_DIR_DESC;
+import static com.hartwig.hmftools.geneutils.common.CommonUtils.createOutputDir;
 import static com.hartwig.hmftools.geneutils.common.CommonUtils.getEnsemblDirectory;
 
 import java.io.BufferedWriter;
@@ -33,17 +37,20 @@ import java.util.Map;
 import java.util.StringJoiner;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.driver.panel.DriverGene;
+import com.hartwig.hmftools.common.driver.panel.DriverGeneFile;
+import com.hartwig.hmftools.common.driver.panel.DriverGeneGermlineReporting;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
 import com.hartwig.hmftools.common.fusion.KnownFusionData;
 import com.hartwig.hmftools.common.fusion.KnownFusionType;
 import com.hartwig.hmftools.common.gene.GeneData;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
-import com.hartwig.hmftools.common.utils.config.ConfigUtils;
 
 public class GenerateFusionFiles
 {
     private final String mKnownFusionDbFile;
+    private final String mDriverGenePanelFile;
     private final String mResourceRepoDir;
     private final String mOutputDir;
 
@@ -55,7 +62,8 @@ public class GenerateFusionFiles
         GU_LOGGER.info("starting known fusion file generation");
 
         mKnownFusionDbFile = configBuilder.getValue(KNOWN_FUSION_DB_FILE);
-        mResourceRepoDir = configBuilder.getValue(RESOURCE_REPO_DIR);
+        mDriverGenePanelFile = configBuilder.getValue(DRIVER_GENE_PANEL);
+        mResourceRepoDir = checkAddDirSeparator(configBuilder.getValue(RESOURCE_REPO_DIR));
         mOutputDir = parseOutputDir(configBuilder);
     }
 
@@ -72,25 +80,44 @@ public class GenerateFusionFiles
         {
             FusionRefData ref1 = fusionRefData.get(i);
 
+            if(ref1.Type == PROMISCUOUS_ENHANCER_TARGET)
+                continue;
+
             for(int j = i + 1; j < fusionRefData.size(); ++j)
             {
                 FusionRefData ref2 = fusionRefData.get(j);
 
                 if(ref1.isDuplicate(ref2))
                 {
-                    GU_LOGGER.error("duplicate fusion entry: {} {}-{}", ref1.toString());
+                    GU_LOGGER.error("duplicate fusion entry: {}", ref1.toString());
                     System.exit(1);
                 }
             }
         }
 
-        createFusionFiles(RefGenomeVersion.V37, fusionRefData);
-        createFusionFiles(RefGenomeVersion.V38, fusionRefData);
+        List<DriverGene> driverGenes = Lists.newArrayList();
+
+        if(mDriverGenePanelFile != null)
+        {
+            try
+            {
+                driverGenes.addAll(DriverGeneFile.read(mDriverGenePanelFile));
+            }
+            catch(IOException e)
+            {
+                GU_LOGGER.error("failed to read driver gene panel file: {}", e.toString());
+            }
+        }
+
+        createOutputDir(mOutputDir);
+        createFusionFiles(RefGenomeVersion.V37, fusionRefData, driverGenes);
+        createFusionFiles(RefGenomeVersion.V38, fusionRefData, driverGenes);
 
         GU_LOGGER.info("fusion reference file generation complete");
     }
 
-    public void createFusionFiles(final RefGenomeVersion refGenomeVersion, final List<FusionRefData> fusionRefData)
+    private void createFusionFiles(
+            final RefGenomeVersion refGenomeVersion, final List<FusionRefData> fusionRefData, final List<DriverGene> driverGenes)
     {
         // step 3: load Ensembl data cache files
         String ensemblDir = getEnsemblDirectory(refGenomeVersion, mResourceRepoDir);
@@ -126,8 +153,8 @@ public class GenerateFusionFiles
         // step 5: write known_fusion_data for each version
         writeKnownFusionFiles(refGenomeVersion, fusionRefData);
 
-        // step 6: write known fusion BED files (eg for Gripss and SvPrep)
-        writeFusionBedFiles(refGenomeVersion, fusionRefData, ensemblDataCache);
+        // step 6: write known fusion BED files for Esvee
+        writeFusionBedFiles(refGenomeVersion, fusionRefData, driverGenes, ensemblDataCache);
     }
 
     private void writeKnownFusionFiles(final RefGenomeVersion refGenomeVersion, final List<FusionRefData> fusionRefData)
@@ -161,9 +188,20 @@ public class GenerateFusionFiles
                 fusionData.add(fusion.ThreeGene);
                 fusionData.add(fusion.CancerTypes);
                 fusionData.add(fusion.PubMedId);
-                fusionData.add(fusion.KnownExonTranscript);
-                fusionData.add(fusion.KnownExonUpRange);
-                fusionData.add(fusion.KnownExonDownRange);
+
+                if(refGenomeVersion.is37())
+                {
+                    fusionData.add(fusion.KnownExonTranscript);
+                    fusionData.add(fusion.KnownExonUpRange);
+                    fusionData.add(fusion.KnownExonDownRange);
+                }
+                else
+                {
+                    fusionData.add(fusion.KnownExonTranscriptRef38);
+                    fusionData.add(fusion.KnownExonUpRangeRef38);
+                    fusionData.add(fusion.KnownExonDownRangeRef38);
+                }
+
                 fusionData.add(fusion.HighImpactPromiscuous);
 
                 if(refGenomeVersion.is37())
@@ -183,7 +221,7 @@ public class GenerateFusionFiles
         }
     }
 
-    private class FusionBedData implements Comparable<FusionBedData>
+    private static class FusionBedData implements Comparable<FusionBedData>
     {
         public final String Name;
         public final String ChrUp;
@@ -268,13 +306,23 @@ public class GenerateFusionFiles
     }
 
     private void writeFusionBedFiles(
-            final RefGenomeVersion refGenomeVersion, final List<FusionRefData> fusionRefData, final EnsemblDataCache ensemblDataCache)
+            final RefGenomeVersion refGenomeVersion, final List<FusionRefData> fusionRefData, final List<DriverGene> driverGenes,
+            final EnsemblDataCache ensemblDataCache)
     {
         List<FusionBedData> fusionBedDataList = Lists.newArrayList();
 
         for(FusionRefData fusion : fusionRefData)
         {
             addBedEntries(refGenomeVersion, ensemblDataCache, fusion, fusionBedDataList);
+        }
+
+        for(DriverGene driverGene : driverGenes)
+        {
+            if(driverGene.reportGermlineDeletion() != DriverGeneGermlineReporting.NONE
+            || driverGene.reportGermlineDisruption() != DriverGeneGermlineReporting.NONE)
+            {
+                addGermlineDelDupBedEntries(ensemblDataCache, driverGene, fusionBedDataList);
+            }
         }
 
         // sort and then write
@@ -394,6 +442,27 @@ public class GenerateFusionFiles
         }
     }
 
+    private void addGermlineDelDupBedEntries(
+            final EnsemblDataCache ensemblDataCache, final DriverGene driverGene, final List<FusionBedData> bedEntries)
+    {
+        String name = format("%s", driverGene.gene());
+
+        GeneData geneData = ensemblDataCache.getGeneDataByName(driverGene.gene());
+
+        String chrUp = geneData.Chromosome;
+        String chrDown = geneData.Chromosome;
+        int posUpStart = geneData.GeneStart;
+        int posUpEnd = geneData.GeneEnd;
+        int posDownStart = geneData.GeneStart;
+        int posDownEnd = geneData.GeneEnd;
+
+        byte strandUp = POS_STRAND;
+        byte strandDown = NEG_STRAND;
+
+        bedEntries.add(new FusionBedData(
+                name, chrUp, chrDown, strandUp, strandDown, posUpStart, posUpEnd, posDownStart, posDownEnd));
+    }
+
     private List<FusionRefData> loadFusionRefData()
     {
         try
@@ -409,7 +478,7 @@ public class GenerateFusionFiles
                 String line = lines.get(i);
                 String[] values = line.split(TSV_DELIM, -1);
 
-                if(values.length < 10)
+                if(values.length < 13)
                 {
                     GU_LOGGER.error("entry({}) missing data: {}", i, line);
                     return Collections.emptyList();
@@ -429,6 +498,8 @@ public class GenerateFusionFiles
                         values[fieldsIndexMap.get(KnownFusionData.FLD_HIGH_IMPACT_PROM)],
                         values[fieldsIndexMap.get(KnownFusionData.FLD_OVERRIDES)],
                         values[fieldsIndexMap.get("KnownExonTranscriptRef38")],
+                        values[fieldsIndexMap.get("KnownExonUpRangeRef38")],
+                        values[fieldsIndexMap.get("KnownExonDownRangeRef38")],
                         values[fieldsIndexMap.get("OverridesRef38")]));
             }
 
@@ -437,12 +508,12 @@ public class GenerateFusionFiles
         }
         catch(IOException e)
         {
-            GU_LOGGER.error("failed to read fusion file: {}", e.toString());
+            GU_LOGGER.error("failed to read fusion file({}): {}", mKnownFusionDbFile, e.toString());
             return Collections.emptyList();
         }
     }
 
-    private class FusionRefData
+    private static class FusionRefData
     {
         public final KnownFusionType Type;
         public final String FiveGene;
@@ -455,12 +526,15 @@ public class GenerateFusionFiles
         public final String HighImpactPromiscuous;
         public final String Overrides;
         public final String KnownExonTranscriptRef38;
+        public final String KnownExonUpRangeRef38;
+        public final String KnownExonDownRangeRef38;
         public final String OverridesRef38;
 
         public FusionRefData(
                 final KnownFusionType type, final String fiveGene, final String threeGene, final String cancerTypes, final String pubMedId,
                 final String knownExonTranscript, final String knownExonUpRange, final String knownExonDownRange,
-                final String highImpactPromiscuous, final String overrides, final String knownExonTranscriptRef38, final String overridesRef38)
+                final String highImpactPromiscuous, final String overrides, final String knownExonTranscriptRef38,
+                final String knownExonUpRangeRef38, final String knownExonDownRangeRef38, final String overridesRef38)
         {
             Type = type;
             FiveGene = fiveGene;
@@ -473,6 +547,8 @@ public class GenerateFusionFiles
             HighImpactPromiscuous = highImpactPromiscuous;
             Overrides = overrides;
             KnownExonTranscriptRef38 = knownExonTranscriptRef38;
+            KnownExonUpRangeRef38 = knownExonUpRangeRef38;
+            KnownExonDownRangeRef38 = knownExonDownRangeRef38;
             OverridesRef38 = overridesRef38;
         }
 
@@ -481,8 +557,16 @@ public class GenerateFusionFiles
             if(Type != other.Type)
                 return false;
 
-            return FiveGene.equals(other.FiveGene) && ThreeGene.equals(other.ThreeGene)
-                    && KnownExonUpRange.equals(other.KnownExonUpRange) && KnownExonDownRange.equals(other.KnownExonDownRange);
+            if(!FiveGene.equals(other.FiveGene) || !ThreeGene.equals(other.ThreeGene))
+                return false;
+
+            boolean equalKnownExonRange37 =
+                    KnownExonTranscript.equals(other.KnownExonTranscript) && KnownExonUpRange.equals(other.KnownExonUpRange)
+                            && KnownExonDownRange.equals(other.KnownExonDownRange);
+            boolean equalKnownExonRange38 = KnownExonTranscriptRef38.equals(other.KnownExonTranscriptRef38)
+                    && KnownExonUpRangeRef38.equals(other.KnownExonUpRangeRef38)
+                    && KnownExonDownRangeRef38.equals(other.KnownExonDownRangeRef38);
+            return equalKnownExonRange37 || equalKnownExonRange38;
         }
 
         public String toString()
@@ -495,6 +579,7 @@ public class GenerateFusionFiles
     {
         ConfigBuilder configBuilder = new ConfigBuilder(APP_NAME);
 
+        addGenePanelOption(configBuilder, false);
         configBuilder.addPath(KNOWN_FUSION_DB_FILE, true, "File containing the driver gene panel for 37");
         configBuilder.addPath(RESOURCE_REPO_DIR, true, RESOURCE_REPO_DIR_DESC);
         addOutputDir(configBuilder);

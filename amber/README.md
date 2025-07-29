@@ -2,15 +2,11 @@
 AMBER is designed to generate a tumor BAF file for use in PURPLE from a provided VCF of likely heterozygous SNP sites.
 
 When using paired reference/tumor data, AMBER is also able to: 
-  - detect evidence of contamination in the tumor from homozygous sites in the reference; and
+  - detect evidence of contamination in the tumor from homozygous sites in the reference
   - facilitate sample matching / patient deduplication by recording SNPs in the germline
-  - identify long regions of homozygosty and consanguinity
+  - identify long regions of homozygosity and consanguinity
 
-## Installation
-
-To install, download the latest compiled jar file from the [download links](#version-history-and-download-links). 
-
-Ref genome versions 37 and 38 of the likely heterozygous sites are available to download from [HMFTools-Resources > DNA Pipeline > copy_number](https://console.cloud.google.com/storage/browser/hmf-public/HMFtools-Resources/dna_pipeline/).
+All resource files for this tool and the WiGiTs pipeline are available for download via the [HMF Resource page](../pipeline/README_RESOURCES.md).
 
 The Bioconductor [copynumber](http://bioconductor.org/packages/release/bioc/html/copynumber.html) package is required for segmentation.
 After installing [R](https://www.r-project.org/) or [RStudio](https://rstudio.com/), the copy number package can be added with the following R commands:
@@ -19,22 +15,22 @@ After installing [R](https://www.r-project.org/) or [RStudio](https://rstudio.co
     install("copynumber")
 ```
 
-AMBER requires Java 11+ to be installed.
+AMBER requires Java 17+ to be installed.
 
 ## Paired Normal/Tumor Mode
 This is the default and recommended mode.
 
 ### Mandatory Arguments
 
-| Argument      | Description                                                                                |
-|---------------|--------------------------------------------------------------------------------------------|
-| reference     | Name of the reference sample   (if left null run in tumor_only mode)                       |
-| reference_bam | Path to indexed reference BAM file                                                         |
-| tumor         | Name of the tumor sample (if left null run in germline_only mode)                          |
-| tumor_bam     | Path to indexed tumor BAM file                                                             |
-| output_dir    | Path to the output directory. This directory will be created if it does not already exist. |
-| loci          | Path to vcf file containing likely heterozygous sites (see below). Gz files supported.     |
-| ref_genome_version | One of `37` or `38`. Required only when using CRAM files.                             |
+| Argument           | Description                                                                                |
+|--------------------|--------------------------------------------------------------------------------------------|
+| reference          | Name of the reference sample   (if left null run in tumor_only mode)                       |
+| reference_bam      | Path to indexed reference BAM file                                                         |
+| tumor              | Name of the tumor sample (if left null run in germline_only mode)                          |
+| tumor_bam          | Path to indexed tumor BAM file                                                             |
+| output_dir         | Path to the output directory. This directory will be created if it does not already exist. |
+| loci               | Path to vcf file containing likely heterozygous sites (see below). Gz files supported.     |
+| ref_genome_version | One of `37` or `38`                                                                        |
 
 The loci file used by HMF for both 37 and 38 reference genomes is available to download from [HMF-Pipeline-Resources](https://resources.hartwigmedicalfoundation.nl). These loci are generated using GNOMAD v3 SNP sites (lifted over for GRCH37 version) from chr1-chrX with only a single ALT at that location and with populationAF > 0.05 and < 0.95.  These sites are further filtered to remove loci with frequently unclear zygosity in a set of 60 HMF samples, yielding around 6.3M sites overall.  
 
@@ -45,23 +41,22 @@ AMBER supports both BAM and CRAM file formats.
 
 ### Optional Arguments
 
-| Argument              | Default | Description                                                                                       |
-|-----------------------|---------|---------------------------------------------------------------------------------------------------|
-| threads               | 1       | Number of threads to use                                                                          |
-| min_mapping_quality   | 50       | Minimum mapping quality for an alignment to be used                                               |
-| min_base_quality      | 13      | Minimum quality for a base to be considered                                                       |
-| tumor_min_depth      | 8      | Min tumor depth for a site to be considered |
-| min_depth_percent     | 0.5     | Only include reference sites with read depth within min percentage of median reference read depth |
-| max_depth_percent     | 1.5     | Only include reference sites with read depth within max percentage of median reference read depth |
-| min_het_af_percent    | 0.4     | Minimum allelic frequency in reference sample to be considered heterozygous                                           |
-| max_het_af_percent    | 0.65    | Maximum allelic frequency in reference sample to be considered heterozygous                                           |
-| ref_genome            | NA      | Path to the reference genome fasta file. Required only when using CRAM files.                     |
-| validation_stringency | STRICT  | SAM validation strategy: STRICT, SILENT, LENIENT                                                  |
+| Argument               | Default | Description                                                                                       |
+|------------------------|---------|---------------------------------------------------------------------------------------------------|
+| min_mapping_quality    | 50      | Minimum mapping quality for an alignment to be used                                               |
+| min_base_quality       | 30      | Minimum quality for a base to be considered                                                       |
+| tumor_min_depth        | 8 / 25  | Min tumor depth for a site to be considered, uses 25 in tumor-only mode                           |
+| min_depth_percent      | 0.5     | Only include reference sites with read depth within min percentage of median reference read depth |
+| max_depth_percent      | 1.5     | Only include reference sites with read depth within max percentage of median reference read depth |
+| min_het_af_percent     | 0.4     | Minimum allelic frequency in reference sample to be considered heterozygous                       |
+| max_het_af_percent     | 0.65    | Maximum allelic frequency in reference sample to be considered heterozygous                       |
+| validation_stringency  | STRICT  | SAM validation strategy: STRICT, SILENT, LENIENT                                                  |
+| threads                | 1       | Number of threads to use                                                                          |
 
 ### Example Usage
 
 ```
-java -jar amber.jar com.hartwig.hmftools.amber.AmberApplication \
+java -Xmx16G -jar amber.jar \
     -reference SAMPLE_ID_R \
     -reference_bam /sample_data/SAMPLE_ID_R.bam \ 
     -tumor SAMPLE_ID \
@@ -90,19 +85,20 @@ If no reference BAM is supplied, AMBER will be put into tumor only mode.  In tum
 
 ### Tumor-only specific optional Arguments
 
-| Argument          | Default | Description                                                                   |
-|-------------------|---------|-------------------------------------------------------------------------------|
-| tumor_only_min_vaf | 0.05    | Min VAF in ref and alt in tumor only mode                                     |
-| tumor_only_min_support | 2 | Min support in ref and alt in tumor only mode                                 |
+| Argument               | Default | Description                                   |
+|------------------------|---------|-----------------------------------------------|
+| tumor_only_min_vaf     | 0.025    | Min VAF in ref and alt in tumor-only mode     |
+| tumor_only_min_support | 2       | Min support in ref and alt in tumor-only mode |
 
 ### Example Usage
 
 ```
-java -Xmx32G -cp amber.jar com.hartwig.hmftools.amber.AmberApplication \
+java -Xmx16G -jar amber.jar \
    -tumor COLO829T -tumor_bam /run_dir/COLO829T.bam \ 
    -output_dir /run_dir/amber/ \
    -threads 16 \
-   -loci /path/to/GermlineHetPon.37.vcf.gz 
+   -loci /path/to/GermlineHetPon.37.vcf.gz \
+   -ref_genome_version 38
 ```
 ## Germline Only Mode
 
@@ -114,7 +110,7 @@ If the tumor / tumor bam are not specified then Amber will be run in germline on
 
 ## Targeted Mode
 
-AMBER may be run on targeted data.   The differences in behaviour in Amber in targeted mode are documented here: [here](https://github.com/hartwigmedical/hmftools/blob/master/pipeline/README_TARGETED.md#amber).  
+AMBER may be run on targeted data. The differences in behaviour in Amber in targeted mode are documented here: [here](https://github.com/hartwigmedical/hmftools/blob/master/pipeline/README_TARGETED.md#amber).  
 
 ## Multiple Reference / Donor mode
 The `reference` and `reference_bam` arguments supports multiple arguments separated by commas. 
@@ -124,16 +120,45 @@ No change is made to the SNPCheck or contamination output. These will be run on 
 ## Algorithm 
 
 ### Analysis and filtering of BAF points
-When using paired reference/tumor bams, AMBER confirms these sites as heterozygous in the reference sample bam then calculates the allelic frequency of corresponding sites in the tumor bam. 
-In tumor only mode, all provided sites are examined in the tumor with additional filtering then applied. 
+When using paired reference/tumor bams, AMBER confirms these sites as heterozygous in the reference sample bam then calculates the allelic frequency of corresponding sites in the tumor bam. Only observations which meet the min map quality, min base quality and min tumor depth and with depth and AF in the specificed range are considered.    In tumor only mode, all provided sites are examined in the tumor with additional filteringon tumor vaf and allelic depth to ensure that the sites are highly unlikely to be homozygous ref or alt in the germline.
  
 ### Segmentation
 The Bioconductor copy number package is then used to generate pcf segments from the BAF file.
 
 ### Contamination
+The contamination algorithm aims to detect potential contamination from other patients’ DNA during the preparation stage.  It can only be run in Normal/Tumor mode as it works by analysing evidence in the tumor for heterozygosity at corresponding high confidence homozygous reference sites in the normal.  AMBER first detects presence of contamination and then estimates a contamination rate.
+
+**Detect contamination**
+
+AMBER first gathers high confidence homozygous ref sites from the normal sample – each site requires at least 7 reads supporting the REF and 0 reads supporting the ALT. The tumor sample is considered contaminated if, within these corresponding sites, 
+
+- The number of sites with three or more ALT support reads is greater than or equals to 10 AND The number of sites with three or more ALT support reads is greater than or equals to 3% of the total number of heterozygous sites
+  
+OR
+
+- The number of sites with three or more ALT support reads is greater than or equals to 10 AND The number of sites with three or more ALT support reads with VAF below 5% is greater than or equals to 0.2% of the total number of heterozygous sites
+
+otherwise contamination is set to 0.
+
+**Determine contamination rate**
+
+The range of the contamination rate is evaluated from 0.001 to 1 in increments of 0.001.
+
+In each candidate site in the Tumor sample with 2 or more ALT support
+- If it is heterozygous, the expected no. contaminated reads = 0.5 * contamination rate * median read depth
+- If it is homozygous with ALT, the expected no. contaminated reads = contamination rate * median read depth
+- If it is homozygous with REF, the expected no. contaminated reads = 0
+
+Assuming a Poisson distribution, the expected probability of detecting a contaminated read is
 ```
-TO DO
+0.5 * Poisson(observation = ALT support, mean = ALT heterozygous mean) 
++ 0.25 * Poisson(observation = ALT support, mean = homozygous mean)
 ```
+AMBER then excludes probabilities associated with ALT support of 0 or 1 and re-normalises the expected probability for all higher ALT support from 3 and more.
+
+AMBER also counts the actual number of positions with ALT support. And similarly calculates the proportion belonging to each ALT support, excluding 0 and 1.
+
+Finally, the contamination rate is chosen whose value minimises the cumulative differences between the predicted and actual proportions. 
 
 ### Regions of Homozygosity
 Amber outputs a file which contains continuous regions of homozygous sites.  The sex chromosomes are excluded from consideration, as are the short arms of chr 13,14,15,21 & 22 as well as regions within 1M bases of centromeric gaps and large regions of heterochromatin (ie for chr 1,chr9, chr 16).
@@ -157,8 +182,8 @@ If only one chromosome is affected and the regions affected amount to more than 
 The REFERENCE.amber.snp.vcf.gz contains some 1000 SNP points that can be used to identify if a new sample belongs to an existing patient. 
 This is particularly important when doing cohort analysis as multiple samples from the same patient can skew results.
 
-To enable patient matching a database is required with three tables, AmberSample, AmberMapping and AmberPatient. 
-Scripts to generate these tables are available [here](../patient-db/src/main/resources/patches/amber/amber3.4_to_3.5_migration.sql).   
+To enable patient matching a database is required with three tables, amberSample, amberMapping and amberPatient. 
+Scripts to generate these tables are available [here](../patient-db/src/main/resources/generate_database.sql).   
 
 Each sample is loaded into AmberSample with the `LoadAmberData` application which downsamples the REFERENCE.amber.snp.vcf.gz file to 100 loci and describes each locus as:
 - 1: Homozygous ref
@@ -180,8 +205,6 @@ java -cp amber.jar com.hartwig.hmftools.patientdb.amber.LoadAmberData \
     -db_pass password \
     -db_url mysql://localhost:3306/hmfpatients?serverTimezone=UTC
 ```
-
-The Amber.snpcheck.37.vcf (and 38 equivalent) are available to download from [HMFTools-Resources > Amber](https://console.cloud.google.com/storage/browser/hmf-public/HMFtools-Resources/dna_pipeline/).
 
 An example query to check if a sample is one of many for a patient is:
 ```
@@ -210,7 +233,6 @@ ORDER BY sampleCount desc;
 
 # Known issues / future improvements
 - **Population based phasing**: Could significantly increase resolution of subclonal/low tumor fraction BAF segmentation.
-
  
 # Version History and Download Links
 - [4.0](https://github.com/hartwigmedical/hmftools/releases/tag/amber-v4.0rc)

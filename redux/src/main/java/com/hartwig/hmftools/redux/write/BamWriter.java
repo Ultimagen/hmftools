@@ -2,9 +2,8 @@ package com.hartwig.hmftools.redux.write;
 
 import static java.lang.String.format;
 
-import static com.hartwig.hmftools.common.bam.SamRecordUtils.CONSENSUS_READ_ATTRIBUTE;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.UMI_ATTRIBUTE;
-import static com.hartwig.hmftools.redux.ReduxConfig.RD_LOGGER;
+import static com.hartwig.hmftools.common.sequencing.SequencingType.ILLUMINA;
 import static com.hartwig.hmftools.redux.common.FragmentStatus.DUPLICATE;
 import static com.hartwig.hmftools.redux.common.FragmentStatus.PRIMARY;
 
@@ -15,8 +14,10 @@ import com.hartwig.hmftools.common.basequal.jitter.JitterAnalyser;
 import com.hartwig.hmftools.common.utils.file.FileWriterUtils;
 import com.hartwig.hmftools.redux.ReduxConfig;
 import com.hartwig.hmftools.redux.common.DuplicateGroup;
-import com.hartwig.hmftools.redux.common.Fragment;
+import com.hartwig.hmftools.redux.common.DuplicateGroupCollapser;
+import com.hartwig.hmftools.redux.common.FragmentCoords;
 import com.hartwig.hmftools.redux.common.FragmentStatus;
+import com.hartwig.hmftools.redux.common.ReadInfo;
 
 import org.jetbrains.annotations.Nullable;
 
@@ -30,24 +31,29 @@ public abstract class BamWriter
     protected final SAMFileWriter mSamFileWriter;
     protected final ReadDataWriter mReadDataWriter;
     private final JitterAnalyser mJitterAnalyser;
+    private final boolean mRecomputeFragCoords;
 
     protected final AtomicLong mNonConsensusReadCount;
     protected final AtomicLong mConsensusReadCount;
 
-    public BamWriter(final String filename, final ReduxConfig config, final ReadDataWriter readDataWriter,
-            final SAMFileWriter samFileWriter, @Nullable final JitterAnalyser jitterAnalyser)
+    public BamWriter(
+            final String filename, final ReduxConfig config, final ReadDataWriter readDataWriter, final SAMFileWriter samFileWriter,
+            @Nullable final JitterAnalyser jitterAnalyser)
     {
         mFilename = filename;
         mConfig = config;
         mSamFileWriter = samFileWriter;
         mReadDataWriter = readDataWriter;
         mJitterAnalyser = jitterAnalyser;
+        mRecomputeFragCoords = mReadDataWriter.enabled() && (DuplicateGroupCollapser.isEnabled(mConfig.DuplicateGroupCollapse) || (
+                config.Sequencing == ILLUMINA && config.UMIs.Enabled));
 
         mNonConsensusReadCount = new AtomicLong(0);
         mConsensusReadCount = new AtomicLong(0);
     }
 
     public String filename() { return mFilename; }
+    public SAMFileWriter samFileWriter() { return mSamFileWriter; }
 
     public long nonConsensusWriteCount() { return mNonConsensusReadCount.get(); }
     public long consensusWriteCount() { return mConsensusReadCount.get(); }
@@ -63,84 +69,95 @@ public abstract class BamWriter
 
     // the public write methods are all thread-safe, using atomic counters and then the key SAM-write methods are handled
     // in the derived sync and non-sync implementations
-    public void writeFragments(final List<Fragment> fragments, boolean excludeUmis)
+    public void writeNonDuplicateReads(final List<ReadInfo> readInfos)
     {
-        fragments.forEach(x -> doWriteFragment(x, excludeUmis));
-    }
-
-    public void writeFragment(final Fragment fragment) { doWriteFragment(fragment, true); }
-
-    public void writeRead(final SAMRecord read, final FragmentStatus fragmentStatus)
-    {
-        writeRead(read, fragmentStatus, null);
-    }
-
-    public void writeDuplicateGroup(final DuplicateGroup group, final List<SAMRecord> completeReads)
-    {
-        for(SAMRecord read : completeReads)
+        for(ReadInfo readInfo : readInfos)
         {
-            if(read.hasAttribute(CONSENSUS_READ_ATTRIBUTE))
-            {
-                processRecord(read);
-                mConsensusReadCount.incrementAndGet();
+            // UMIs are not captured nor written for non-duplicates
+            writeRead(readInfo.read(), FragmentStatus.NONE, readInfo.coordinates().Key, "");
+        }
+    }
 
-                mReadDataWriter.writeReadData(read, PRIMARY, group.coordinatesKey(), 0, group.umiId());
+    public void writeSecondaryRead(final SAMRecord read)
+    {
+        writeRead(read, FragmentStatus.UNSET, "", "");
+    }
 
-                continue;
-            }
+    public void writeDuplicateGroup(final DuplicateGroup group)
+    {
+        String fragCoords = group.fragmentCoordinates().Key;
+        if(group.consensusRead() != null)
+        {
+            SAMRecord read = group.consensusRead();
+            processRecord(read);
+            mConsensusReadCount.incrementAndGet();
 
+            if(mRecomputeFragCoords)
+                fragCoords = FragmentCoords.fromRead(read, false).Key;
+
+            if(mReadDataWriter != null && mReadDataWriter.enabled())
+                mReadDataWriter.writeReadData(read, PRIMARY, fragCoords, group.umiId());
+        }
+
+        // is poly-g umi collapsing the only reason this is a duplicate group?
+        List<SAMRecord> remainingReads;
+        if(group.readCount() - group.polyGUmiReads().size() == 1)
+        {
+            SAMRecord read = group.reads().get(0);
             if(mConfig.UMIs.Enabled)
                 read.setAttribute(UMI_ATTRIBUTE, group.umiId());
 
-            writeRead(read, DUPLICATE, group.coordinatesKey(), 0, group.umiId());
+            if(mRecomputeFragCoords)
+                fragCoords = FragmentCoords.fromRead(read, false).Key;
+
+            writeRead(read, PRIMARY, fragCoords, group.umiId());
+
+            remainingReads = group.polyGUmiReads();
+        }
+        else
+        {
+            remainingReads = group.allReads();
+        }
+
+        for(SAMRecord read : remainingReads)
+        {
+            if(mConfig.UMIs.Enabled)
+                read.setAttribute(UMI_ATTRIBUTE, group.umiId());
+
+            FragmentStatus fragmentStatus = group.isPrimaryRead(read) ? PRIMARY : DUPLICATE;
+            if(mRecomputeFragCoords)
+                fragCoords = FragmentCoords.fromRead(read, false).Key;
+
+            writeRead(read, fragmentStatus, fragCoords, group.umiId());
         }
     }
 
     protected abstract void writeRecord(final SAMRecord read);
+    public abstract long unsortedWriteCount();
 
     protected final void processRecord(final SAMRecord read)
+    {
+        processJitterRead(read);
+        writeRecord(read);
+    }
+
+    public void processJitterRead(final SAMRecord read)
     {
         if(mJitterAnalyser != null && mJitterAnalyser.bamSlicerFilter().passesFilters(read))
         {
             mJitterAnalyser.processRead(read);
         }
-
-        writeRecord(read);
     }
 
     public abstract void close();
 
-    private void doWriteFragment(final Fragment fragment, boolean excludeDuplicates)
-    {
-        if(excludeDuplicates && fragment.umi() != null) // reads in duplicate groups are only written as a complete group
-            return;
-
-        if(fragment.readsWritten())
-        {
-            RD_LOGGER.error("fragment({}) reads already written", fragment);
-            return;
-        }
-
-        fragment.setReadWritten();
-        fragment.reads().forEach(x -> writeRead(x, fragment.status(), fragment));
-    }
-
-    private void writeRead(final SAMRecord read, final FragmentStatus fragmentStatus, @Nullable final Fragment fragment)
-    {
-        writeRead(
-                read, fragmentStatus,
-                fragment != null ? fragment.coordinates().Key : "",
-                fragment != null ? fragment.averageBaseQual() : 0,
-                fragment != null ? fragment.umi() : "");
-    }
-
     private void writeRead(
-            final SAMRecord read, final FragmentStatus fragmentStatus, final String fragmentCoordinates,
-            final double avgBaseQual, final String umiId)
+            final SAMRecord read, final FragmentStatus fragmentStatus, final String fragmentCoordinates, String umiId)
     {
         mNonConsensusReadCount.incrementAndGet();
 
-        mReadDataWriter.writeReadData(read, fragmentStatus, fragmentCoordinates, avgBaseQual, umiId);
+        if(mReadDataWriter.enabled())
+            mReadDataWriter.writeReadData(read, fragmentStatus, fragmentCoordinates, umiId);
 
         if(fragmentStatus == DUPLICATE)
         {

@@ -9,8 +9,9 @@ import java.util.List;
 import com.hartwig.hmftools.common.gene.TranscriptData;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
 import com.hartwig.hmftools.sage.common.SageVariant;
-import com.hartwig.hmftools.sage.common.SimpleVariant;
+import com.hartwig.hmftools.common.variant.SimpleVariant;
 import com.hartwig.hmftools.sage.filter.FilterConfig;
+import com.hartwig.hmftools.sage.filter.VariantFilters;
 
 public class VariantDeduper
 {
@@ -18,10 +19,11 @@ public class VariantDeduper
     private final IndelDeduper mIndelDeduper;
 
     public VariantDeduper(
-            final List<TranscriptData> transcripts, final RefGenomeInterface refGenome, int readLength, final FilterConfig filterConfig)
+            final List<TranscriptData> transcripts, final RefGenomeInterface refGenome, final FilterConfig filterConfig,
+            final VariantFilters filters)
     {
         mDedupMixedGermlineSomatic = new DedupMixedGermlineSomatic(transcripts, filterConfig);
-        mIndelDeduper = new IndelDeduper(refGenome, readLength);
+        mIndelDeduper = new IndelDeduper(refGenome, filters);
     }
 
     public void processVariants(final List<SageVariant> variants)

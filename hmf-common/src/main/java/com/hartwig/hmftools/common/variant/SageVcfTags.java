@@ -1,5 +1,10 @@
 package com.hartwig.hmftools.common.variant;
 
+import static java.lang.String.format;
+
+import htsjdk.variant.vcf.VCFHeader;
+import htsjdk.variant.vcf.VCFHeaderLine;
+
 public final class SageVcfTags
 {
     public static final String TIER = "TIER";
@@ -7,6 +12,9 @@ public final class SageVcfTags
 
     public static final String LOCAL_PHASE_SET = "LPS";
     public static final String LOCAL_PHASE_SET_DESC = "Local Phase Set";
+
+    public static final String LPS_APPEND_INFO = "LPSA";
+    public static final String LPS_APPEND_INFO_DESC = "Local Phase Set Append Info";
 
     // NOTE: most downstream applications use reference and read-context repeat and homology information
     public static final String REPEAT_COUNT = "REP_C";
@@ -42,7 +50,53 @@ public final class SageVcfTags
     public static final String UMI_TYPE_COUNTS_DESC =
             "UMI type counts [TotalNone,TotalSingle,TotalDualStrand,AltNone,AltSingle,AltDualStrand]";
 
+    public static final String MAP_QUAL_FACTOR = "MQF";
+    public static final String MAP_QUAL_FACTOR_DESC = "Map qual heuristic as used in min tumor quality filter";
+
+    public static final String AVG_RAW_BASE_QUAL = "RABQ";
+    public static final String AVG_RAW_BASE_QUAL_DESC = "Average calculated raw base quality in alt reads";
+
+    public static final String AVG_BASE_QUAL = "ABQ";
+    public static final String AVG_BASE_QUAL_DESC = "Average calculated base quality (all,alt)";
+
+    public static final String NEARBY_INDEL_FLAG = "NEARBY_INDEL";
+    public static final String NEARBY_INDEL_FLAG_DESC = "Variant has an INDEL overlapping its core";
+
+    public static final String MIN_COORDS_COUNT = "MUC";
+    public static final String MIN_COORDS_COUNT_DESC = "Min unique fragment coordinates in alt reads";
+
+    public static final String AVG_READ_EDGE_DISTANCE = "AED";
+    public static final String AVG_READ_EDGE_DISTANCE_DESC = "Average read edge distance [alt,total]";
+
     public static final int UMI_TYPE_COUNT = 6;
 
+    public static final String TINC_LEVEL = "tincLevel";
+
+    public static final String TINC_RECOVERED_FLAG = "TINC_RECOVERED";
+    public static final String TINC_RECOVERED_DESC = "Variant recovered from germline filters by TINC detection";
+
     public static final String LIST_SEPARATOR = ",";
+
+    public static void writeTincLevel(final VCFHeader vcfHeader, final double tincLevel)
+    {
+        if(tincLevel > 0)
+            vcfHeader.addMetaDataLine(new VCFHeaderLine(TINC_LEVEL, format("%.3f", tincLevel)));
+    }
+
+    public static double parseTincLevel(final VCFHeader vcfHeader)
+    {
+        VCFHeaderLine tincHeader = vcfHeader.getMetaDataLine(TINC_LEVEL);
+
+        if(tincHeader == null)
+            return 0;
+
+        try
+        {
+            return Double.parseDouble(tincHeader.getValue());
+        }
+        catch(Exception e)
+        {
+            return 0;
+        }
+    }
 }

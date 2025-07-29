@@ -1,10 +1,11 @@
 package com.hartwig.hmftools.sage;
 
-import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
-import static com.hartwig.hmftools.common.utils.version.VersionInfo.appVersionFile;
-import static com.hartwig.hmftools.common.utils.version.VersionInfo.fromAppName;
+import static com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr;
+import static com.hartwig.hmftools.common.utils.config.VersionInfo.fromAppName;
 import static com.hartwig.hmftools.sage.SageCommon.APP_NAME;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
+import static com.hartwig.hmftools.sage.tinc.TincAnalyser.generateTincVcfFilename;
+import static com.hartwig.hmftools.sage.tinc.TincConfig.callerTincConfig;
 
 import java.io.File;
 import java.io.IOException;
@@ -13,14 +14,15 @@ import java.util.Map;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
-import com.hartwig.hmftools.common.utils.version.VersionInfo;
-import com.hartwig.hmftools.sage.coverage.Coverage;
-import com.hartwig.hmftools.sage.evidence.FragmentLengths;
+import com.hartwig.hmftools.common.utils.config.VersionInfo;
+import com.hartwig.hmftools.sage.evidence.FragmentLengthWriter;
 import com.hartwig.hmftools.sage.phase.PhaseSetCounter;
 import com.hartwig.hmftools.sage.pipeline.ChromosomePipeline;
 import com.hartwig.hmftools.sage.bqr.BaseQualityRecalibration;
 import com.hartwig.hmftools.sage.bqr.BqrRecordMap;
 import com.hartwig.hmftools.sage.quality.MsiJitterCalcs;
+import com.hartwig.hmftools.sage.tinc.TincAnalyser;
+import com.hartwig.hmftools.sage.tinc.TincConfig;
 import com.hartwig.hmftools.sage.vcf.VcfWriter;
 
 import htsjdk.samtools.SAMSequenceDictionary;
@@ -36,7 +38,8 @@ public class SageApplication implements AutoCloseable
 
     private final PhaseSetCounter mPhaseSetCounter;
     private final VcfWriter mVcfWriter;
-    private final FragmentLengths mFragmentLengths;
+    private final FragmentLengthWriter mFragmentLengths;
+    private final TincConfig mTincConfig;
 
     private SageApplication(final ConfigBuilder configBuilder)
     {
@@ -59,17 +62,25 @@ public class SageApplication implements AutoCloseable
 
         mPhaseSetCounter = new PhaseSetCounter();
 
-        mVcfWriter = new VcfWriter(mConfig.Common, mConfig.TumorIds, mConfig.Common.ReferenceIds, mRefData.RefGenome);
+        mVcfWriter = new VcfWriter(mConfig.Common, mConfig.TumorIds, mConfig.Common.ReferenceIds, mRefData.RefGenome, mConfig.RunTinc);
 
-        mFragmentLengths = new FragmentLengths(mConfig.Common);
+        mFragmentLengths = new FragmentLengthWriter(mConfig.Common);
 
         SG_LOGGER.info("writing to file: {}", mConfig.Common.OutputFile);
+
+        if(mConfig.RunTinc && !mConfig.Common.ReferenceIds.isEmpty())
+        {
+            mTincConfig = callerTincConfig(configBuilder, mConfig);
+        }
+        else
+        {
+            mTincConfig = null;
+        }
     }
 
     private void run() throws IOException
     {
         long startTimeMs = System.currentTimeMillis();
-        final Coverage coverage = new Coverage(mConfig.TumorIds, mRefData.CoveragePanel.values(), mConfig.Common);
 
         SageCommon.setReadLength(mConfig.Common, mRefData.PanelWithHotspots, mConfig.TumorBams.get(0));
 
@@ -90,7 +101,11 @@ public class SageApplication implements AutoCloseable
 
         List<String> combinedSampleIds = Lists.newArrayList(mConfig.TumorIds);
         combinedSampleIds.addAll(mConfig.Common.ReferenceIds);
-        MsiJitterCalcs msiJitterCalcs = MsiJitterCalcs.build(combinedSampleIds, mConfig.Common.JitterParamsDir);
+
+        MsiJitterCalcs msiJitterCalcs = MsiJitterCalcs.build(
+                combinedSampleIds,
+                !mConfig.Common.SkipMsiJitter ? mConfig.Common.JitterParamsDir : null,
+                mConfig.Common.Quality.HighDepthMode);
 
         final SAMSequenceDictionary dictionary = dictionary();
         for(final SAMSequenceRecord samSequenceRecord : dictionary.getSequences())
@@ -101,13 +116,22 @@ public class SageApplication implements AutoCloseable
                 continue;
 
             final ChromosomePipeline pipeline = new ChromosomePipeline(
-                    chromosome, mConfig, mRefData, recalibrationMap, msiJitterCalcs, coverage, mPhaseSetCounter, mVcfWriter, mFragmentLengths);
+                    chromosome, mConfig, mRefData, recalibrationMap, msiJitterCalcs, mPhaseSetCounter, mVcfWriter, mFragmentLengths);
 
             pipeline.process();
         }
 
-        coverage.writeFiles(mConfig.Common.OutputFile);
         mFragmentLengths.close();
+        mVcfWriter.close();
+
+        if(mTincConfig != null && !mConfig.Common.ReferenceIds.isEmpty())
+        {
+            TincAnalyser tincAnalyser = new TincAnalyser(mTincConfig);
+            tincAnalyser.run(mConfig.Common.Filter);
+
+            String outputVcf = mTincConfig.RewriteVcf ? mConfig.Common.OutputFile : generateTincVcfFilename(mConfig.Common.OutputFile);
+            tincAnalyser.writeVcf(mRefData.RefGenome, mConfig.Common.OutputFile, outputVcf);
+        }
 
         SG_LOGGER.info("Sage complete, mins({})", runTimeMinsStr(startTimeMs));
     }
@@ -132,7 +156,6 @@ public class SageApplication implements AutoCloseable
     public void close() throws IOException
     {
         mRefData.RefGenome.close();
-        mVcfWriter.close();
     }
 
     public static void main(final String... args) throws IOException

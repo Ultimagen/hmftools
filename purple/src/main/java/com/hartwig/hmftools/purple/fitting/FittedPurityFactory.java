@@ -1,6 +1,5 @@
 package com.hartwig.hmftools.purple.fitting;
 
-import static com.hartwig.hmftools.common.utils.Doubles.lessOrEqual;
 import static com.hartwig.hmftools.common.utils.Doubles.positiveOrZero;
 
 import java.util.Collection;
@@ -26,7 +25,7 @@ import com.hartwig.hmftools.purple.PurpleConfig;
 import com.hartwig.hmftools.purple.fittingsnv.SomaticDeviation;
 import com.hartwig.hmftools.purple.region.ObservedRegion;
 import com.hartwig.hmftools.common.utils.Doubles;
-import com.hartwig.hmftools.common.utils.collection.Downsample;
+import com.hartwig.hmftools.common.utils.Downsample;
 import com.hartwig.hmftools.purple.somatic.SomaticVariant;
 
 public class FittedPurityFactory
@@ -88,7 +87,7 @@ public class FittedPurityFactory
         }
 
         mTotalBAFCount = accumulatedBafCount;
-        mAverageFittingRatio = accumulatedWeightedRatio / accumulatedBafCount;
+        mAverageFittingRatio = accumulatedBafCount > 0 ? accumulatedWeightedRatio / accumulatedBafCount : 0;
 
         List<SomaticVariant> downsampleVariants = Downsample.downsample(MAX_SOMATICS_TO_FIT, filteredVariants);
 
@@ -101,15 +100,28 @@ public class FittedPurityFactory
         }
     }
 
+    public boolean validDataForFit() { return mAverageFittingRatio > 0; }
+
     public List<FittedPurity> getFittedPurities() { return mFittedPurities; }
 
     public void fitPurity() throws ExecutionException, InterruptedException
     {
         FittingConfig config = mConfig.Fitting;
 
+        List<Double> purityValues = Lists.newArrayList();
+
+        double purityValue = config.MinPurity;
+
+        while(purityValue <= config.MaxPurity)
+        {
+            purityValues.add(purityValue);
+
+            purityValue = Doubles.round(purityValue + config.PurityIncrement, 2);
+        }
+
         if(mConfig.Threads <= 1)
         {
-            for(double purity = config.MinPurity; lessOrEqual(purity, config.MaxPurity); purity += config.PurityIncrement)
+            for(Double purity : purityValues)
             {
                 mFittedPurities.addAll(fitPurity(purity));
             }
@@ -117,7 +129,8 @@ public class FittedPurityFactory
         else
         {
             List<Future<List<FittedPurity>>> futures = Lists.newArrayList();
-            for(double purity = config.MinPurity; lessOrEqual(purity, config.MaxPurity); purity += config.PurityIncrement)
+
+            for(Double purity : purityValues)
             {
                 futures.add(mExecutorService.submit(callableFitPurity(purity)));
             }
@@ -207,12 +220,6 @@ public class FittedPurityFactory
                 .build();
     }
 
-    public static RegionFitCalculator createFittedRegionFactory(
-            final int averageTumorDepth, final CobaltChromosomes cobaltChromosomes, final FittingConfig fitScoreConfig)
-    {
-        return new RegionFitCalculator(cobaltChromosomes, fitScoreConfig, averageTumorDepth);
-    }
-
     private static boolean useRegionToFitPurity(boolean tumorOnlyMode, final CobaltChromosomes cobaltChromosomes, final ObservedRegion region)
     {
         if(region.bafCount() <= 0)
@@ -261,8 +268,9 @@ public class FittedPurityFactory
         while(Doubles.lessThan(ploidy, exclusiveMax))
         {
             results.add(ploidy);
-            ploidy += increment;
+            ploidy = Doubles.round(ploidy + increment, 2);
         }
+
         return results;
     }
 }

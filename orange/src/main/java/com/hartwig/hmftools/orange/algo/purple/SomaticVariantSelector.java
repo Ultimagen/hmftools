@@ -4,13 +4,13 @@ import java.util.List;
 import java.util.Set;
 
 import com.google.common.collect.Sets;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGene;
+import com.hartwig.hmftools.common.driver.panel.DriverGene;
 import com.hartwig.hmftools.datamodel.purple.HotspotType;
 import com.hartwig.hmftools.datamodel.purple.PurpleCodingEffect;
 import com.hartwig.hmftools.datamodel.purple.PurpleVariant;
 import com.hartwig.hmftools.datamodel.purple.PurpleVariantType;
 
-import org.apache.commons.compress.utils.Lists;
+import com.google.common.collect.Lists;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -28,13 +28,13 @@ final class SomaticVariantSelector
             if(!variant.reported())
             {
                 boolean isAtLeastNearHotspot = variant.hotspot() == HotspotType.HOTSPOT || variant.hotspot() == HotspotType.NEAR_HOTSPOT;
-                boolean affectsGeneAndHasPhasedReportedVariant =
-                        !variant.gene().isEmpty() && hasReportedVariantWithPhase(reportedSomaticVariants, variant.localPhaseSets());
+                boolean isExonicAndHasPhasedReportedVariant =
+                        !variant.gene().isEmpty() && isExonic(variant) && hasReportedVariantWithPhase(reportedSomaticVariants, variant.localPhaseSets());
                 boolean isCuppaRelevantVariant = isRelevantForCuppa(variant);
                 boolean isSynonymousButReportable = isSynonymousWithReportableWorstImpact(variant, driverGenes);
                 boolean isUnreportedSpliceVariant = isUnreportedSpliceVariant(variant, driverGenes);
 
-                if(isAtLeastNearHotspot || affectsGeneAndHasPhasedReportedVariant || isCuppaRelevantVariant || isSynonymousButReportable
+                if(isAtLeastNearHotspot || isExonicAndHasPhasedReportedVariant || isCuppaRelevantVariant || isSynonymousButReportable
                         || isUnreportedSpliceVariant)
                 {
                     filtered.add(variant);
@@ -74,6 +74,10 @@ final class SomaticVariantSelector
             }
         }
         return false;
+    }
+
+    private static boolean isExonic(@NotNull PurpleVariant variant) {
+        return variant.canonicalImpact().affectedExon() != null;
     }
 
     private static boolean isRelevantForCuppa(@NotNull PurpleVariant variant)

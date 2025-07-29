@@ -2,19 +2,19 @@ package com.hartwig.hmftools.purple.germline;
 
 import static java.lang.Math.max;
 
-import static com.hartwig.hmftools.common.drivercatalog.DeletionDrivers.MAX_COPY_NUMBER_DEL;
-import static com.hartwig.hmftools.common.drivercatalog.panel.DriverGeneGermlineReporting.ANY;
-import static com.hartwig.hmftools.common.drivercatalog.panel.DriverGeneGermlineReporting.VARIANT_NOT_LOST;
-import static com.hartwig.hmftools.common.drivercatalog.panel.DriverGeneGermlineReporting.WILDTYPE_LOST;
+import static com.hartwig.hmftools.common.driver.DeletionDrivers.MAX_COPY_NUMBER_DEL;
+import static com.hartwig.hmftools.common.driver.panel.DriverGeneGermlineReporting.ANY;
+import static com.hartwig.hmftools.common.driver.panel.DriverGeneGermlineReporting.VARIANT_NOT_LOST;
+import static com.hartwig.hmftools.common.driver.panel.DriverGeneGermlineReporting.WILDTYPE_LOST;
 import static com.hartwig.hmftools.common.purple.GermlineStatus.HET_DELETION;
 import static com.hartwig.hmftools.common.purple.GermlineStatus.HOM_DELETION;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DEL;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionsOverlap;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.NEG_ORIENT;
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.POS_ORIENT;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_REV;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_FWD;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
 import static com.hartwig.hmftools.purple.PurpleUtils.PPL_LOGGER;
 import static com.hartwig.hmftools.purple.PurpleConstants.GERMLINE_DEL_CN_CONSISTENCY_MACN_PERC;
@@ -31,11 +31,11 @@ import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.drivercatalog.DriverCatalog;
-import com.hartwig.hmftools.common.drivercatalog.DriverType;
-import com.hartwig.hmftools.common.drivercatalog.ImmutableDriverCatalog;
-import com.hartwig.hmftools.common.drivercatalog.LikelihoodMethod;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGene;
+import com.hartwig.hmftools.common.driver.DriverCatalog;
+import com.hartwig.hmftools.common.driver.DriverType;
+import com.hartwig.hmftools.common.driver.ImmutableDriverCatalog;
+import com.hartwig.hmftools.common.driver.LikelihoodMethod;
+import com.hartwig.hmftools.common.driver.panel.DriverGene;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
 import com.hartwig.hmftools.common.gene.ExonData;
 import com.hartwig.hmftools.common.gene.GeneData;
@@ -121,7 +121,7 @@ public class GermlineDeletions
         {
             int regionStart;
             int regionEnd;
-            byte requiredOrientation = (se == SE_START) ? POS_ORIENT : NEG_ORIENT;
+            byte requiredOrientation = (se == SE_START) ? ORIENT_FWD : ORIENT_REV;
 
             if(se == SE_START)
             {
@@ -130,16 +130,8 @@ public class GermlineDeletions
             }
             else
             {
-                if(nextRegion != null)
-                {
-                    regionStart = nextRegion.minStart() - 1;
-                    regionEnd = nextRegion.maxStart() - 1;
-                }
-                else
-                {
-                    regionStart = region.end();
-                    regionEnd = region.end();
-                }
+                regionEnd = nextRegion != null ? nextRegion.maxStart() - 1 : region.end();
+                regionStart = region.end();
             }
 
             regionStart -= WINDOW_SIZE;

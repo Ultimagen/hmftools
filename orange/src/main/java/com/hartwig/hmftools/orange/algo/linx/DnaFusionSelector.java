@@ -3,13 +3,13 @@ package com.hartwig.hmftools.orange.algo.linx;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import com.hartwig.hmftools.common.drivercatalog.DriverCategory;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGene;
+import com.hartwig.hmftools.common.driver.DriverCategory;
+import com.hartwig.hmftools.common.driver.panel.DriverGene;
 import com.hartwig.hmftools.common.fusion.KnownFusionType;
 import com.hartwig.hmftools.common.linx.FusionPhasedType;
 import com.hartwig.hmftools.common.linx.LinxFusion;
 
-import org.apache.commons.compress.utils.Lists;
+import com.google.common.collect.Lists;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 

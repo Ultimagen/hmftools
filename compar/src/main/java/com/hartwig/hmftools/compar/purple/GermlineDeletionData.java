@@ -2,10 +2,12 @@ package com.hartwig.hmftools.compar.purple;
 
 import static java.lang.String.format;
 
+import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_CHROMOSOME;
 import static com.hartwig.hmftools.compar.common.Category.GERMLINE_DELETION;
+import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_CHROMOSOME_BAND;
 import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_REPORTED;
+import static com.hartwig.hmftools.compar.common.CommonUtils.createMismatchFromDiffs;
 import static com.hartwig.hmftools.compar.common.DiffFunctions.checkDiff;
-import static com.hartwig.hmftools.compar.common.MismatchType.VALUE;
 
 import java.util.List;
 
@@ -20,15 +22,17 @@ import com.hartwig.hmftools.compar.common.Mismatch;
 public class GermlineDeletionData implements ComparableItem
 {
     public final GermlineDeletion Deletion;
+    public final String mComparisonChromosome;
 
     protected static final String FLD_GERMLINE_STATUS = "GermlineStatus";
     protected static final String FLD_TUMOR_STATUS = "TumorStatus";
     protected static final String FLD_GERMLINE_CN = "GermlineCopyNumber";
     protected static final String FLD_TUMOR_CN = "TumorCopyNumber";
 
-    public GermlineDeletionData(final GermlineDeletion germlineDeletion)
+    public GermlineDeletionData(final GermlineDeletion germlineDeletion, final String comparisonChromosome)
     {
         Deletion = germlineDeletion;
+        mComparisonChromosome = comparisonChromosome;
     }
 
     public Category category() {
@@ -59,6 +63,11 @@ public class GermlineDeletionData implements ComparableItem
     }
 
     @Override
+    public boolean isPass() {
+        return true;
+    }
+
+    @Override
     public boolean matches(final ComparableItem other)
     {
         final GermlineDeletionData otherDeletion = (GermlineDeletionData)other;
@@ -66,7 +75,8 @@ public class GermlineDeletionData implements ComparableItem
     }
 
     @Override
-    public Mismatch findMismatch(final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds)
+    public Mismatch findMismatch(final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds,
+            final boolean includeMatches)
     {
         final GermlineDeletionData otherDeletion = (GermlineDeletionData) other;
 
@@ -77,7 +87,9 @@ public class GermlineDeletionData implements ComparableItem
         checkDiff(diffs, FLD_TUMOR_STATUS, Deletion.TumorStatus.toString(), otherDeletion.Deletion.TumorStatus.toString());
         checkDiff(diffs, FLD_GERMLINE_CN, Deletion.GermlineCopyNumber, otherDeletion.Deletion.GermlineCopyNumber, thresholds);
         checkDiff(diffs, FLD_TUMOR_CN, Deletion.TumorCopyNumber, otherDeletion.Deletion.TumorCopyNumber, thresholds);
+        checkDiff(diffs, FLD_CHROMOSOME, mComparisonChromosome, otherDeletion.mComparisonChromosome);
+        checkDiff(diffs, FLD_CHROMOSOME_BAND, Deletion.ChromosomeBand, otherDeletion.Deletion.ChromosomeBand);
 
-        return !diffs.isEmpty() ? new Mismatch(this, other, VALUE, diffs) : null;
+        return createMismatchFromDiffs(this, other, diffs, matchLevel, includeMatches);
     }
 }

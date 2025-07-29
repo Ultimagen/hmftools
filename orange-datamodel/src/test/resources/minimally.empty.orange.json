@@ -58,6 +58,14 @@
       "minPloidy": 0,
       "maxPloidy": 0
     },
+    "tumorStats": {
+      "maxDiploidProportion": 0,
+      "hotspotMutationCount": 0,
+      "hotspotStructuralVariantCount": 0,
+      "smallVariantAlleleReadCount": 0,
+      "structuralVariantTumorFragmentCount": 0,
+      "bafCount": 0
+    },
     "characteristics": {
       "wholeGenomeDuplication": true,
       "microsatelliteIndelsPerMb": 0,
@@ -76,9 +84,13 @@
     "reportableGermlineVariants": null,
     "allSomaticCopyNumbers": [],
     "allSomaticGeneCopyNumbers": [],
-    "allSomaticGainsLosses": [],
-    "reportableSomaticGainsLosses": [],
-    "suspectGeneCopyNumbersWithLOH": []
+    "allSomaticGainsDels": [],
+    "reportableSomaticGainsDels": [],
+    "suspectGeneCopyNumbersWithLOH": [],
+    "chromosomalRearrangements": {
+      "hasTrisomy1q": false,
+      "hasCodeletion1p19q": false
+    }
   },
   "linx": {
     "allSomaticStructuralVariants": [],
@@ -104,12 +116,13 @@
   },
   "peach": [],
   "cuppa": {
+    "mode" : "WGS",
+    "predictions": [
+    ],
     "bestPrediction": {
       "cancerType": "cancer",
       "likelihood": 0
     },
-    "predictions": [
-    ],
     "simpleDups32To200B": 0,
     "maxComplexSize": 0,
     "telomericSGLs": 0,

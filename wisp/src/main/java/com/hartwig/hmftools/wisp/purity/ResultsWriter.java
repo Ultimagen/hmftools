@@ -14,6 +14,7 @@ import static com.hartwig.hmftools.wisp.purity.WriteType.SOMATIC_DATA;
 import static com.hartwig.hmftools.wisp.purity.loh.AmberLohCalcs.initialiseAmberLohWriter;
 import static com.hartwig.hmftools.wisp.purity.cn.CopyNumberProfile.initialiseCnPlotCalcWriter;
 import static com.hartwig.hmftools.wisp.purity.cn.CopyNumberProfile.initialiseCnRatioWriter;
+import static com.hartwig.hmftools.wisp.purity.variant.PurityCalcData.CALC_NO_SET;
 import static com.hartwig.hmftools.wisp.purity.variant.SampleFragmentLengths.initialiseFragmentLengthWriter;
 import static com.hartwig.hmftools.wisp.purity.variant.SomaticVariants.initialiseVariantWriter;
 import static com.hartwig.hmftools.wisp.purity.variant.VafPeakModel.initialiseSomaticPeakWriter;
@@ -168,11 +169,11 @@ public class ResultsWriter
             return format("%4.3e", probability);
     }
 
-    public static String formatDetectionResult(double estimatedPurity, double limitOfDetection)
+    public static DetectionResult formatDetectionResult(double estimatedPurity, double limitOfDetection)
     {
-        if(limitOfDetection >= 1)
-            return "NA";
+        if(limitOfDetection >= 1 || limitOfDetection == CALC_NO_SET)
+            return DetectionResult.NA;
 
-        return estimatedPurity > limitOfDetection ? "TRUE" : "FALSE";
+        return estimatedPurity > limitOfDetection ? DetectionResult.TRUE : DetectionResult.FALSE;
     }
 }

@@ -6,6 +6,7 @@ import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 import static com.hartwig.hmftools.esvee.prep.SpanningReadCache.formChromosomePartition;
 import static com.hartwig.hmftools.esvee.prep.types.ReadFilterType.SOFT_CLIP_LOW_BASE_QUAL;
 import static com.hartwig.hmftools.esvee.prep.types.ReadType.CANDIDATE_SUPPORT;
+import static com.hartwig.hmftools.esvee.prep.types.ReadType.NO_SUPPORT;
 import static com.hartwig.hmftools.esvee.prep.types.ReadType.SUPPORT;
 
 import java.util.Comparator;
@@ -132,7 +133,7 @@ public class ReadGroup
         return mReads.size() == 2 && mReads.stream().allMatch(x -> !x.hasSuppAlignment() && !x.isSupplementaryAlignment());
     }
 
-    public boolean allNoSupport() { return mReads.stream().allMatch(x -> x.readType() == ReadType.NO_SUPPORT); }
+    public boolean allNoSupport() { return mReads.stream().allMatch(x -> x.readType() == NO_SUPPORT); }
 
     public boolean hasReadType(final ReadType type) { return mReads.stream().anyMatch(x -> x.readType() == type); }
 
@@ -142,10 +143,13 @@ public class ReadGroup
     {
         if(conditionalOnRemoteReads())
         {
-            if(mReads.size() == 2)
-                mStatus = ReadGroupStatus.PAIRED;
-            else
-                mStatus = ReadGroupStatus.SUPPLEMENTARY;
+            if(mStatus != ReadGroupStatus.EXPECTED)
+            {
+                if(mReads.size() == 2)
+                    mStatus = ReadGroupStatus.PAIRED;
+                else
+                    mStatus = ReadGroupStatus.SUPPLEMENTARY;
+            }
 
             mExpectedReadCount = mReads.size();
             return;
@@ -189,12 +193,13 @@ public class ReadGroup
     public boolean conditionalOnRemoteReads()
     {
         // a candidate or supporting SC low-qual read needs to check that its remote mate read supports a junction
-        // and for supplementaries needs to check the the remote mate read(s) aren't duplicates
+        // and for supplementaries needs to check that the remote mate read(s) aren't duplicates
         // an exception is where a supplementary supporting a junction is paired with a non-supp candidate
         if(mReads.stream().allMatch(x -> x.isSupplementaryAlignment()))
             return true;
 
         if(mReads.stream().allMatch(x -> x.readType() == CANDIDATE_SUPPORT
+        || x.readType() == NO_SUPPORT
         || x.isUnmapped()
         || (x.readType() == SUPPORT && ReadFilterType.isSet(x.filters(), SOFT_CLIP_LOW_BASE_QUAL))))
         {
@@ -244,7 +249,7 @@ public class ReadGroup
             if(read.isSupplementaryAlignment() != otherRead.isSupplementaryAlignment())
                 continue;
 
-            if(read.MateChromosome.equals(otherRead.Chromosome) && read.MatePosStart == otherRead.start())
+            if(read.MateChromosome.equals(otherRead.Chromosome) && read.MatePosStart == otherRead.AlignmentStart)
                 return true;
         }
 
@@ -254,7 +259,7 @@ public class ReadGroup
     public String toString()
     {
         return format("reads(%d) initRead(%s:%d-%d) id(%s) partitions(%d) state(%s)",
-                mReads.size(), mReads.get(0).Chromosome, mReads.get(0).start(), mReads.get(0).end(), id(), partitionCount(), mStatus);
+                mReads.size(), mReads.get(0).Chromosome, mReads.get(0).AlignmentStart, mReads.get(0).AlignmentEnd, id(), partitionCount(), mStatus);
     }
 
     private static boolean supplementaryInRegion(final SupplementaryReadData suppData, final ChrBaseRegion region)
@@ -278,7 +283,7 @@ public class ReadGroup
     {
         public int compare(final ReadGroup first, final ReadGroup second)
         {
-            return first.reads().get(0).start() - second.reads().get(0).start();
+            return first.reads().get(0).AlignmentStart - second.reads().get(0).AlignmentStart;
         }
     }
 }

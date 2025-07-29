@@ -1,7 +1,9 @@
 package com.hartwig.hmftools.compar.mutation;
 
-import static com.hartwig.hmftools.compar.common.MismatchType.NEW_ONLY;
-import static com.hartwig.hmftools.compar.common.MismatchType.REF_ONLY;
+import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_AF;
+import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_VARIANT_CN;
+import static com.hartwig.hmftools.compar.common.CommonUtils.createMismatchFromDiffs;
+
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.common.variant.CodingEffect.UNDEFINED;
@@ -14,10 +16,10 @@ import static com.hartwig.hmftools.common.variant.impact.VariantImpactSerialiser
 import static com.hartwig.hmftools.compar.common.Category.SOMATIC_VARIANT;
 import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_QUAL;
 import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_REPORTED;
+import static com.hartwig.hmftools.compar.common.CommonUtils.determineComparisonGenomePosition;
 import static com.hartwig.hmftools.compar.common.DiffFunctions.FILTER_DIFF;
 import static com.hartwig.hmftools.compar.common.DiffFunctions.checkDiff;
 import static com.hartwig.hmftools.compar.common.DiffFunctions.checkFilterDiffs;
-import static com.hartwig.hmftools.compar.common.MismatchType.VALUE;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_BIALLELIC;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_CANON_EFFECT;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_CODING_EFFECT;
@@ -26,7 +28,11 @@ import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_HGVS_CODING
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_HGVS_PROTEIN;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_HOTSPOT;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_OTHER_REPORTED;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_PURITY_ADJUSTED_VAF;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_TIER;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_TUMOR_SUPPORTING_READ_COUNT;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_TUMOR_TOTAL_READ_COUNT;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_VARIANT_COPY_NUMBER;
 import static com.hartwig.hmftools.patientdb.database.hmfpatients.Tables.SOMATICVARIANT;
 
 import java.util.Arrays;
@@ -35,12 +41,15 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.region.BasePosition;
+import com.hartwig.hmftools.common.variant.AllelicDepth;
 import com.hartwig.hmftools.common.variant.CodingEffect;
 import com.hartwig.hmftools.common.variant.Hotspot;
 import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.common.variant.VariantType;
 import com.hartwig.hmftools.common.variant.impact.VariantImpact;
 import com.hartwig.hmftools.common.variant.impact.VariantImpactSerialiser;
+import com.hartwig.hmftools.compar.ComparConfig;
 import com.hartwig.hmftools.compar.common.Category;
 import com.hartwig.hmftools.compar.ComparableItem;
 import com.hartwig.hmftools.compar.common.DiffThresholds;
@@ -75,9 +84,14 @@ public class SomaticVariantData implements ComparableItem
     public final int Qual;
     public final double SubclonalLikelihood;
     public final Set<String> Filters;
-
-    private String mComparisonChromosome;
-    private int mComparisonPosition;
+    public final double VariantCopyNumber;
+    public final double PurityAdjustedVaf;
+    public final int TumorSupportingReadCount;
+    public final int TumorTotalReadCount;
+    public final boolean IsFromUnfilteredVcf;
+    public final boolean HasPurpleAnnotation;
+    public final String mComparisonChromosome;
+    public final int mComparisonPosition;
 
     protected static final String FLD_SUBCLONAL_LIKELIHOOD = "SubclonalLikelihood";
     protected static final String FLD_LPS = "HasLPS";
@@ -89,7 +103,9 @@ public class SomaticVariantData implements ComparableItem
             final String gene, final boolean reported, final Hotspot hotspotStatus, final VariantTier tier, final boolean biallelic,
             final String canonicalEffect, final String canonicalCodingEffect, final String canonicalHgvsCodingImpact,
             final String canonicalHgvsProteinImpact, final String otherReportedEffects, final boolean hasLPS, final int qual,
-            final double subclonalLikelihood, final Set<String> filters)
+            final double subclonalLikelihood, final Set<String> filters, final double variantCopyNumber, final double purityAdjustedVaf,
+            final int tumorSupportingReadCount, final int tumorTotalReadCount, final boolean isFromUnfilteredVcf,
+            final boolean hasPurpleAnnotation, final String comparisonChromosome, final int comparisonPosition)
     {
         Chromosome = chromosome;
         Position = position;
@@ -110,9 +126,14 @@ public class SomaticVariantData implements ComparableItem
         Qual = qual;
         SubclonalLikelihood = subclonalLikelihood;
         Filters = filters;
-
-        mComparisonChromosome = chromosome;
-        mComparisonPosition = position;
+        VariantCopyNumber = variantCopyNumber;
+        PurityAdjustedVaf = purityAdjustedVaf;
+        TumorSupportingReadCount = tumorSupportingReadCount;
+        TumorTotalReadCount = tumorTotalReadCount;
+        IsFromUnfilteredVcf = isFromUnfilteredVcf;
+        HasPurpleAnnotation = hasPurpleAnnotation;
+        mComparisonChromosome = comparisonChromosome;
+        mComparisonPosition = comparisonPosition;
     }
 
     @Override
@@ -142,6 +163,10 @@ public class SomaticVariantData implements ComparableItem
         values.add(format("%s", CanonicalHgvsProteinImpact));
         values.add(format("%s", OtherReportedEffects));
         values.add(format("%d", Qual));
+        values.add(format("%.2f", VariantCopyNumber));
+        values.add(format("%.2f", PurityAdjustedVaf));
+        values.add(String.format("%d", TumorSupportingReadCount));
+        values.add(String.format("%d", TumorTotalReadCount));
 
         values.add(format("%.2f", SubclonalLikelihood));
         values.add(format("%s", HasLPS));
@@ -150,7 +175,15 @@ public class SomaticVariantData implements ComparableItem
     }
 
     @Override
-    public boolean reportable() { return Reported; }
+    public boolean reportable() {
+        return !IsFromUnfilteredVcf && Reported;
+    }
+
+    @Override
+    public boolean isPass() {
+        // A reportable variant not in a gene should be impossible, but if it happens we want to see it
+        return !IsFromUnfilteredVcf && (Reported || !Gene.isEmpty());
+    }
 
     @Override
     public boolean matches(final ComparableItem other)
@@ -172,23 +205,17 @@ public class SomaticVariantData implements ComparableItem
     public String comparisonChromosome() { return mComparisonChromosome; }
     public int comparisonPosition() { return mComparisonPosition; }
 
-    public void setComparisonCoordinates(final String chromosome, final int position)
-    {
-        mComparisonChromosome = chromosome;
-        mComparisonPosition = position;
-    }
-
     @Override
-    public Mismatch findMismatch(final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds)
-    {
-        return findDiffs(other, thresholds, MatchFilterStatus.BOTH_UNFILTERED, false);
-    }
-
-    protected Mismatch findDiffs(
-            final ComparableItem other, final DiffThresholds thresholds, MatchFilterStatus matchFilterStatus, boolean nonPurple)
+    public Mismatch findMismatch(final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds,
+            final boolean includeMatches)
     {
         final SomaticVariantData otherVar = (SomaticVariantData) other;
+        final List<String> diffs = findDiffs(otherVar, thresholds);
+        return createMismatchFromDiffs(this, other, diffs, matchLevel, includeMatches);
+    }
 
+    private List<String> findDiffs(final SomaticVariantData otherVar, final DiffThresholds thresholds)
+    {
         final List<String> diffs = Lists.newArrayList();
 
         if(Qual != NO_QUAL_PRESENT && otherVar.Qual != NO_QUAL_PRESENT)
@@ -196,8 +223,10 @@ public class SomaticVariantData implements ComparableItem
 
         checkDiff(diffs, FLD_REPORTED, Reported, otherVar.Reported);
         checkDiff(diffs, FLD_TIER, Tier.toString(), otherVar.Tier.toString());
+        checkDiff(diffs, FLD_TUMOR_SUPPORTING_READ_COUNT, TumorSupportingReadCount, otherVar.TumorSupportingReadCount, thresholds);
+        checkDiff(diffs, FLD_TUMOR_TOTAL_READ_COUNT, TumorTotalReadCount, otherVar.TumorTotalReadCount, thresholds);
 
-        if(matchFilterStatus.canComparePurpleFields())
+        if(canComparePaveFields(otherVar))
         {
             // assumes Pave annotated - could possibly check VCF for presence of tags
             checkDiff(diffs, FLD_GENE, Gene, otherVar.Gene);
@@ -207,12 +236,14 @@ public class SomaticVariantData implements ComparableItem
             checkDiff(diffs, FLD_HGVS_PROTEIN, CanonicalHgvsProteinImpact, otherVar.CanonicalHgvsProteinImpact);
         }
 
-        if(matchFilterStatus.canComparePurpleFields() && !nonPurple)
+        if(canComparePurpleFields(otherVar))
         {
             checkDiff(diffs, FLD_HOTSPOT, HotspotStatus.toString(), otherVar.HotspotStatus.toString());
             checkDiff(diffs, FLD_BIALLELIC, Biallelic, otherVar.Biallelic);
             checkDiff(diffs, FLD_OTHER_REPORTED, OtherReportedEffects, otherVar.OtherReportedEffects);
             checkDiff(diffs, FLD_SUBCLONAL_LIKELIHOOD, SubclonalLikelihood, otherVar.SubclonalLikelihood, thresholds);
+            checkDiff(diffs, FLD_VARIANT_COPY_NUMBER, VariantCopyNumber, otherVar.VariantCopyNumber, thresholds);
+            checkDiff(diffs, FLD_PURITY_ADJUSTED_VAF, PurityAdjustedVaf, otherVar.PurityAdjustedVaf, thresholds);
         }
 
         checkDiff(diffs, FLD_LPS, HasLPS, otherVar.HasLPS);
@@ -223,25 +254,26 @@ public class SomaticVariantData implements ComparableItem
         if(Filters.isEmpty() && otherVar.Filters.isEmpty() && !diffs.contains(FILTER_DIFF))
         {
             // if ones side is filtered, suggests was filtered downstream of Sage (eg Pave or Purple) so indicate this
-            if(matchFilterStatus == MatchFilterStatus.REF_FILTERED)
+            if(IsFromUnfilteredVcf && !otherVar.IsFromUnfilteredVcf)
                 diffs.add(format("%s(%s/%s)", FILTER_DIFF, "FILTERED", PASS));
-            else if(matchFilterStatus == MatchFilterStatus.NEW_FILTERED)
+            else if(!IsFromUnfilteredVcf && otherVar.IsFromUnfilteredVcf)
                 diffs.add(format("%s(%s/%s)", FILTER_DIFF, PASS, "FILTERED"));
         }
-
-        if(diffs.isEmpty())
-            return null;
-        else if(matchFilterStatus == MatchFilterStatus.BOTH_UNFILTERED)
-            return new Mismatch(this, other, VALUE, diffs);
-        else if(matchFilterStatus == MatchFilterStatus.REF_FILTERED)
-            return new Mismatch(this, other, NEW_ONLY, diffs);
-        else if(matchFilterStatus == MatchFilterStatus.NEW_FILTERED)
-            return new Mismatch(this, other, REF_ONLY, diffs);
-        else
-            throw new RuntimeException(String.format("Unrecognized value for MatchFilterStatus: %s", matchFilterStatus));
+        return diffs;
     }
 
-    public static SomaticVariantData fromContext(final VariantContext context)
+    private boolean canComparePaveFields(final SomaticVariantData otherVar)
+    {
+        return !IsFromUnfilteredVcf && !otherVar.IsFromUnfilteredVcf;
+    }
+
+    private boolean canComparePurpleFields(final SomaticVariantData otherVar)
+    {
+        return HasPurpleAnnotation && otherVar.HasPurpleAnnotation;
+    }
+
+    public static SomaticVariantData fromContext(final VariantContext context, final String sampleId, final boolean fromUnfilteredFile,
+            final boolean hasPurpleAnnotation, String sourceName, ComparConfig config)
     {
         int position = context.getStart();
         String chromosome = context.getContig();
@@ -249,12 +281,15 @@ public class SomaticVariantData implements ComparableItem
         String alt = !context.getAlternateAlleles().isEmpty() ? context.getAlternateAlleles().get(0).toString() : ref;
 
         VariantImpact variantImpact;
-
         if(context.hasAttribute(VAR_IMPACT))
             variantImpact = VariantImpactSerialiser.fromVariantContext(context);
         else
             variantImpact = fromSnpEffAttributes(context);
 
+        BasePosition comparisonPosition = determineComparisonGenomePosition(
+                chromosome, position, sourceName, config.RequiresLiftover, config.LiftoverCache);
+
+        var tumorAllelicDepth = AllelicDepth.fromGenotype(context.getGenotype(sampleId));
         return new SomaticVariantData(
                 chromosome, position, ref, alt, VariantType.type(context),
                 variantImpact.GeneName,
@@ -270,18 +305,33 @@ public class SomaticVariantData implements ComparableItem
                 context.hasAttribute(LOCAL_PHASE_SET),
                 (int)context.getPhredScaledQual(),
                 context.getAttributeAsDouble(SUBCLONAL_LIKELIHOOD_FLAG, 0),
-                context.getFilters());
+                context.getFilters(),
+                context.getAttributeAsDouble(PURPLE_VARIANT_CN, 0),
+                context.getAttributeAsDouble(PURPLE_AF, 0),
+                tumorAllelicDepth.AlleleReadCount,
+                tumorAllelicDepth.TotalReadCount,
+                fromUnfilteredFile,
+                hasPurpleAnnotation,
+                comparisonPosition.Chromosome,
+                comparisonPosition.Position
+        );
     }
 
-    public static SomaticVariantData fromRecord(final Record record)
+    public static SomaticVariantData fromRecord(final Record record, final String sourceName, final ComparConfig config)
     {
         Set<String> filters = Arrays.stream(record.getValue(SOMATICVARIANT.FILTER).split(";", -1)).collect(Collectors.toSet());
         String localPhaseSets = record.get(SOMATICVARIANT.LOCALPHASESET);
         double qual = record.getValue(Tables.SOMATICVARIANT.QUAL);
 
+        var chromosome = record.getValue(SOMATICVARIANT.CHROMOSOME);
+        var position = record.getValue(SOMATICVARIANT.POSITION);
+
+        BasePosition comparisonPosition = determineComparisonGenomePosition(
+                chromosome, position, sourceName, config.RequiresLiftover, config.LiftoverCache);
+
         return new SomaticVariantData(
-                record.getValue(Tables.SOMATICVARIANT.CHROMOSOME),
-                record.getValue(Tables.SOMATICVARIANT.POSITION),
+                chromosome,
+                position,
                 record.getValue(Tables.SOMATICVARIANT.REF),
                 record.getValue(Tables.SOMATICVARIANT.ALT),
                 VariantType.valueOf(record.getValue(SOMATICVARIANT.TYPE)),
@@ -297,7 +347,15 @@ public class SomaticVariantData implements ComparableItem
                 record.getValue(SOMATICVARIANT.OTHERTRANSCRIPTEFFECTS),
                 localPhaseSets != null && !localPhaseSets.isEmpty(),
                 (int)qual, record.getValue(SOMATICVARIANT.SUBCLONALLIKELIHOOD),
-                filters);
+                filters,
+                record.getValue(SOMATICVARIANT.VARIANTCOPYNUMBER),
+                record.getValue(SOMATICVARIANT.ADJUSTEDVAF),
+                record.getValue(SOMATICVARIANT.ALLELEREADCOUNT),
+                record.getValue(SOMATICVARIANT.TOTALREADCOUNT),
+                false,
+                true,
+                comparisonPosition.Chromosome,
+                comparisonPosition.Position);
     }
 
     private static final String SNPEFF_WORST = "SEW";

@@ -1,13 +1,15 @@
 package com.hartwig.hmftools.linx;
 
-import static com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL_OPTION;
-import static com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL_OPTION_DESC;
-import static com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanelConfig.loadDriverGenes;
+import static com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL;
+import static com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL_DESC;
+import static com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig.loadDriverGenes;
 import static com.hartwig.hmftools.common.fusion.KnownFusionCache.KNOWN_FUSIONS_FILE;
-import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.REF_GENOME_VERSION_CFG_DESC;
+import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.addRefGenomeVersion;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.V37;
 import static com.hartwig.hmftools.common.purple.PurpleCommon.PURPLE_SV_GERMLINE_VCF_SUFFIX;
 import static com.hartwig.hmftools.common.purple.PurpleCommon.PURPLE_SV_VCF_SUFFIX;
+import static com.hartwig.hmftools.common.utils.config.CommonConfig.PERF_DEBUG;
+import static com.hartwig.hmftools.common.utils.config.CommonConfig.PERF_DEBUG_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.PURPLE_DIR_CFG;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.PURPLE_DIR_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE_DATA_DIR_CFG;
@@ -23,8 +25,8 @@ import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.OUTPUT_DIR;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.addOutputDir;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDirSeparator;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.parseOutputDir;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.addThreadOptions;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.parseThreads;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.addThreadOptions;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.parseThreads;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.loadSampleIdsFile;
 import static com.hartwig.hmftools.linx.types.LinxConstants.DEFAULT_PROXIMITY_DISTANCE;
 
@@ -32,7 +34,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGene;
+import com.hartwig.hmftools.common.driver.panel.DriverGene;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.purple.PurpleCommon;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
@@ -69,6 +71,7 @@ public class LinxConfig
     public final boolean RunFusions;
     public final boolean RunDrivers;
     public final boolean FailOnMissing;
+    public final boolean PerfDebug;
 
     public final int Threads;
 
@@ -95,7 +98,6 @@ public class LinxConfig
     // global Linx logger
     public static final Logger LNX_LOGGER = LogManager.getLogger(LinxConfig.class);
 
-    // TODO: set by config, try to only use from Linx Config or pass where required
     public static RefGenomeVersion REF_GENOME_VERSION = V37;
 
     public LinxConfig(final ConfigBuilder configBuilder)
@@ -148,7 +150,7 @@ public class LinxConfig
         Output = new LinxOutput(configBuilder, isSingleSample() && !IsGermline);
 
         RefGenVersion = RefGenomeVersion.from(configBuilder);
-        REF_GENOME_VERSION = RefGenVersion; // see TODO above
+        REF_GENOME_VERSION = RefGenVersion;
 
         ProximityDistance = configBuilder.getInteger(CLUSTER_BASE_DISTANCE);
 
@@ -163,6 +165,7 @@ public class LinxConfig
 
         LogVerbose = configBuilder.hasFlag(LOG_VERBOSE);
         Threads = parseThreads(configBuilder);
+        PerfDebug = configBuilder.hasFlag(PERF_DEBUG);
 
         ChainingSvLimit = configBuilder.getInteger(CHAINING_SV_LIMIT);
 
@@ -178,6 +181,8 @@ public class LinxConfig
     public final List<String> getSampleIds() { return mSampleIds; }
     public boolean hasMultipleSamples() { return mSampleIds.size() > 1; }
     public boolean isSingleSample() { return mSampleIds.size() == 1; }
+
+    public boolean isSomatic() { return !IsGermline; }
 
     private void setSamplesFromConfig(final ConfigBuilder configBuilder)
     {
@@ -247,6 +252,7 @@ public class LinxConfig
         RunFusions = true;
         FailOnMissing = false;
         Threads = 0;
+        PerfDebug = false;
     }
 
     public static void addConfig(final ConfigBuilder configBuilder)
@@ -255,9 +261,10 @@ public class LinxConfig
         configBuilder.addConfigItem(SAMPLE_ID_FILE, false, SAMPLE_ID_FILE_DESC);
         configBuilder.addConfigItem(PURPLE_DIR_CFG, PURPLE_DIR_DESC);
         configBuilder.addConfigItem(SAMPLE_DATA_DIR_CFG, SAMPLE_DATA_DIR_DESC);
-        configBuilder.addConfigItem(RefGenomeVersion.REF_GENOME_VERSION, REF_GENOME_VERSION_CFG_DESC);
+        addRefGenomeVersion(configBuilder);
+
         configBuilder.addConfigItem(VCF_FILE, "Path to the PURPLE structural variant VCF file");
-        configBuilder.addPath(DRIVER_GENE_PANEL_OPTION, false, DRIVER_GENE_PANEL_OPTION_DESC);
+        configBuilder.addPath(DRIVER_GENE_PANEL, false, DRIVER_GENE_PANEL_DESC);
         configBuilder.addPath(LINE_ELEMENT_FILE, false, "Line elements file");
         configBuilder.addPath(FRAGILE_SITE_FILE, false, "Fragile site file");
         configBuilder.addFlag(GERMLINE, "Process germline SVs");
@@ -270,6 +277,7 @@ public class LinxConfig
 
         LinxOutput.addConfig(configBuilder);
         configBuilder.addFlag(FAIL_ON_MISSING_SAMPLE, "Failing all processing in batch mode if any sample is missing");
+        configBuilder.addFlag(PERF_DEBUG, PERF_DEBUG_DESC);
         configBuilder.addFlag(LOG_VERBOSE, "Log extra detail");
         addOutputDir(configBuilder);
         addThreadOptions(configBuilder);

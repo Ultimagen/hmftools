@@ -11,15 +11,16 @@ import java.util.StringJoiner;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.hartwig.hmftools.common.drivercatalog.DriverCatalog;
-import com.hartwig.hmftools.common.drivercatalog.DriverImpact;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanel;
-import com.hartwig.hmftools.common.drivercatalog.panel.ReportablePredicate;
+import com.hartwig.hmftools.common.driver.DriverCatalog;
+import com.hartwig.hmftools.common.driver.DriverImpact;
+import com.hartwig.hmftools.common.driver.panel.DriverGenePanel;
+import com.hartwig.hmftools.common.driver.panel.ReportablePredicate;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
 import com.hartwig.hmftools.common.variant.CodingEffect;
 import com.hartwig.hmftools.common.variant.VariantType;
 import com.hartwig.hmftools.common.variant.impact.AltTranscriptReportableInfo;
 import com.hartwig.hmftools.common.variant.impact.VariantImpact;
+import com.hartwig.hmftools.purple.DriverSourceData;
 import com.hartwig.hmftools.purple.somatic.SomaticVariant;
 
 import htsjdk.variant.variantcontext.VariantContext;
@@ -81,7 +82,7 @@ public class SomaticVariantDrivers
 
     protected static boolean isReportable(final ReportablePredicate predicate, final SomaticVariant variant)
     {
-        return predicate.isReportable(variant.variantImpact(), variant.type(), variant.decorator().repeatCount(), variant.isHotspot());
+        return predicate.isReportable(variant.variantImpact(), variant.type(), variant.isHotspot());
     }
 
     public static boolean hasTranscriptCodingEffect(final VariantImpact variantImpact, final VariantType variantType, final String transcript)
@@ -149,12 +150,12 @@ public class SomaticVariantDrivers
         variantContext.getCommonInfo().putAttribute(REPORTABLE_TRANSCRIPTS, reportableTranscripts.toString());
     }
 
-    public List<DriverCatalog> buildCatalog(final Map<String,List<GeneCopyNumber>> geneCopyNumberMap)
+    public List<DriverCatalog> buildCatalog(final Map<String,List<GeneCopyNumber>> geneCopyNumberMap, final List<DriverSourceData> driverSourceData)
     {
         final List<DriverCatalog> result = Lists.newArrayList();
 
-        result.addAll(mOncoDrivers.findDrivers(geneCopyNumberMap, mVariantTypeCounts, mVariantTypeCountsBiallelic));
-        result.addAll(mTsgDrivers.findDrivers(geneCopyNumberMap, mVariantTypeCounts, mVariantTypeCountsBiallelic));
+        result.addAll(mOncoDrivers.findDrivers(geneCopyNumberMap, mVariantTypeCounts, mVariantTypeCountsBiallelic, driverSourceData));
+        result.addAll(mTsgDrivers.findDrivers(geneCopyNumberMap, mVariantTypeCounts, mVariantTypeCountsBiallelic, driverSourceData));
 
         return result;
     }

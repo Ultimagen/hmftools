@@ -53,7 +53,7 @@ public class FragileSiteAnnotator
             }
 
             mFragileSites.addAll(loadConfigFile(fileContents, REF_GENOME_VERSION));
-            LNX_LOGGER.info("loaded {} known fragile sites", mFragileSites.size());
+            LNX_LOGGER.debug("loaded {} known fragile sites", mFragileSites.size());
         }
         catch(IOException e)
         {
@@ -70,7 +70,7 @@ public class FragileSiteAnnotator
         {
             if(fsRegion.containsPosition(svData.chromosome(useStart), svData.position(useStart)))
             {
-                LNX_LOGGER.debug("var({}) found in known fragile site({})", svData.posId(), fsRegion);
+                LNX_LOGGER.trace("var({}) found in known fragile site({})", svData.posId(), fsRegion);
                 return true;
             }
         }

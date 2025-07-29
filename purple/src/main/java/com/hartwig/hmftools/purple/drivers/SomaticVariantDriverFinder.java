@@ -6,15 +6,16 @@ import java.util.List;
 import java.util.Map;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.drivercatalog.DriverCatalog;
-import com.hartwig.hmftools.common.drivercatalog.DriverCategory;
-import com.hartwig.hmftools.common.drivercatalog.dnds.DndsDriverGeneLikelihood;
-import com.hartwig.hmftools.common.drivercatalog.dnds.ImmutableDndsDriverGeneLikelihood;
-import com.hartwig.hmftools.common.drivercatalog.dnds.ImmutableDndsDriverImpactLikelihood;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanel;
-import com.hartwig.hmftools.common.drivercatalog.panel.ReportablePredicate;
+import com.hartwig.hmftools.common.driver.DriverCatalog;
+import com.hartwig.hmftools.common.driver.DriverCategory;
+import com.hartwig.hmftools.common.driver.dnds.DndsDriverGeneLikelihood;
+import com.hartwig.hmftools.common.driver.dnds.ImmutableDndsDriverGeneLikelihood;
+import com.hartwig.hmftools.common.driver.dnds.ImmutableDndsDriverImpactLikelihood;
+import com.hartwig.hmftools.common.driver.panel.DriverGenePanel;
+import com.hartwig.hmftools.common.driver.panel.ReportablePredicate;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
 import com.hartwig.hmftools.common.variant.VariantType;
+import com.hartwig.hmftools.purple.DriverSourceData;
 import com.hartwig.hmftools.purple.somatic.SomaticVariant;
 
 public abstract class SomaticVariantDriverFinder
@@ -56,5 +57,5 @@ public abstract class SomaticVariantDriverFinder
 
     public abstract List<DriverCatalog> findDrivers(
             final Map<String,List<GeneCopyNumber>> geneCopyNumberMap, final Map<VariantType,Integer> variantTypeCounts,
-            final Map<VariantType,Integer> variantTypeCountsBiallelic);
+            final Map<VariantType,Integer> variantTypeCountsBiallelic, final List<DriverSourceData> driverSourceData);
 }

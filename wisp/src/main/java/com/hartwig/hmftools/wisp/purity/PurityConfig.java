@@ -21,17 +21,22 @@ import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.OUTPUT_DIR;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.OUTPUT_ID;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.addOutputOptions;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDirSeparator;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.addThreadOptions;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.parseThreads;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.addThreadOptions;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.parseThreads;
+import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.pathFromFile;
 import static com.hartwig.hmftools.wisp.common.CommonUtils.CT_LOGGER;
 import static com.hartwig.hmftools.wisp.purity.PurityConstants.DEFAULT_BQR_MIN_QUAL;
 import static com.hartwig.hmftools.wisp.purity.SampleData.sampleIdsFromStr;
 import static com.hartwig.hmftools.wisp.purity.PurityConstants.DEFAULT_NOISE_READS_PER_MILLION;
 import static com.hartwig.hmftools.wisp.purity.PurityConstants.DEFAULT_NOISE_READS_PER_MILLION_DUAL_STRAND;
+import static com.hartwig.hmftools.wisp.purity.WriteType.CN_WRITE_TYPES;
+import static com.hartwig.hmftools.wisp.purity.WriteType.LOH_WRITE_TYPES;
+import static com.hartwig.hmftools.wisp.purity.WriteType.SOMATIC_WRITE_TYPES;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -40,6 +45,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
+import com.hartwig.hmftools.common.variant.SimpleVariant;
 import com.hartwig.hmftools.wisp.purity.variant.ProbeVariantCache;
 
 public class PurityConfig
@@ -57,6 +63,7 @@ public class PurityConfig
     public final String AmberDir;
     public final String CobaltDir;
     public final String FragmentLengthDir;
+    public final List<SimpleVariant> ExcludedSomatics;
 
     public final ProbeVariantCache ProbeVariants;
 
@@ -70,6 +77,7 @@ public class PurityConfig
     public final double GcRatioMin;
     public final int BqrQualThreshold;
     public final boolean SkipSubclonalFilter;
+    public final boolean ApplyRefVariantFilters;
     public final boolean WriteAllSummaryMethods;
     public final boolean AllowMissingSamples;
     public final boolean DisableDualFragments;
@@ -77,6 +85,7 @@ public class PurityConfig
 
     private static final String PATIENT_ID = "patient_id";
     private static final String TUMOR_ID = "tumor_id";
+    private static final String REFERENCE_ID = "reference_id";
     private static final String AMBER_EXTRA_TUMOR_ID = "amber_extra_tumor_id";
     private static final String SAMPLES = "samples";
     private static final String PURITY_METHODS = "purity_methods";
@@ -94,8 +103,10 @@ public class PurityConfig
     private static final String PROBE_VARIANTS_FILE = "probe_variants_file";
     private static final String BQR_QUAL_THRESHOLD = "bqr_qual_threshold";
     private static final String SKIP_SUBCLONAL_FILTER = "skip_subclonal_filter";
+    private static final String APPLY_REF_VARIANT_FILTERS = "apply_ref_variant_filters";
     private static final String ALLOW_MISSING_SAMPLES = "allow_missing_samples";
     private static final String DISABLE_DUAL_FRAGS = "disable_dual_frags";
+    private static final String EXCLUDED_SOMATICS_FILE = "excluded_somatics";
 
     public PurityConfig(final ConfigBuilder configBuilder)
     {
@@ -119,7 +130,20 @@ public class PurityConfig
         }
 
         SomaticVcf = configBuilder.getValue(SOMATIC_VCF);
-        SomaticDir = checkAddDirSeparator(configBuilder.getValue(SOMATIC_DIR, SampleDataDir));
+
+        if(configBuilder.hasValue(SOMATIC_DIR))
+        {
+            SomaticDir = checkAddDirSeparator(configBuilder.getValue(SOMATIC_DIR));
+        }
+        else if(SampleDataDir != null)
+        {
+            SomaticDir = SampleDataDir;
+        }
+        else
+        {
+            SomaticDir = pathFromFile(SomaticVcf);
+        }
+
         PurpleDir = checkAddDirSeparator(configBuilder.getValue(PURPLE_DIR_CFG, SampleDataDir));
         AmberDir = checkAddDirSeparator(configBuilder.getValue(AMBER_DIR_CFG, SampleDataDir));
         CobaltDir = checkAddDirSeparator(configBuilder.getValue(COBALT_DIR_CFG, SampleDataDir));
@@ -142,6 +166,7 @@ public class PurityConfig
         BqrQualThreshold = configBuilder.getInteger(BQR_QUAL_THRESHOLD);
         SkipBqr = configBuilder.hasFlag(SKIP_BQR);
         SkipSubclonalFilter = configBuilder.hasFlag(SKIP_SUBCLONAL_FILTER);
+        ApplyRefVariantFilters = configBuilder.hasFlag(APPLY_REF_VARIANT_FILTERS);
         AllowMissingSamples = configBuilder.hasFlag(ALLOW_MISSING_SAMPLES);
         DisableDualFragments = configBuilder.hasFlag(DISABLE_DUAL_FRAGS);
 
@@ -152,9 +177,20 @@ public class PurityConfig
             String writeTypes = configBuilder.getValue(WRITE_TYPES);
 
             if(writeTypes.equals(WriteType.ALL))
-                Arrays.stream(WriteType.values()).forEach(x -> WriteTypes.add(x));
+            {
+                if(PurityMethods.contains(PurityMethod.SOMATIC_VARIANT))
+                    WriteTypes.addAll(SOMATIC_WRITE_TYPES);
+
+                if(PurityMethods.contains(PurityMethod.COPY_NUMBER))
+                    WriteTypes.addAll(CN_WRITE_TYPES);
+
+                if(PurityMethods.contains(PurityMethod.AMBER_LOH))
+                    WriteTypes.addAll(LOH_WRITE_TYPES);
+            }
             else
+            {
                 Arrays.stream(writeTypes.split(ITEM_DELIM, -1)).forEach(x -> WriteTypes.add(WriteType.valueOf(x)));
+            }
         }
 
         WriteAllSummaryMethods = configBuilder.hasFlag(WRITE_ALL_SUMMARY_METHODS);
@@ -178,14 +214,33 @@ public class PurityConfig
         }
 
         Threads = parseThreads(configBuilder);
-    }
 
+        if(configBuilder.hasValue(EXCLUDED_SOMATICS_FILE))
+        {
+            ExcludedSomatics = Lists.newArrayList();
+
+            try
+            {
+                ExcludedSomatics.addAll(SimpleVariant.loadSimpleVariants(configBuilder.getValue(EXCLUDED_SOMATICS_FILE)));
+            }
+            catch(Exception e)
+            {
+                CT_LOGGER.error("failed to load excluded variants: {}", e.toString());
+                System.exit(1);
+            }
+
+            CT_LOGGER.info("excluding {} somatic variants", ExcludedSomatics.size());
+        }
+        else
+        {
+            ExcludedSomatics = Collections.emptyList();
+        }
+    }
 
     public boolean writeType(final WriteType writeType) { return WriteTypes.contains(writeType); }
     public boolean hasSyntheticTumor() { return PurpleDir == null || PurpleDir.isEmpty(); }
     public boolean multiplePatients() { return Samples.size() > 1; }
     public boolean multipleSamples() { return multiplePatients() || Samples.stream().mapToInt(x -> x.SampleIds.size()).sum() > 1; }
-    public boolean hasBatchControls() { return Samples.stream().anyMatch(x -> x.isBatchControl()); }
 
     public String getPurpleDir(final String sampleId) { return convertWildcardSamplePath(PurpleDir, sampleId); }
     public String getAmberDir(final String sampleId) { return convertWildcardSamplePath(AmberDir, sampleId); }
@@ -218,6 +273,7 @@ public class PurityConfig
             Samples.add(new SampleData(
                     configBuilder.getValue(PATIENT_ID),
                     configBuilder.getValue(TUMOR_ID),
+                    configBuilder.getValue(REFERENCE_ID),
                     sampleIdsFromStr(configBuilder.getValue(SAMPLES)),
                     "", GcRatioMin > 0,
                     configBuilder.getValue(AMBER_EXTRA_TUMOR_ID)));
@@ -256,9 +312,10 @@ public class PurityConfig
 
     public static void addConfig(final ConfigBuilder configBuilder)
     {
-        configBuilder.addConfigItem(SAMPLE_ID_FILE, false, "Patient and sample data file: PatientId,TumorId,SampleIds");
+        configBuilder.addConfigItem(SAMPLE_ID_FILE, false, "Patient and sample data file: PatientId,TumorId,ReferenceId,SampleIds");
         configBuilder.addConfigItem(PATIENT_ID, false, "Patient ID");
         configBuilder.addConfigItem(TUMOR_ID, false, "Original tumor ID");
+        configBuilder.addConfigItem(REFERENCE_ID, false, "Original reference ID");
         configBuilder.addConfigItem(AMBER_EXTRA_TUMOR_ID, false, "Secondary Amber tumor ID");
         configBuilder.addConfigItem(SAMPLES, false, "List of sample IDs separated by ','");
 
@@ -283,12 +340,14 @@ public class PurityConfig
 
         configBuilder.addPath(REF_GENOME, true, REF_GENOME_CFG_DESC);
         configBuilder.addPath(PROBE_VARIANTS_FILE, false, "File defining the probe variants");
+        configBuilder.addPath(EXCLUDED_SOMATICS_FILE, false, "File with somatic variants to ignore");
 
         configBuilder.addDecimal(
                 NOISE_READS_PER_MILLION, "Expected reads-per-million from noise", DEFAULT_NOISE_READS_PER_MILLION);
 
         configBuilder.addInteger(BQR_QUAL_THRESHOLD, "BQR qual threshold", DEFAULT_BQR_MIN_QUAL);
         configBuilder.addFlag(SKIP_SUBCLONAL_FILTER, "Skip subclonal filter for somatics");
+        configBuilder.addFlag(APPLY_REF_VARIANT_FILTERS, "For externally validated variants, only apply qual-per-AD and chip filteres");
         configBuilder.addFlag(DISABLE_DUAL_FRAGS, "Disable use of dual fragments in purity calcs");
         configBuilder.addFlag(ALLOW_MISSING_SAMPLES, "Continue if samples are missing data");
 

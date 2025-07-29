@@ -1,9 +1,18 @@
 package com.hartwig.hmftools.common.genome.chromosome;
 
+import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeCoordinates.refGenomeCoordinates;
+
+import java.util.List;
+
+import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.genome.position.GenomePosition;
+import com.hartwig.hmftools.common.genome.refgenome.RefGenomeCoordinates;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeFunctions;
+import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.genome.region.GenomeRegion;
 import com.hartwig.hmftools.common.purple.Gender;
+import com.hartwig.hmftools.common.region.ChrBaseRegion;
+import com.hartwig.hmftools.common.region.SpecificRegions;
 
 public enum HumanChromosome implements Chromosome
 {
@@ -43,6 +52,9 @@ public enum HumanChromosome implements Chromosome
 
     public static final String CHR_PREFIX = "chr";
     public static final String ENUM_PREFIX = "_";
+
+    public static final String MT_CHR_V37 = "MT";
+    public static final String MT_CHR_V38 = "chrM";
 
     @Override
     public boolean isAutosome()
@@ -152,5 +164,24 @@ public enum HumanChromosome implements Chromosome
                 return INVALID_CHR_RANK;
             }
         }
+    }
+
+    public static List<ChrBaseRegion> formHumanChromosomeRegions(final SpecificRegions specificRegions, final RefGenomeVersion refGenomeVersion)
+    {
+        List<ChrBaseRegion> inputRegions = Lists.newArrayList();
+
+        RefGenomeCoordinates refGenomeCoordinates = refGenomeCoordinates(refGenomeVersion);
+
+        for(HumanChromosome chromosome : HumanChromosome.values())
+        {
+            String chromosomeStr = refGenomeVersion.versionedChromosome(chromosome.toString());
+
+            if(specificRegions.excludeChromosome(chromosomeStr))
+                continue;
+
+            inputRegions.add(new ChrBaseRegion(chromosomeStr, 1, refGenomeCoordinates.Lengths.get(chromosome)));
+        }
+
+        return inputRegions;
     }
 }

@@ -3,6 +3,10 @@ package com.hartwig.hmftools.common.utils.config;
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.common.utils.config.ConfigItemType.FLAG;
+import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
+
+import java.util.Arrays;
+import java.util.stream.Collectors;
 
 public class ConfigItem
 {
@@ -16,8 +20,8 @@ public class ConfigItem
     private String mDefaultValue;
     private String mPathPrefixConfig;
 
-    public ConfigItem(final ConfigItemType type, final String name, final boolean required, final String description,
-            final String defaultValue)
+    public ConfigItem(
+            final ConfigItemType type, final String name, final boolean required, final String description, final String defaultValue)
     {
         Type = type;
         Name = name;
@@ -68,5 +72,17 @@ public class ConfigItem
     {
         return format("%s %s required(%s) value(%s) default(%s) desc(%s)",
                 Name, Type, Required, mValue, mDefaultValue != null ? mDefaultValue : "none", Description);
+    }
+
+    public static String enumValueSelectionAsStr(final Enum<?>[] enumValues, final String configName)
+    {
+        String valuesStr = Arrays.stream(enumValues).map(x -> x.toString()).collect(Collectors.joining(ITEM_DELIM));
+        return format("%s: %s separated by '%s'", configName, valuesStr, ITEM_DELIM);
+    }
+
+    public static String enumValuesAsStr(final Enum<?>[] enumValues, final String configName)
+    {
+        String valuesStr = Arrays.stream(enumValues).map(x -> x.toString()).collect(Collectors.joining(", "));
+        return format("%s: %s", configName, valuesStr);
     }
 }

@@ -1,16 +1,16 @@
 package com.hartwig.hmftools.redux;
 
-import static com.hartwig.hmftools.redux.merge.BamMerger.formSequenceIntervals;
+import static com.hartwig.hmftools.common.bamops.BamMerger.formSequenceIntervals;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.redux.merge.SequenceInfo;
+import com.hartwig.hmftools.common.bamops.SequenceInfo;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import htsjdk.samtools.SAMSequenceRecord;
 
@@ -19,7 +19,6 @@ public class BamMergeTest
     @Test
     public void testSequenceInfos()
     {
-
         List<SAMSequenceRecord> sequences = Lists.newArrayList();
 
         sequences.add(new SAMSequenceRecord("1", 10000));

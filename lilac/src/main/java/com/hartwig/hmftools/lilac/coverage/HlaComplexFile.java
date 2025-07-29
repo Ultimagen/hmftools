@@ -4,16 +4,11 @@ import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.lilac.LilacConfig.LL_LOGGER;
-import static com.hartwig.hmftools.lilac.LilacConstants.GENE_A;
-import static com.hartwig.hmftools.lilac.LilacConstants.GENE_B;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.util.List;
 import java.util.StringJoiner;
-
-import com.google.common.collect.Lists;
-import com.hartwig.hmftools.lilac.hla.HlaAllele;
 
 public class HlaComplexFile
 {
@@ -21,7 +16,10 @@ public class HlaComplexFile
     {
         StringJoiner sb = new StringJoiner(TSV_DELIM);
         sb.add("Score");
+        sb.add("ComplexityPenalty");
+        sb.add("Complexity");
         sb.add("HomozygousCount");
+        sb.add("CohortFrequencyPenalty");
         sb.add("CohortFrequency");
         sb.add("RecoveryCount");
         sb.add("WildcardCount");
@@ -58,7 +56,6 @@ public class HlaComplexFile
         catch(IOException e)
         {
             LL_LOGGER.error("failed to write {}: {}", fileName, e.toString());
-            return;
         }
     }
 
@@ -67,7 +64,10 @@ public class HlaComplexFile
         StringJoiner sj = new StringJoiner(TSV_DELIM);
 
         sj.add(String.format("%.2f", coverage.getScore()));
+        sj.add(String.format("%.2f", coverage.getComplexityPenalty()));
+        sj.add(String.format("%d", coverage.getComplexity()));
         sj.add(String.valueOf(coverage.homozygousCount()));
+        sj.add(String.format("%.2f", coverage.getCohortFrequencyPenalty()));
         sj.add(String.format("%.2f", coverage.cohortFrequencyTotal()));
         sj.add(String.valueOf(coverage.recoveredCount()));
         sj.add(String.valueOf(coverage.wildcardCount()));
@@ -118,7 +118,7 @@ public class HlaComplexFile
 
                     writer.write(String.format("%s\t%s\t%s\t%s\t%s\t%s",
                             complexStr, fragAllele.getFragment().id(), fragAllele.getFragment().readInfo(),
-                            type, fullAlleles.toString(), wildAlleles.toString()));
+                            type, fullAlleles, wildAlleles));
 
                     writer.newLine();
                 }
@@ -129,17 +129,16 @@ public class HlaComplexFile
         catch(IOException e)
         {
             LL_LOGGER.error("failed to write {}: {}", fileName, e.toString());
-            return;
         }
     }
 
-
+    /* unused and Class-I specific
     public static List<HlaAllele> parseCandidateCoverageData(final List<String> alleleDataList)
     {
         // convert allele coverage output back into the 6 candidate alleles
         // example: A*01:01[199,131,68,0]   A*02:01[162,100,62,0]   B*18:01[182,112,70,0]   B*38:01[165,92,73,0]    C*12:03[356,320,36,0]
 
-        List<HlaAllele> rawAlleles = org.apache.commons.compress.utils.Lists.newArrayList();
+        List<HlaAllele> rawAlleles = new ArrayList<>();
 
         for(String alleleCoverageData : alleleDataList)
         {
@@ -147,7 +146,7 @@ public class HlaComplexFile
             rawAlleles.add(HlaAllele.fromString(alleleData));
         }
 
-        List<HlaAllele> allAlleles = Lists.newArrayList();
+        List<HlaAllele> allAlleles = new ArrayList<>();
 
         int aCount = 0;
         int bCount = 0;
@@ -189,5 +188,5 @@ public class HlaComplexFile
 
         return allAlleles;
     }
-
+    */
 }

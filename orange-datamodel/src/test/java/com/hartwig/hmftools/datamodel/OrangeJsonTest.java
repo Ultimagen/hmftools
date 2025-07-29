@@ -26,8 +26,8 @@ import com.hartwig.hmftools.datamodel.linx.LinxFusion;
 import com.hartwig.hmftools.datamodel.linx.LinxFusionType;
 import com.hartwig.hmftools.datamodel.linx.LinxHomozygousDisruption;
 import com.hartwig.hmftools.datamodel.linx.LinxRecord;
-import com.hartwig.hmftools.datamodel.linx.LinxUnreportableReason;
 import com.hartwig.hmftools.datamodel.linx.LinxSvAnnotation;
+import com.hartwig.hmftools.datamodel.linx.LinxUnreportableReason;
 import com.hartwig.hmftools.datamodel.orange.OrangePlots;
 import com.hartwig.hmftools.datamodel.orange.OrangeRecord;
 import com.hartwig.hmftools.datamodel.orange.OrangeRefGenomeVersion;
@@ -38,7 +38,7 @@ import com.hartwig.hmftools.datamodel.purple.PurpleCodingEffect;
 import com.hartwig.hmftools.datamodel.purple.PurpleCopyNumber;
 import com.hartwig.hmftools.datamodel.purple.PurpleDriver;
 import com.hartwig.hmftools.datamodel.purple.PurpleDriverType;
-import com.hartwig.hmftools.datamodel.purple.PurpleGainLoss;
+import com.hartwig.hmftools.datamodel.purple.PurpleGainDeletion;
 import com.hartwig.hmftools.datamodel.purple.PurpleGeneCopyNumber;
 import com.hartwig.hmftools.datamodel.purple.PurpleGenotypeStatus;
 import com.hartwig.hmftools.datamodel.purple.PurpleMicrosatelliteStatus;
@@ -145,6 +145,7 @@ public class OrangeJsonTest
         assertEquals(10, somaticVariant.tumorDepth().alleleReadCount());
         assertEquals(0.0, somaticVariant.subclonalLikelihood(), EPSILON);
         assertFalse(somaticVariant.biallelic());
+        assertEquals(0.1, somaticVariant.biallelicProbability(), EPSILON);
         assertEquals(PurpleGenotypeStatus.UNKNOWN, somaticVariant.genotypeStatus());
         assertNull(somaticVariant.localPhaseSets());
         assertEquals("ENST00000335508", somaticVariant.canonicalImpact().transcript());
@@ -177,6 +178,7 @@ public class OrangeJsonTest
         assertEquals(20, germlineVariant.tumorDepth().alleleReadCount());
         assertEquals(0.2, germlineVariant.subclonalLikelihood(), EPSILON);
         assertFalse(germlineVariant.biallelic());
+        assertEquals(0, germlineVariant.biallelicProbability(), EPSILON);
         assertEquals(PurpleGenotypeStatus.HET, germlineVariant.genotypeStatus());
         assertEquals(2, germlineVariant.localPhaseSets().size());
         assertTrue(germlineVariant.localPhaseSets().contains(1));
@@ -211,19 +213,19 @@ public class OrangeJsonTest
         assertEquals(1.2, geneCopyNumber.minCopyNumber(), EPSILON);
         assertEquals(0.4, geneCopyNumber.minMinorAlleleCopyNumber(), EPSILON);
 
-        assertEquals(1, purple.allSomaticGainsLosses().size());
-        PurpleGainLoss gainLoss = purple.allSomaticGainsLosses().iterator().next();
-        assertEquals("5", gainLoss.chromosome());
-        assertEquals("q2.2", gainLoss.chromosomeBand());
-        assertEquals("SMAD4", gainLoss.gene());
-        assertEquals("ENST00000591126", gainLoss.transcript());
-        assertFalse(gainLoss.isCanonical());
-        assertEquals(CopyNumberInterpretation.FULL_LOSS, gainLoss.interpretation());
-        assertEquals(0.1, gainLoss.minCopies(), EPSILON);
-        assertEquals(1.2, gainLoss.maxCopies(), EPSILON);
+        assertEquals(1, purple.allSomaticGainsDels().size());
+        PurpleGainDeletion gainDel = purple.allSomaticGainsDels().iterator().next();
+        assertEquals("5", gainDel.chromosome());
+        assertEquals("q2.2", gainDel.chromosomeBand());
+        assertEquals("SMAD4", gainDel.gene());
+        assertEquals("ENST00000591126", gainDel.transcript());
+        assertFalse(gainDel.isCanonical());
+        assertEquals(CopyNumberInterpretation.FULL_DEL, gainDel.interpretation());
+        assertEquals(0.1, gainDel.minCopies(), EPSILON);
+        assertEquals(1.2, gainDel.maxCopies(), EPSILON);
 
-        assertEquals(1, purple.reportableSomaticGainsLosses().size());
-        assertEquals(gainLoss, purple.reportableSomaticGainsLosses().iterator().next());
+        assertEquals(1, purple.reportableSomaticGainsDels().size());
+        assertEquals(gainDel, purple.reportableSomaticGainsDels().iterator().next());
     }
 
     @NotNull

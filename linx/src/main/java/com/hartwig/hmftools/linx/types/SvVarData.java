@@ -3,13 +3,16 @@ package com.hartwig.hmftools.linx.types;
 import static java.lang.Math.abs;
 import static java.lang.Math.max;
 import static java.lang.Math.round;
+import static java.lang.String.format;
 
+import static com.hartwig.hmftools.common.gene.TranscriptCodingType.CODING;
+import static com.hartwig.hmftools.common.utils.file.FileDelimiters.CSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 import static com.hartwig.hmftools.common.utils.Strings.appendStr;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_PAIR;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.seIndex;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_PAIR;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.seIndex;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.BND;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DEL;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DUP;
@@ -22,19 +25,22 @@ import static com.hartwig.hmftools.linx.types.SglMapping.convertFromInsertSequen
 
 import java.util.List;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.hartwig.hmftools.linx.gene.BreakendGeneData;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeFunctions;
 import com.hartwig.hmftools.common.purple.ChromosomeArm;
-import com.hartwig.hmftools.common.utils.sv.StartEndPair;
+import com.hartwig.hmftools.common.sv.StartEndPair;
 import com.hartwig.hmftools.common.sv.StructuralVariantData;
 import com.hartwig.hmftools.common.sv.StructuralVariantType;
 import com.hartwig.hmftools.linx.analysis.ClusteringReason;
 import com.hartwig.hmftools.linx.annotators.LineElementType;
 import com.hartwig.hmftools.linx.cn.SvCNData;
+import com.hartwig.hmftools.linx.gene.BreakendTransData;
 
 public class SvVarData
 {
@@ -45,8 +51,6 @@ public class SvVarData
     private final SvBreakend[] mBreakend;
     private final boolean[] mFragileSite;
     private final StartEndPair<Set<LineElementType>> mLineElements;
-
-    private final String[] mAssemblyData;
 
     private SvCluster mCluster;
     private String mClusterReason;
@@ -61,7 +65,7 @@ public class SvVarData
     private final StartEndPair<List<LinkedPair>> mTiLinks; // start and end lists of inferred or assembled TIs
 
     private final DbPair[] mDbLink; // deletion bridge formed from this breakend to another
-    private final StartEndPair<List<String>> mTIAssemblies;
+    private final StartEndPair<List<String>> mAssemblyLinks;
 
     private final StartEndPair<List<BreakendGeneData>> mGenes;
 
@@ -80,16 +84,11 @@ public class SvVarData
 
     private final List<SglMapping> mSglMappings;
     private SvVarData[] mLinkedSVs;
-    private List<String> mAnnotationList;
 
     public static final String NONE_SEGMENT_INFERRED = "INFERRED";
     public static final String INF_SV_TYPE = "INF";
     public static final String SGL_CENTRO_SATELLITE = "Satellite/centr";
     public static final String SGL_TELO_SATELLITE = "Satellite/telo";
-
-    public static final String ASSEMBLY_TYPE_TI = "asm";
-    public static final String TRANSITIVE_TYPE_TI = "trs";
-    public static final String ASSEMBLY_TYPE_EQV = "eqv";
 
     public static final String RELATION_TYPE_NEIGHBOUR = "NHBR";
     public static final String RELATION_TYPE_OVERLAP = "OVRL";
@@ -120,8 +119,7 @@ public class SvVarData
 
         mGenes = new StartEndPair<>(Lists.newArrayList(), Lists.newArrayList());
 
-        mAssemblyData = new String[SE_PAIR];
-        mTIAssemblies = new StartEndPair<>(Lists.newArrayList(), Lists.newArrayList());
+        mAssemblyLinks = new StartEndPair<>(Lists.newArrayList(), Lists.newArrayList());
 
         mCopyNumber = new double[] { mSVData.adjustedStartCopyNumber(),  mSVData.adjustedEndCopyNumber() };
         mCopyNumberChange = new double[] {mSVData.adjustedStartCopyNumberChange(), mSVData.adjustedEndCopyNumberChange() };
@@ -135,7 +133,8 @@ public class SvVarData
         mCnDataPrevEnd = null;
         mCnDataPostEnd = null;
 
-        setAssemblyData(false);
+        setAssemblyData(true, mSVData.startLinkedBy());
+        setAssemblyData(false, mSVData.endLinkedBy());
 
         if(isSglBreakend())
         {
@@ -148,7 +147,6 @@ public class SvVarData
         }
 
         mLinkedSVs = null;
-        mAnnotationList = null;
     }
 
     public int id() { return mSVData.id(); }
@@ -176,12 +174,12 @@ public class SvVarData
     {
         if(isSglBreakend())
         {
-            return String.format("id(%s) pos(%s:%d:%d)",
+            return format("id(%s) pos(%s:%d:%d)",
                     id(), mChr[SE_START], orientation(true), position(true));
         }
         else
         {
-            return String.format("id(%s) pos(%s:%d:%d -> %s:%d:%d)",
+            return format("id(%s) pos(%s:%d:%d -> %s:%d:%d)",
                     id(), mChr[SE_START], orientation(true), position(true),
                     mChr[SE_END], orientation(false), position(false));
         }
@@ -189,7 +187,7 @@ public class SvVarData
 
     public String posId(boolean useStart)
     {
-        return String.format("%s: %s %s:%d:%d",
+        return format("%s: %s %s:%d:%d",
                 id(), useStart ? "start" :"end", mChr[seIndex(useStart)], orientation(useStart), position(useStart));
     }
 
@@ -414,22 +412,6 @@ public class SvVarData
         return (type() == DEL || type() == DUP || type() == INS);
     }
 
-   public String getAssemblyData(boolean isStart) { return mAssemblyData[seIndex(isStart)]; }
-
-    // unit testing only
-    public void setAssemblyData(boolean isStart, final String data)
-    {
-        mAssemblyData[seIndex(isStart)] = data;
-        setAssemblyData(true);
-    }
-
-    public List<String> getTIAssemblies(boolean isStart) { return mTIAssemblies.get(isStart); }
-
-    public boolean isEquivBreakend()
-    {
-        return getAssemblyData(true).contains(ASSEMBLY_TYPE_EQV);
-    }
-
     public void setLinkedSVs(final SvVarData var1, final SvVarData var2)
     {
         mLinkedSVs = new SvVarData[] {var1, var2};
@@ -445,19 +427,48 @@ public class SvVarData
 
     public String getGeneInBreakend(boolean isStart, boolean includeId)
     {
+        return getGeneInBreakend(isStart, includeId, false);
+    }
+
+    public String getGeneInBreakend(boolean isStart, boolean includeId, boolean includeTransImpact)
+    {
         // create a list of any genes which this breakend touches, but exclude the upstream distance used for fusions
         final List<BreakendGeneData> genesList = getGenesList(isStart).stream()
                 .filter(x -> x.breakendWithinGene(PRE_TRANSCRIPT_DISTANCE))
                 .collect(Collectors.toList());
 
-        String genesStr = "";
+        StringJoiner sj = new StringJoiner(ITEM_DELIM);
+
         for(final BreakendGeneData gene : genesList)
         {
-            String geneStr = includeId ? gene.geneId() + ":" + gene.geneName() : gene.geneName();
-            genesStr = appendStr(genesStr, geneStr, ITEM_DELIM_CHR);
+            StringJoiner geneSj = new StringJoiner("|");
+
+            if(includeId)
+                geneSj.add(gene.geneId());
+
+            geneSj.add(gene.geneName());
+
+            if(includeTransImpact)
+            {
+                BreakendTransData transData = gene.canonical();
+
+                if(transData != null)
+                {
+                    geneSj.add(String.valueOf(transData.regionType()));
+                    geneSj.add(String.valueOf(transData.codingType()));
+
+                    if(transData.isDisruptive())
+                        geneSj.add("disruptive");
+
+                    if(transData.codingType() == CODING)
+                        geneSj.add(format("exon=%d", transData.ExonUpstream));
+                }
+            }
+
+            sj.add(geneSj.toString());
         }
 
-        return genesStr;
+        return sj.toString();
     }
 
     public boolean hasAssemblyLink(boolean isStart)
@@ -465,32 +476,28 @@ public class SvVarData
         return mTiLinks.get(isStart).stream().anyMatch(LinkedPair::isAssembled);
     }
 
-    private void setAssemblyData(boolean useExisting)
+    public List<String> getAssemblyLinks(boolean isStart) { return mAssemblyLinks.get(isStart); }
+
+    public String assemblyInfoStr(boolean isStart) { return mAssemblyLinks.get(isStart).stream().collect(Collectors.joining(ITEM_DELIM)); }
+
+    @VisibleForTesting
+    public void addAssemblyInfo(boolean isStart, final String assemblyData)
     {
-        for(int se = SE_START; se <= SE_END; ++se)
+        mAssemblyLinks.get(isStart).add(assemblyData);
+    }
+
+    private void setAssemblyData(boolean isStart, final String assemblyData)
+    {
+        if(assemblyData.isEmpty() || assemblyData.equals("."))
+            return;
+
+        String delim = assemblyData.contains(ITEM_DELIM) ? ITEM_DELIM : CSV_DELIM;
+
+        String[] assemblyLinks = assemblyData.split(delim, -1);
+
+        for(String assemblyLink : assemblyLinks)
         {
-            if(!useExisting)
-            {
-                mAssemblyData[se] = "";
-
-                final String linkedByData = se == SE_START ? mSVData.startLinkedBy() : mSVData.endLinkedBy();
-
-                if(!linkedByData.isEmpty() && !linkedByData.equals("."))
-                {
-                    mAssemblyData[se] = linkedByData.replaceAll(",", ";");
-                }
-            }
-
-            if(!mAssemblyData[se].isEmpty())
-            {
-                String[] assemblyList = mAssemblyData[se].split(";");
-
-                for(String assembly : assemblyList)
-                {
-                    if(assembly.contains(ASSEMBLY_TYPE_TI) || assembly.contains(TRANSITIVE_TYPE_TI))
-                        mTIAssemblies.get(se).add(assembly);
-                }
-            }
+            mAssemblyLinks.get(isStart).add(assemblyLink);
         }
     }
 
@@ -569,30 +576,6 @@ public class SvVarData
             mCnDataPostEnd = postData;
         }
     }
-
-    public List<String> getAnnotationList() { return mAnnotationList; }
-
-    public void addAnnotation(final String annotation)
-    {
-        if(mAnnotationList == null)
-            mAnnotationList = Lists.newArrayList();
-
-        if(mAnnotationList.contains(annotation))
-            return;
-
-        mAnnotationList.add(annotation);
-    }
-
-    public boolean hasAnnotation(final String annotation) { return mAnnotationList != null && mAnnotationList.contains(annotation); }
-
-    public String getAnnotations()
-    {
-        if(mAnnotationList == null)
-            return "";
-
-        return mAnnotationList.stream().collect (Collectors.joining (ITEM_DELIM));
-    }
-
 
     public static boolean haveSameChrArms(final SvVarData var1, final SvVarData var2)
     {

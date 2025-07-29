@@ -2,31 +2,52 @@ package com.hartwig.hmftools.esvee.caller;
 
 import static java.lang.Math.max;
 
-import static com.hartwig.hmftools.common.gripss.RepeatMaskAnnotations.REPEAT_MASK_FILE;
-import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
-import static com.hartwig.hmftools.common.utils.version.VersionInfo.fromAppName;
+import static com.hartwig.hmftools.common.sv.RepeatMaskAnnotations.REPEAT_MASK_FILE;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH_DESC;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH_PAIR;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH_PAIR_DESC;
+import static com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr;
+import static com.hartwig.hmftools.common.utils.config.CommonConfig.TARGET_REGIONS_BED;
+import static com.hartwig.hmftools.common.utils.config.VersionInfo.fromAppName;
 import static com.hartwig.hmftools.common.variant.GenotypeIds.fromVcfHeader;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
-import static com.hartwig.hmftools.esvee.caller.CallerConfig.addConfig;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.caller.CallerConfig.registerConfig;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.GERMLINE_AD_THRESHOLD;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.GERMLINE_AF_THRESHOLD;
+import static com.hartwig.hmftools.esvee.caller.LineChecker.adjustLineSites;
 import static com.hartwig.hmftools.esvee.caller.VariantFilters.logFilterTypeCounts;
+import static com.hartwig.hmftools.esvee.caller.annotation.PonCache.ARTEFACT_PON_BED_SGL_FILE;
+import static com.hartwig.hmftools.esvee.caller.annotation.PonCache.ARTEFACT_PON_BED_SV_FILE;
+import static com.hartwig.hmftools.esvee.caller.annotation.PonCache.GERMLINE_PON_MARGIN;
+import static com.hartwig.hmftools.esvee.caller.annotation.PonCache.GERMLINE_SGL_PON_MARGIN;
 import static com.hartwig.hmftools.esvee.common.FileCommon.APP_NAME;
+import static com.hartwig.hmftools.esvee.common.FileCommon.formDiscordantStatsFilename;
 import static com.hartwig.hmftools.esvee.common.FileCommon.formFragmentLengthDistFilename;
+import static com.hartwig.hmftools.esvee.prep.types.DiscordantStats.loadDiscordantStats;
+
+import com.google.common.annotations.VisibleForTesting;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
-import com.hartwig.hmftools.common.utils.version.VersionInfo;
+import com.hartwig.hmftools.common.utils.config.VersionInfo;
 import com.hartwig.hmftools.common.variant.GenotypeIds;
 import com.hartwig.hmftools.common.variant.VcfFileReader;
 import com.hartwig.hmftools.esvee.caller.annotation.PonCache;
 import com.hartwig.hmftools.esvee.caller.annotation.RepeatMaskAnnotator;
 import com.hartwig.hmftools.esvee.common.FragmentLengthBounds;
 import com.hartwig.hmftools.esvee.prep.FragmentSizeDistribution;
+import com.hartwig.hmftools.esvee.prep.types.DiscordantStats;
 
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.VariantContext;
+import htsjdk.variant.vcf.VCFFormatHeaderLine;
 import htsjdk.variant.vcf.VCFHeader;
+import htsjdk.variant.vcf.VCFHeaderLineType;
 
 public class CallerApplication
 {
@@ -34,29 +55,78 @@ public class CallerApplication
     public final FilterConstants mFilterConstants;
 
     private final PonCache mPonCache;
+    private final PonCache mArtefactPonCache;
     private final HotspotCache mHotspotCache;
     private final VariantFilters mVariantFilters;
     private final RepeatMaskAnnotator mRepeatMaskAnnotator;
+    private final boolean mTargetedPanelMode;
 
     private int mProcessedVariants;
     private final SvDataCache mSvDataCache;
+
+    private final long mStartTimeMs;
 
     public CallerApplication(final ConfigBuilder configBuilder)
     {
         mConfig = new CallerConfig(configBuilder);
         mFilterConstants = FilterConstants.from(configBuilder);
 
+        mStartTimeMs = System.currentTimeMillis();
+
         SV_LOGGER.info("loading reference data");
         mPonCache = new PonCache(configBuilder);
+
+        if(!mPonCache.hasValidData())
+        {
+            SV_LOGGER.error("invalid PON, exiting");
+            System.exit(1);
+        }
+
+        if(configBuilder.hasValue(ARTEFACT_PON_BED_SV_FILE) || configBuilder.hasValue(ARTEFACT_PON_BED_SGL_FILE))
+        {
+            mArtefactPonCache = new PonCache(
+                    configBuilder.getInteger(GERMLINE_PON_MARGIN),
+                    configBuilder.getInteger(GERMLINE_SGL_PON_MARGIN),
+                    configBuilder.getValue(ARTEFACT_PON_BED_SV_FILE),
+                    configBuilder.getValue(ARTEFACT_PON_BED_SGL_FILE),
+                    false);
+
+            if(!mArtefactPonCache.hasValidData())
+            {
+                SV_LOGGER.error("invalid artefact PON, exiting");
+                System.exit(1);
+            }
+        }
+        else
+        {
+            mArtefactPonCache = null;
+        }
+
         mHotspotCache = new HotspotCache(configBuilder);
 
-        String fragLengthFilename = formFragmentLengthDistFilename(mConfig.OutputDir, mConfig.SampleId);
+        String fragLengthFilename = formFragmentLengthDistFilename(mConfig.PrepDir, mConfig.fileSampleId(), mConfig.OutputId);
+        String discStatsFilename = formDiscordantStatsFilename(mConfig.PrepDir, mConfig.fileSampleId(), mConfig.OutputId);
+
+        if(!Files.exists(Paths.get(fragLengthFilename)) || !Files.exists(Paths.get(discStatsFilename)))
+        {
+            SV_LOGGER.error("missing input files: disc-stats and frag-lengths", discStatsFilename, fragLengthFilename);
+            System.exit(1);
+        }
+
         FragmentLengthBounds fragmentLengthBounds = FragmentSizeDistribution.loadFragmentLengthBounds(fragLengthFilename);
 
-        mVariantFilters = new VariantFilters(mFilterConstants, fragmentLengthBounds);
+        DiscordantStats discordantStats = loadDiscordantStats(discStatsFilename);
+
+        SV_LOGGER.info("fragment length dist: {}", fragmentLengthBounds);
+
+        mVariantFilters = new VariantFilters(mFilterConstants, fragmentLengthBounds, discordantStats);
 
         mProcessedVariants = 0;
-        mSvDataCache = new SvDataCache(mConfig, new TargetRegions(configBuilder));
+
+        TargetRegions targetRegions = new TargetRegions(configBuilder.getValue(TARGET_REGIONS_BED), mConfig.RefGenVersion);
+        mSvDataCache = new SvDataCache(mConfig, targetRegions);
+        mTargetedPanelMode = targetRegions.hasTargetRegions();
+
         mRepeatMaskAnnotator = new RepeatMaskAnnotator();
 
         if(configBuilder.hasValue(REPEAT_MASK_FILE))
@@ -80,11 +150,9 @@ public class CallerApplication
             System.exit(1);
         }
 
-        long startTimeMs = System.currentTimeMillis();
-
         processVcf(mConfig.VcfFile);
 
-        SV_LOGGER.info("Esvee caller complete, mins({})", runTimeMinsStr(startTimeMs));
+        SV_LOGGER.info("Esvee caller complete, mins({})", runTimeMinsStr(mStartTimeMs));
     }
 
     private void processVcf(final String vcfFile)
@@ -93,11 +161,17 @@ public class CallerApplication
 
         VCFHeader vcfHeader = vcfFileReader.vcfHeader();
 
-        SV_LOGGER.info("sample({}) processing VCF({})", mConfig.SampleId, vcfFile);
+        if(mConfig.ManualRefDepth > 0 && !vcfHeader.hasFormatLine(REF_DEPTH))
+        {
+            vcfHeader.addMetaDataLine(new VCFFormatHeaderLine(REF_DEPTH, 1, VCFHeaderLineType.Integer, REF_DEPTH_DESC));
+            vcfHeader.addMetaDataLine(new VCFFormatHeaderLine(REF_DEPTH_PAIR, 1, VCFHeaderLineType.Integer, REF_DEPTH_PAIR_DESC));
+        }
 
-        GenotypeIds genotypeIds = fromVcfHeader(vcfHeader, mConfig.ReferenceId, mConfig.SampleId);
+        SV_LOGGER.info("sample({}) processing VCF({})", mConfig.fileSampleId(), vcfFile);
 
-        if(genotypeIds.TumorOrdinal < 0 || (!mConfig.ReferenceId.isEmpty() && genotypeIds.ReferenceOrdinal < 0))
+        GenotypeIds genotypeIds = fromVcfHeader(vcfHeader, mConfig.ReferenceId, mConfig.TumorId);
+
+        if((mConfig.hasTumor() && genotypeIds.TumorOrdinal < 0) || (mConfig.hasReference() && genotypeIds.ReferenceOrdinal < 0))
         {
             SV_LOGGER.error("missing sample names in VCF: {}", vcfHeader.getGenotypeSamples());
             System.exit(1);
@@ -105,12 +179,12 @@ public class CallerApplication
 
         mSvDataCache.setGenotypeOrdinals(genotypeIds);
 
-        if(mConfig.GermlineOnly)
+        if(mConfig.germlineOnly())
         {
             SV_LOGGER.info("germline mode ref({}: {}) tumor({}: {})",
                     genotypeIds.TumorOrdinal, genotypeIds.TumorId, genotypeIds.ReferenceOrdinal, genotypeIds.ReferenceId);
         }
-        else if(mConfig.ReferenceId.isEmpty())
+        else if(!mConfig.hasReference())
         {
             SV_LOGGER.info("tumor genotype info({}: {})", genotypeIds.TumorOrdinal, genotypeIds.TumorId);
         }
@@ -128,7 +202,7 @@ public class CallerApplication
         }
         else
         {
-            SV_LOGGER.warn("loaded {} breakeds with unmatched({}) complete({}) hardFiltered({})",
+            SV_LOGGER.warn("loaded {} breakends with unmatched({}) complete({}) hardFiltered({})",
                     mProcessedVariants, mSvDataCache.incompleteSVs(), mSvDataCache.getSvList().size(), mSvDataCache.hardFilteredCount());
         }
 
@@ -136,43 +210,55 @@ public class CallerApplication
 
         final VersionInfo version = fromAppName(APP_NAME);
 
-        VcfWriter writer = new VcfWriter(mConfig, vcfHeader, version.version(), genotypeIds, mSvDataCache);
+        VcfWriter vcfWriter = new VcfWriter(mConfig, vcfHeader, version.version(), genotypeIds, mSvDataCache);
 
         if(mSvDataCache.getSvList().isEmpty())
         {
             SV_LOGGER.info("writing empty VCF");
-            writer.close();
+            vcfWriter.close();
             return;
         }
 
-        SV_LOGGER.info("applying soft-filters");
+        mSvDataCache.buildBreakendMap();
+
+        LineChecker.markLineSites(mSvDataCache.getBreakendMap());
+
+        SV_LOGGER.info("applying filters");
 
         for(Variant var : mSvDataCache.getSvList())
         {
             if(mHotspotCache.isHotspotVariant(var))
                 var.markHotspot();
 
-            markGermline(var);
-
             mVariantFilters.applyFilters(var);
         }
 
-        mSvDataCache.buildBreakendMap();
+        if(mTargetedPanelMode)
+            mVariantFilters.applyAdjacentFilters(mSvDataCache.getBreakendMap());
 
-        SV_LOGGER.info("deduplication of paired end single breakends");
-        DuplicateFinder duplicateFinder = new DuplicateFinder(mSvDataCache);
+        // set germline status and final filters based on LINE
+        for(Variant var : mSvDataCache.getSvList())
+        {
+            markGermline(var);
+        }
 
-        /*
-        // duplicateFinder.findDuplicateSVs(alternatePaths);
+        for(Variant var : mSvDataCache.getSvList())
+        {
+            adjustLineSites(var);
+        }
 
-        SV_LOGGER.debug("found {} SV duplications and {} SGL duplications",
-                duplicateFinder.duplicateBreakends().size(), duplicateFinder.duplicateSglBreakends().size());
-        */
+        Deduplication.deduplicateVariants(mSvDataCache.getBreakendMap());
 
         if(mPonCache.hasValidData())
         {
             SV_LOGGER.info("applying PON filters");
-            mPonCache.annotateVariants(mSvDataCache.getSvList());
+            mPonCache.annotateVariants(mSvDataCache.getBreakendMap());
+        }
+
+        if(mArtefactPonCache != null && mArtefactPonCache.hasValidData())
+        {
+            SV_LOGGER.info("applying artefacts PON filters");
+            mArtefactPonCache.annotateVariants(mSvDataCache.getBreakendMap());
         }
 
         if(mRepeatMaskAnnotator.hasData())
@@ -181,8 +267,14 @@ public class CallerApplication
             mRepeatMaskAnnotator.annotateVariants(mSvDataCache.getSvList());
         }
 
-        writer.writeBreakends();
-        writer.close();
+        vcfWriter.writeBreakends();
+        vcfWriter.close();
+
+        if(mConfig.WriteBreakendTsv)
+        {
+            BreakendWriter breakendWriter = new BreakendWriter(mConfig);
+            breakendWriter.writeBreakends(mSvDataCache);
+        }
 
         // summary logging
         if(SV_LOGGER.isDebugEnabled())
@@ -193,23 +285,52 @@ public class CallerApplication
 
     private void markGermline(final Variant var)
     {
+        if(mConfig.germlineOnly())
+        {
+            var.markGermline();
+            return;
+        }
+
+        if(isGermline(var, mConfig.hasReference() ? mConfig.ReferenceId : null))
+            var.markGermline();
+    }
+
+    @VisibleForTesting
+    public static boolean isGermline(final Variant var, @Nullable final String referenceId)
+    {
         Breakend breakend = var.breakendStart();
 
         double maxGermlineAf = 0;
         double maxTumorAf = 0;
+        int germlineAd = 0;
+        int tumorAd = 0;
 
         for(Genotype genotype : breakend.Context.getGenotypes())
         {
             double af = breakend.calcAllelicFrequency(genotype);
 
-            if(mConfig.ReferenceId.contains(genotype.getSampleName()))
+            if(referenceId != null && referenceId.equals(genotype.getSampleName()))
+            {
                 maxGermlineAf = max(maxGermlineAf, af);
+                germlineAd = breakend.fragmentCount(genotype);
+            }
             else
+            {
                 maxTumorAf = max(maxTumorAf, af);
+                tumorAd = breakend.fragmentCount(genotype);
+            }
         }
 
         if(maxGermlineAf >= GERMLINE_AF_THRESHOLD * maxTumorAf)
-            var.markGermline();
+        {
+            // also check the relative fragment counts
+            double adRatio = tumorAd > 0 ? germlineAd / (double)tumorAd : 1;
+
+            if(adRatio >= GERMLINE_AD_THRESHOLD)
+                return true;
+        }
+
+        return false;
     }
 
     public void processVariant(final VariantContext variant, final GenotypeIds genotypeIds)
@@ -220,7 +341,25 @@ public class CallerApplication
 
         if(mProcessedVariants > 0 && (mProcessedVariants % 100000) == 0)
         {
-            SV_LOGGER.debug("sample({}) processed {} variants", mConfig.SampleId, mProcessedVariants);
+            SV_LOGGER.debug("sample({}) processed {} variants", mConfig.TumorId, mProcessedVariants);
+        }
+
+        if(mConfig.ManualRefDepth > 0)
+        {
+            if(genotypeIds.hasReference())
+            {
+                if(!variant.getGenotype(genotypeIds.ReferenceId).hasExtendedAttribute(REF_DEPTH))
+                {
+                    variant.getGenotype(genotypeIds.ReferenceId).getExtendedAttributes().put(REF_DEPTH, mConfig.ManualRefDepth);
+                    variant.getGenotype(genotypeIds.ReferenceId).getExtendedAttributes().put(REF_DEPTH_PAIR, mConfig.ManualRefDepth);
+                }
+
+                if(!variant.getGenotype(genotypeIds.TumorId).hasExtendedAttribute(REF_DEPTH))
+                {
+                    variant.getGenotype(genotypeIds.TumorId).getExtendedAttributes().put(REF_DEPTH, mConfig.ManualRefDepth);
+                    variant.getGenotype(genotypeIds.TumorId).getExtendedAttributes().put(REF_DEPTH_PAIR, mConfig.ManualRefDepth);
+                }
+            }
         }
 
         mSvDataCache.processVariant(variant, genotypeIds);
@@ -229,7 +368,7 @@ public class CallerApplication
     public static void main(@NotNull final String[] args)
     {
         ConfigBuilder configBuilder = new ConfigBuilder(APP_NAME);
-        addConfig(configBuilder);
+        registerConfig(configBuilder);
 
         configBuilder.checkAndParseCommandLine(args);
 

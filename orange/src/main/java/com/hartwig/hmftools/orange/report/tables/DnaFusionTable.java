@@ -26,7 +26,7 @@ import com.itextpdf.layout.element.Paragraph;
 import com.itextpdf.layout.element.Table;
 import com.itextpdf.layout.property.UnitValue;
 
-import org.apache.commons.compress.utils.Lists;
+import com.google.common.collect.Lists;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -146,7 +146,7 @@ public final class DnaFusionTable
                 default:
                     throw new IllegalArgumentException("Unknown unreportable reason: " + item);
             }
-        }).collect(Collectors.joining(","));
+        }).collect(Collectors.joining(", "));
     }
 
     @NotNull

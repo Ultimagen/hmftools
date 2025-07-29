@@ -2,7 +2,6 @@ package com.hartwig.hmftools.sage.vcf;
 
 import static java.lang.Math.abs;
 import static java.lang.Math.max;
-import static java.lang.Math.min;
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.common.variant.SageVcfTags.MICROHOMOLOGY;
@@ -16,15 +15,15 @@ import static com.hartwig.hmftools.common.variant.SageVcfTags.TRINUCLEOTIDE_CONT
 import static com.hartwig.hmftools.sage.SageCommon.APP_NAME;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
 import static com.hartwig.hmftools.sage.SageConstants.DEFAULT_FLANK_LENGTH;
-import static com.hartwig.hmftools.sage.common.VariantTier.LOW_CONFIDENCE;
+import static com.hartwig.hmftools.common.variant.VariantTier.LOW_CONFIDENCE;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_CORE;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_EVENTS;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_INDEX;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_INFO;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_LEFT_FLANK;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_RIGHT_FLANK;
-import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_UPDATED;
 
+import java.util.Collections;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -32,9 +31,9 @@ import com.google.common.collect.Lists;
 import com.hartwig.hmftools.sage.candidate.Candidate;
 import com.hartwig.hmftools.sage.common.RefSequence;
 import com.hartwig.hmftools.sage.common.VariantReadContext;
-import com.hartwig.hmftools.sage.common.SimpleVariant;
+import com.hartwig.hmftools.common.variant.SimpleVariant;
 import com.hartwig.hmftools.sage.common.VariantReadContextBuilder;
-import com.hartwig.hmftools.sage.common.VariantTier;
+import com.hartwig.hmftools.common.variant.VariantTier;
 
 import org.apache.logging.log4j.util.Strings;
 
@@ -126,21 +125,13 @@ public final class CandidateSerialisation
 
         if(readContext == null)
         {
-            SG_LOGGER.error("variant({}) failed to recreate read context", variant);
-            return null;
-        }
+            SG_LOGGER.warn("variant({}) failed to recreate read context, setting invalid", variant);
+            String refBases = "NNN";
 
-        // TEMP: tracking of changes
-        if(buildFromOldTags)
-        {
-            // old read base length
-            String leftFlank = context.getAttributeAsString(READ_CONTEXT_LEFT_FLANK, Strings.EMPTY);
-            String core = context.getAttributeAsString(READ_CONTEXT_CORE, Strings.EMPTY);
-            String rightFlank = context.getAttributeAsString(READ_CONTEXT_RIGHT_FLANK, Strings.EMPTY);
-            int oldReadBaseLength = leftFlank.length() + core.length() + rightFlank.length();
-
-            if(readContext.totalLength() != oldReadBaseLength)
-                context.getCommonInfo().putAttribute(READ_CONTEXT_UPDATED, true);
+            readContext = new VariantReadContext(
+                    variant, readContextVcfInfo.AlignmentStart, 0, refBases.getBytes(), readContextVcfInfo.readBases().getBytes(),
+                    Collections.emptyList(), 0, readContextVcfInfo.VarIndex, 0, null, null,
+                    Collections.emptyList(), 0, 0);
         }
 
         return new Candidate(tier, readContext, context.getAttributeAsInt(READ_CONTEXT_EVENTS, 0), 0);

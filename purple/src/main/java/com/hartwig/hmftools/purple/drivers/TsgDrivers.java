@@ -1,6 +1,5 @@
 package com.hartwig.hmftools.purple.drivers;
 
-import static com.hartwig.hmftools.purple.PurpleUtils.PPL_LOGGER;
 import static com.hartwig.hmftools.purple.drivers.SomaticVariantDrivers.getWorstReportableCodingEffect;
 import static com.hartwig.hmftools.purple.drivers.SomaticVariantDrivers.groupByImpact;
 import static com.hartwig.hmftools.purple.drivers.SomaticVariantDrivers.hasTranscriptCodingEffect;
@@ -10,19 +9,20 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.drivercatalog.DriverCatalog;
-import com.hartwig.hmftools.common.drivercatalog.DriverCatalogFactory;
-import com.hartwig.hmftools.common.drivercatalog.DriverCategory;
-import com.hartwig.hmftools.common.drivercatalog.DriverImpact;
-import com.hartwig.hmftools.common.drivercatalog.DriverType;
-import com.hartwig.hmftools.common.drivercatalog.ImmutableDriverCatalog;
-import com.hartwig.hmftools.common.drivercatalog.LikelihoodMethod;
-import com.hartwig.hmftools.common.drivercatalog.dnds.DndsDriverGeneLikelihood;
-import com.hartwig.hmftools.common.drivercatalog.dnds.DndsDriverImpactLikelihood;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanel;
+import com.hartwig.hmftools.common.driver.DriverCatalog;
+import com.hartwig.hmftools.common.driver.DriverCatalogFactory;
+import com.hartwig.hmftools.common.driver.DriverCategory;
+import com.hartwig.hmftools.common.driver.DriverImpact;
+import com.hartwig.hmftools.common.driver.DriverType;
+import com.hartwig.hmftools.common.driver.ImmutableDriverCatalog;
+import com.hartwig.hmftools.common.driver.LikelihoodMethod;
+import com.hartwig.hmftools.common.driver.dnds.DndsDriverGeneLikelihood;
+import com.hartwig.hmftools.common.driver.dnds.DndsDriverImpactLikelihood;
+import com.hartwig.hmftools.common.driver.panel.DriverGenePanel;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
 import com.hartwig.hmftools.common.variant.CodingEffect;
 import com.hartwig.hmftools.common.variant.VariantType;
+import com.hartwig.hmftools.purple.DriverSourceData;
 import com.hartwig.hmftools.purple.somatic.SomaticVariant;
 
 public class TsgDrivers extends SomaticVariantDriverFinder
@@ -33,8 +33,8 @@ public class TsgDrivers extends SomaticVariantDriverFinder
     }
 
     public List<DriverCatalog> findDrivers(
-            final Map<String,List<GeneCopyNumber>> geneCopyNumberMap,
-            final Map<VariantType,Integer> variantTypeCounts, final Map<VariantType,Integer> variantTypeCountsBiallelic)
+            final Map<String,List<GeneCopyNumber>> geneCopyNumberMap, final Map<VariantType,Integer> variantTypeCounts,
+            final Map<VariantType,Integer> variantTypeCountsBiallelic, final List<DriverSourceData> driverSourceData)
     {
         final List<DriverCatalog> driverCatalog = Lists.newArrayList();
 
@@ -55,16 +55,15 @@ public class TsgDrivers extends SomaticVariantDriverFinder
 
             for(GeneCopyNumber geneCopyNumber : geneCopyNumbers)
             {
-                if(geneCopyNumbers.size() == 1)
+                if(geneCopyNumbers.size() == 1
+                || geneVariants.stream().anyMatch(x -> hasTranscriptCodingEffect(x.variantImpact(), x.type(), geneCopyNumber.transName())))
                 {
-                    driverCatalog.add(createTsgDriver(geneVariants, variantTypeCounts, variantTypeCountsBiallelic, geneCopyNumber, dndsLikelihood));
-                }
-                else
-                {
-                    if(geneVariants.stream().anyMatch(x -> hasTranscriptCodingEffect(x.variantImpact(), x.type(), geneCopyNumber.transName())))
-                    {
-                        driverCatalog.add(createTsgDriver(geneVariants, variantTypeCounts, variantTypeCountsBiallelic, geneCopyNumber, dndsLikelihood));
-                    }
+                    DriverCatalog driverRecord = createTsgDriver(
+                            geneVariants, variantTypeCounts, variantTypeCountsBiallelic, geneCopyNumber, dndsLikelihood);
+
+                    driverCatalog.add(driverRecord);
+
+                    driverSourceData.add(new DriverSourceData(driverRecord, geneVariants.get(0)));
                 }
             }
         }

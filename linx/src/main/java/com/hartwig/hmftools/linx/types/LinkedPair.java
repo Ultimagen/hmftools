@@ -2,14 +2,13 @@ package com.hartwig.hmftools.linx.types;
 
 import static java.lang.Math.abs;
 
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.isStart;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.isStart;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DUP;
 
 import java.util.List;
 
 public class LinkedPair
 {
-
     private SvBreakend mFirstBreakend;
     private SvBreakend mSecondBreakend;
     private int mLinkLength;
@@ -24,7 +23,6 @@ public class LinkedPair
     private String mLocationType;
     private int mOverlapCount;
     private boolean mHasCopyNumberGain;
-    private int mIndelCount;
 
     private String mExonMatchData;
 
@@ -47,7 +45,6 @@ public class LinkedPair
         mLocationType = LOCATION_TYPE_UNCLEAR;
         mOverlapCount = 0;
         mHasCopyNumberGain = false;
-        mIndelCount = 0;
         mExonMatchData = "";
 
         int length = first.position() - second.position();
@@ -149,7 +146,7 @@ public class LinkedPair
     public boolean hasBreakend(final SvVarData var, boolean useStart)
     {
         return (var == mFirstBreakend.getSV() && mFirstBreakend.usesStart() == useStart)
-                || (var == mSecondBreakend.getSV() && mSecondBreakend.usesStart() == useStart);
+            || (var == mSecondBreakend.getSV() && mSecondBreakend.usesStart() == useStart);
     }
 
     public boolean hasBreakend(final SvBreakend breakend)

@@ -1,6 +1,6 @@
 package com.hartwig.hmftools.esvee.prep;
 
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.common.FileCommon.createBamSlicer;
 
 import java.io.File;
@@ -75,7 +75,7 @@ public class PartitionThread extends Thread
 
                 if((processedCount % 10) == 0)
                 {
-                    SV_LOGGER.info("chromosome({}) processed {} partitions", mChromosome, mPartitions.size());
+                    SV_LOGGER.debug("chromosome({}) processed {} partitions", mChromosome, mPartitions.size());
                 }
             }
             catch(NoSuchElementException e)

@@ -2,13 +2,16 @@ package com.hartwig.hmftools.sage.common;
 
 import static java.lang.Math.round;
 
-import static com.hartwig.hmftools.sage.SageConstants.LONG_GERMLINE_INSERT_LENGTH;
+import static com.hartwig.hmftools.sage.SageConstants.LONG_INSERT_LENGTH;
 
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
+
+import com.hartwig.hmftools.common.variant.SimpleVariant;
+import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.sage.candidate.Candidate;
 import com.hartwig.hmftools.sage.evidence.ReadContextCounter;
 import com.hartwig.hmftools.sage.filter.SoftFilter;
@@ -23,6 +26,7 @@ public class SageVariant
     private final List<ReadContextCounter> mTumorReadCounters;
 
     private int mMixedImpact;
+    private boolean mNearIndel;
 
     public SageVariant(
             final Candidate candidate,  final List<ReadContextCounter> referenceCounters, final List<ReadContextCounter> tumorReadCounters)
@@ -31,6 +35,7 @@ public class SageVariant
         mReferenceReadCounters = referenceCounters;
         mTumorReadCounters = tumorReadCounters;
         mFilters = Sets.newHashSet();
+        mNearIndel = false;
     }
 
     public Candidate candidate()
@@ -154,6 +159,9 @@ public class SageVariant
     public boolean hasTumorSamples() { return !mTumorReadCounters.isEmpty(); }
     public boolean hasReferenceSamples() { return !mReferenceReadCounters.isEmpty(); }
 
+    public void setNearIndel() { mNearIndel = true; }
+    public boolean nearIndel() { return mNearIndel; }
+
     public SimpleVariant variant() { return mCandidate.variant(); }
 
     public VariantTier tier() { return mCandidate.tier(); }
@@ -181,7 +189,12 @@ public class SageVariant
     public boolean isDelete() { return variant().ref().length() > variant().alt().length(); }
     public boolean isInsert() { return variant().ref().length() < variant().alt().length(); }
 
-    public boolean isLongInsert() { return SimpleVariant.isLongInsert(mCandidate.variant()); }
+    public boolean isLongInsert() { return isLongInsert(mCandidate.variant()); }
+
+    public static boolean isLongInsert(final SimpleVariant variant)
+    {
+        return variant.isInsert() && variant.indelLength() >= LONG_INSERT_LENGTH;
+    }
 
     public String toString()
     {

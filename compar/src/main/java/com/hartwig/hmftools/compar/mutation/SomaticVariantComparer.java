@@ -7,8 +7,7 @@ import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_QUAL;
 import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
 import static com.hartwig.hmftools.compar.ComparConfig.NEW_SOURCE;
 import static com.hartwig.hmftools.compar.ComparConfig.REF_SOURCE;
-import static com.hartwig.hmftools.compar.common.CommonUtils.determineComparisonGenomePosition;
-import static com.hartwig.hmftools.compar.common.MatchLevel.REPORTABLE;
+import static com.hartwig.hmftools.compar.common.CommonUtils.countsAsCalled;
 import static com.hartwig.hmftools.compar.common.MismatchType.INVALID_BOTH;
 import static com.hartwig.hmftools.compar.common.MismatchType.INVALID_NEW;
 import static com.hartwig.hmftools.compar.common.MismatchType.INVALID_REF;
@@ -16,6 +15,10 @@ import static com.hartwig.hmftools.compar.common.MismatchType.NEW_ONLY;
 import static com.hartwig.hmftools.compar.common.MismatchType.REF_ONLY;
 import static com.hartwig.hmftools.compar.mutation.SomaticVariantData.FLD_LPS;
 import static com.hartwig.hmftools.compar.mutation.SomaticVariantData.FLD_SUBCLONAL_LIKELIHOOD;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_PURITY_ADJUSTED_VAF;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_TUMOR_SUPPORTING_READ_COUNT;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_TUMOR_TOTAL_READ_COUNT;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_VARIANT_COPY_NUMBER;
 import static com.hartwig.hmftools.patientdb.database.hmfpatients.tables.Somaticvariant.SOMATICVARIANT;
 
 import java.util.List;
@@ -26,7 +29,7 @@ import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeFunctions;
 import com.hartwig.hmftools.common.purple.PurpleCommon;
-import com.hartwig.hmftools.common.region.BasePosition;
+import com.hartwig.hmftools.common.variant.AllelicDepth;
 import com.hartwig.hmftools.common.variant.Hotspot;
 import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.common.variant.VariantType;
@@ -67,45 +70,19 @@ public class SomaticVariantComparer implements ItemComparer
         // use a custom method optimised for large numbers of variants
         final MatchLevel matchLevel = mConfig.Categories.get(category());
 
-        final List<SomaticVariantData> allRefVariants = Lists.newArrayList();
-        final List<SomaticVariantData> allNewVariants = Lists.newArrayList();
+        final List<SomaticVariantData> refVariants = loadVariants(sampleId, mConfig.SourceNames.get(0));
+        final List<SomaticVariantData> newVariants = loadVariants(sampleId, mConfig.SourceNames.get(1));
 
-        boolean usesNonPurpleVcfs = false;
-        boolean hasRefItems = false;
-        boolean hasNewItems = false;
+        return identifyMismatches(sampleId, mismatches, refVariants, newVariants, matchLevel);
+    }
 
-        for(int i = 0; i <= 1; ++i)
-        {
-            final List<SomaticVariantData> variants = (i == 0) ? allRefVariants : allNewVariants;
+    public boolean identifyMismatches(final String sampleId, final List<Mismatch> mismatches, final List<SomaticVariantData> refVariants,
+            final List<SomaticVariantData> newVariants, final MatchLevel matchLevel)
+    {
+        boolean hasRefItems = refVariants != null;
+        boolean hasNewItems = newVariants != null;
+        final List<String> emptyDiffs = List.of();
 
-            final String sourceName = mConfig.SourceNames.get(i);
-
-            String sourceSampleId = mConfig.sourceSampleId(sourceName, sampleId);
-
-            if(!mConfig.DbConnections.isEmpty())
-            {
-                variants.addAll(loadVariants(sourceSampleId, mConfig.DbConnections.get(sourceName), sourceName));
-            }
-            else
-            {
-                FileSources fileSources = mConfig.FileSources.get(sourceName);
-                List<SomaticVariantData> fileVariants = loadVariants(sourceSampleId, FileSources.sampleInstance(fileSources, sourceSampleId));
-
-                if(fileVariants == null)
-                    continue;
-
-                variants.addAll(fileVariants);
-                usesNonPurpleVcfs |= !fileSources.SomaticVcf.isEmpty();
-            }
-
-            if(sourceName.equals(REF_SOURCE))
-                hasRefItems = true;
-            else
-                hasNewItems = true;
-        }
-
-        final List<String> emptyDiffs = Lists.newArrayList();
-        
         if(!hasRefItems || !hasNewItems)
         {
             InvalidDataItem invalidDataItem = new InvalidDataItem(category());
@@ -120,49 +97,50 @@ public class SomaticVariantComparer implements ItemComparer
             return false;
         }
 
-        final Map<String,List<SomaticVariantData>> refVariantsMap = buildVariantMap(allRefVariants);
-        final Map<String,List<SomaticVariantData>> newVariantsMap = buildVariantMap(allNewVariants);
-        final List<SomaticVariantData> emptyVariants = Lists.newArrayList();
+        final String refSourceSampleId = mConfig.sourceSampleId(REF_SOURCE, sampleId);
+        final String newSourceSampleId = mConfig.sourceSampleId(NEW_SOURCE, sampleId);
+
+        final Map<String,List<SomaticVariantData>> refVariantsMap = buildVariantMap(refVariants);
+        final Map<String,List<SomaticVariantData>> newVariantsMap = buildVariantMap(newVariants);
+        final List<SomaticVariantData> emptyVariants = List.of();
 
         for(HumanChromosome chromosome : HumanChromosome.values())
         {
             String chrStr = chromosome.toString();
-            List<SomaticVariantData> refVariants = refVariantsMap.get(chrStr);
-            List<SomaticVariantData> newVariants = newVariantsMap.get(chrStr);
+            List<SomaticVariantData> chromosomeRefVariants = refVariantsMap.get(chrStr);
+            List<SomaticVariantData> chromosomeNewVariants = newVariantsMap.get(chrStr);
 
-            if(newVariants == null && refVariants == null)
+            if(chromosomeNewVariants == null && chromosomeRefVariants == null)
                 continue;
 
-            if(newVariants == null)
-                newVariants = emptyVariants;
+            if(chromosomeNewVariants == null)
+                chromosomeNewVariants = emptyVariants;
 
-            if(refVariants == null)
-                refVariants = emptyVariants;
+            if(chromosomeRefVariants == null)
+                chromosomeRefVariants = emptyVariants;
 
             int index1 = 0;
             int index2 = 0;
-            while(index1 < refVariants.size())
+            while(index1 < chromosomeRefVariants.size())
             {
-                final SomaticVariantData refVariant = refVariants.get(index1);
+                final SomaticVariantData refVariant = chromosomeRefVariants.get(index1);
 
                 SomaticVariantData matchedVariant = null;
-                MatchFilterStatus matchFilterStatus = null;
 
                 // shift index2 back to index at or before first potentially matching variant
-                while(index2 > 0 && (index2 >= newVariants.size() || newVariants.get(index2).Position >= refVariant.comparisonPosition()))
+                while(index2 > 0 && (index2 >= chromosomeNewVariants.size() || chromosomeNewVariants.get(index2).Position >= refVariant.comparisonPosition()))
                 {
                     --index2;
                 }
 
-                while(index2 < newVariants.size())
+                while(index2 < chromosomeNewVariants.size())
                 {
-                    final SomaticVariantData newVariant = newVariants.get(index2);
+                    final SomaticVariantData newVariant = chromosomeNewVariants.get(index2);
 
                     if(refVariant.matches(newVariant))
                     {
                         matchedVariant = newVariant;
-                        matchFilterStatus = MatchFilterStatus.BOTH_UNFILTERED;
-                        newVariants.remove(index2);
+                        chromosomeNewVariants.remove(index2);
                         break;
                     }
                     else if(newVariant.Position > refVariant.comparisonPosition())
@@ -175,23 +153,21 @@ public class SomaticVariantComparer implements ItemComparer
 
                 if(matchedVariant == null)
                 {
-                    final SomaticVariantData unfilteredVariant = findUnfilteredVariant(refVariant, NEW_SOURCE);
+                    final SomaticVariantData unfilteredVariant = findUnfilteredVariant(refVariant, NEW_SOURCE, newSourceSampleId);
 
                     if(unfilteredVariant != null)
                     {
-                        matchFilterStatus = MatchFilterStatus.NEW_FILTERED;
-                        unfilteredVariant.setComparisonCoordinates(refVariant.Chromosome, refVariant.Position);
                         matchedVariant = unfilteredVariant;
                     }
                 }
 
                 if(matchedVariant != null)
                 {
-                    refVariants.remove(index1);
+                    chromosomeRefVariants.remove(index1);
 
                     if(includeMismatchWithVariant(refVariant, matchLevel) || includeMismatchWithVariant(matchedVariant, matchLevel))
                     {
-                        Mismatch mismatch = refVariant.findDiffs(matchedVariant, mConfig.Thresholds, matchFilterStatus, usesNonPurpleVcfs);
+                        Mismatch mismatch = refVariant.findMismatch(matchedVariant, matchLevel, mConfig.Thresholds, mConfig.IncludeMatches);
 
                         if(mismatch != null)
                             mismatches.add(mismatch);
@@ -203,20 +179,19 @@ public class SomaticVariantComparer implements ItemComparer
                 }
             }
 
-            refVariants.stream().filter(x -> includeMismatchWithVariant(x, matchLevel))
+            chromosomeRefVariants.stream().filter(x -> includeMismatchWithVariant(x, matchLevel))
                     .forEach(x -> mismatches.add(new Mismatch(x, null, REF_ONLY, emptyDiffs)));
 
-            for(SomaticVariantData newVariant : newVariants)
+            for(SomaticVariantData newVariant : chromosomeNewVariants)
             {
                 if(!includeMismatchWithVariant(newVariant, matchLevel))
                     continue;
 
-                SomaticVariantData unfilteredVariant = findUnfilteredVariant(newVariant, REF_SOURCE);
+                SomaticVariantData unfilteredVariant = findUnfilteredVariant(newVariant, REF_SOURCE, refSourceSampleId);
 
                 if(unfilteredVariant != null)
                 {
-                    unfilteredVariant.setComparisonCoordinates(newVariant.Chromosome, newVariant.Position);
-                    mismatches.add(unfilteredVariant.findDiffs(newVariant, mConfig.Thresholds, MatchFilterStatus.REF_FILTERED, usesNonPurpleVcfs));
+                    mismatches.add(unfilteredVariant.findMismatch(newVariant, matchLevel, mConfig.Thresholds, mConfig.IncludeMatches));
                 }
                 else
                 {
@@ -228,7 +203,8 @@ public class SomaticVariantComparer implements ItemComparer
         return true;
     }
 
-    protected SomaticVariantData findUnfilteredVariant(final SomaticVariantData testVariant, final String otherSource)
+    protected SomaticVariantData findUnfilteredVariant(final SomaticVariantData testVariant, final String otherSource,
+            final String sourceSampleId)
     {
         VcfFileReader unfilteredVcfReader = mUnfilteredVcfReaders.get(otherSource);
 
@@ -246,12 +222,15 @@ public class SomaticVariantComparer implements ItemComparer
             if(!testVariant.Ref.equals(ref) || !testVariant.Alt.equals(alt))
                 continue;
 
+            final AllelicDepth tumorAllelicDepth = AllelicDepth.fromGenotype(context.getGenotype(sourceSampleId));
             return new SomaticVariantData(
                     context.getContig(), context.getStart(), ref, alt, VariantType.type(context),
                     "", false, Hotspot.fromVariant(context), VariantTier.fromContext(context),
                     false, "", "", "", "",
                     "", context.hasAttribute(LOCAL_PHASE_SET), (int)context.getPhredScaledQual(),
-                    0, context.getFilters());
+                    0, context.getFilters(), 0, 0,
+                    tumorAllelicDepth.AlleleReadCount, tumorAllelicDepth.TotalReadCount, true, false,
+                    testVariant.Chromosome, testVariant.Position);
         }
 
         return null;
@@ -259,9 +238,7 @@ public class SomaticVariantComparer implements ItemComparer
 
     private boolean includeMismatchWithVariant(SomaticVariantData variant, MatchLevel matchLevel)
     {
-        boolean reportabilityIsFine = (matchLevel != REPORTABLE || variant.reportable());
-        boolean isInGene = !variant.Gene.isEmpty();
-        return reportabilityIsFine && isInGene;
+        return countsAsCalled(variant, matchLevel);
     }
 
     private Map<String,List<SomaticVariantData>> buildVariantMap(final List<SomaticVariantData> variants)
@@ -289,6 +266,10 @@ public class SomaticVariantComparer implements ItemComparer
     {
         thresholds.addFieldThreshold(FLD_QUAL, 20, 0.2);
         thresholds.addFieldThreshold(FLD_SUBCLONAL_LIKELIHOOD, 0.6, 0);
+        thresholds.addFieldThreshold(FLD_VARIANT_COPY_NUMBER, 0.3, 0.15);
+        thresholds.addFieldThreshold(FLD_PURITY_ADJUSTED_VAF, 0.2, 0);
+        thresholds.addFieldThreshold(FLD_TUMOR_SUPPORTING_READ_COUNT, 1, 0.2);
+        thresholds.addFieldThreshold(FLD_TUMOR_TOTAL_READ_COUNT, 1, 0.2);
     }
 
     @Override
@@ -298,6 +279,22 @@ public class SomaticVariantComparer implements ItemComparer
         fieldNames.add(FLD_SUBCLONAL_LIKELIHOOD);
         fieldNames.add(FLD_LPS);
         return fieldNames;
+    }
+
+    private List<SomaticVariantData> loadVariants(final String sampleId, final String sourceName)
+    {
+        String sourceSampleId = mConfig.sourceSampleId(sourceName, sampleId);
+
+        if(!mConfig.DbConnections.isEmpty())
+        {
+            return loadVariants(sourceSampleId, mConfig.DbConnections.get(sourceName), sourceName);
+        }
+        else
+        {
+            String sourceGermlineSampleId = mConfig.sourceGermlineSampleId(sourceName, sampleId);
+            FileSources fileSources = mConfig.FileSources.get(sourceName);
+            return loadVariants(sourceSampleId, FileSources.sampleInstance(fileSources, sourceSampleId, sourceGermlineSampleId));
+        }
     }
 
     @Override
@@ -321,10 +318,7 @@ public class SomaticVariantComparer implements ItemComparer
 
         for(Record record : results)
         {
-            final SomaticVariantData variant = SomaticVariantData.fromRecord(record);
-            BasePosition comparisonPosition = determineComparisonGenomePosition(
-                    variant.Chromosome, variant.Position, sourceName, mConfig.RequiresLiftover, mConfig.LiftoverCache);
-            variant.setComparisonCoordinates(comparisonPosition.Chromosome, comparisonPosition.Position);
+            final SomaticVariantData variant = SomaticVariantData.fromRecord(record, sourceName, mConfig);
             variants.add(variant);
         }
 
@@ -332,7 +326,7 @@ public class SomaticVariantComparer implements ItemComparer
     }
 
     @Override
-    public List<ComparableItem> loadFromFile(final String sampleId, final FileSources fileSources)
+    public List<ComparableItem> loadFromFile(final String sampleId, final String germlineSampleId, final FileSources fileSources)
     {
         final List<ComparableItem> items = Lists.newArrayList();
         loadVariants(sampleId, fileSources).forEach(x -> items.add(x));
@@ -344,8 +338,8 @@ public class SomaticVariantComparer implements ItemComparer
         final List<SomaticVariantData> variants = Lists.newArrayList();
 
         // use the Purple suffix if not specified
-        String vcfFile = !fileSources.SomaticVcf.isEmpty() ?
-                fileSources.SomaticVcf : PurpleCommon.purpleSomaticVcfFile(fileSources.Purple, sampleId);
+        boolean usePurpleVcf = fileSources.SomaticVcf.isEmpty();
+        String vcfFile = usePurpleVcf ? PurpleCommon.purpleSomaticVcfFile(fileSources.Purple, sampleId) : fileSources.SomaticVcf;
 
         VcfFileReader vcfFileReader = new VcfFileReader(vcfFile);
 
@@ -360,14 +354,10 @@ public class SomaticVariantComparer implements ItemComparer
             if(variantContext.isFiltered())
                 continue;
 
-            SomaticVariantData variant = SomaticVariantData.fromContext(variantContext);
+            SomaticVariantData variant = SomaticVariantData.fromContext(variantContext, sampleId, false, usePurpleVcf, fileSources.Source, mConfig);
 
             if(mConfig.RestrictToDrivers && !mConfig.DriverGenes.contains(variant.Gene))
                 continue;
-
-            BasePosition comparisonPosition = determineComparisonGenomePosition(
-                    variant.Chromosome, variant.Position, fileSources.Source, mConfig.RequiresLiftover, mConfig.LiftoverCache);
-            variant.setComparisonCoordinates(comparisonPosition.Chromosome, comparisonPosition.Position);
 
             variants.add(variant);
         }

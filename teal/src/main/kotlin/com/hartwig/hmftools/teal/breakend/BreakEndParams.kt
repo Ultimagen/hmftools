@@ -3,10 +3,10 @@ package com.hartwig.hmftools.teal.breakend
 import com.beust.jcommander.IStringConverter
 import com.beust.jcommander.Parameter
 import com.beust.jcommander.ParameterException
-import com.hartwig.hmftools.common.genome.bed.NamedBedFile
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion
 import com.hartwig.hmftools.common.genome.region.GenomeRegion
 import com.hartwig.hmftools.common.genome.region.GenomeRegions
+import com.hartwig.hmftools.common.region.ChrBaseRegion
 
 private const val DEFAULT_BREAK_POINT_MARK_DUP_DISTANCE = 60
 private const val DEFAULT_SPLIT_TELOMERE_MATCH_THRESHOLD = 0.9
@@ -47,7 +47,7 @@ class BreakEndParams
         }
 
     var refGenomeVersion = RefGenomeVersion.V37
-    var excludedGenomeRegions: List<GenomeRegion> = emptyList()
+    var excludedGenomeRegions: List<ChrBaseRegion> = emptyList()
 
     @Parameter(names = ["-genome_regions"],
         listConverter = IncludedGenomeRegionsConverter::class,
@@ -56,28 +56,23 @@ class BreakEndParams
 
     companion object
     {
-        private fun loadExcludedRegionBed(refGenomeVersion: RefGenomeVersion): List<GenomeRegion>
+        private fun loadExcludedRegionBed(refGenomeVersion: RefGenomeVersion): List<ChrBaseRegion>
         {
-            val resourcePath = when (refGenomeVersion)
+            if (refGenomeVersion != RefGenomeVersion.V37)
             {
-                RefGenomeVersion.V37 -> "blacklistedTelomereRegions.37.bed"
-                RefGenomeVersion.V38 -> "blacklistedTelomereRegions.38.bed"
-                else -> null
+                // these regions have been removed since HG37
+                return emptyList()
             }
-            if (resourcePath != null)
-            {
-                val bedStream: java.io.InputStream = BreakEndParams::class.java.classLoader.getResourceAsStream(resourcePath)!!
-                // write the resource out to a temp file and read it back
-                val tempFile = java.io.File.createTempFile("teal-region-bed", null)
-                tempFile.deleteOnExit()
 
-                // cannot use readAllBytes since we are still on java8
-                val bytes = ByteArray(bedStream.available())
-                java.io.DataInputStream(bedStream).readFully(bytes)
-                tempFile.writeBytes(bytes)
-                return NamedBedFile.readBedFile(tempFile.path)
-            }
-            return emptyList()
+            val resourcePath = "blacklistedTelomereRegions.37.bed"
+            val bedStream: java.io.InputStream = BreakEndParams::class.java.classLoader.getResourceAsStream(resourcePath)!!
+            // write the resource out to a temp file and read it back
+            val tempFile = java.io.File.createTempFile("teal-region-bed", null)
+            tempFile.deleteOnExit()
+
+            tempFile.writeBytes(bedStream.readAllBytes())
+
+            return ChrBaseRegion.loadChrBaseRegionList(tempFile.path)
         }
 
         class IncludedGenomeRegionsConverter : IStringConverter<List<GenomeRegion>?>

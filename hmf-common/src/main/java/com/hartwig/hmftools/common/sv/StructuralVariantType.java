@@ -1,6 +1,10 @@
 package com.hartwig.hmftools.common.sv;
 
-import org.jetbrains.annotations.NotNull;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SV_TYPE;
+
+import javax.annotation.Nullable;
+
+import htsjdk.variant.variantcontext.VariantContext;
 
 public enum StructuralVariantType
 {
@@ -12,37 +16,10 @@ public enum StructuralVariantType
     INV,
     SGL;
 
-    @NotNull
-    public static StructuralVariantType fromAttribute(@NotNull String svType)
+    public static @Nullable StructuralVariantType fromContext(final VariantContext context)
     {
-        if(svType.startsWith("DUP"))
-        {
-            return DUP;
-        }
-        return StructuralVariantType.valueOf(svType);
+        return context.hasAttribute(SV_TYPE) ? StructuralVariantType.valueOf(context.getAttributeAsString(SV_TYPE, "")) : null;
     }
 
-    public static int typeAsInt(@NotNull StructuralVariantType type)
-    {
-        // ordered alphabetically
-        switch(type)
-        {
-            case BND:
-                return 0;
-            case DEL:
-                return 1;
-            case DUP:
-                return 2;
-            case INF:
-                return 3;
-            case INS:
-                return 4;
-            case INV:
-                return 5;
-            case SGL:
-                return 6;
-        }
-
-        return 0;
-    }
+    public static int typeAsInt(StructuralVariantType type) { return type.ordinal(); }
 }

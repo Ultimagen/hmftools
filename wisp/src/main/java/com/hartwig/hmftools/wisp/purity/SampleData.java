@@ -24,17 +24,19 @@ public class SampleData
 {
     public final String PatientId;
     public final String TumorId;
+    public final String ReferenceId;
     public final String AmberExtraTumorId;
     public final List<String> SampleIds;
     public final String VcfTag;
     public final boolean IsPanel;
 
     public SampleData(
-            final String patientId, final String tumorId, final List<String> sampleIds, final String vcfTag, final boolean isPanel,
+            final String patientId, final String tumorId, final String referenceId, final List<String> sampleIds, final String vcfTag, final boolean isPanel,
             final String amberExtraTumorId)
     {
         PatientId = patientId;
         TumorId = tumorId;
+        ReferenceId = referenceId;
         SampleIds = sampleIds;
         VcfTag = vcfTag;
         IsPanel = isPanel;
@@ -42,6 +44,7 @@ public class SampleData
     }
 
     public boolean isBatchControl() { return VcfTag != null && VcfTag.contains(BATCH_CONTROL_TAG); }
+    public boolean hasReference() { return ReferenceId != null && !ReferenceId.isEmpty(); }
 
     public String toString()
     {
@@ -70,6 +73,9 @@ public class SampleData
             int patientIndex = fieldsIndexMap.get("PatientId");
             int tumorIndex = fieldsIndexMap.get("TumorId");
             int sampleIdsIndex = fieldsIndexMap.get("SampleIds");
+
+            // optional fields
+            Integer referenceIndex = fieldsIndexMap.get("ReferenceId");
             Integer vcfIndex = fieldsIndexMap.get("VcfTag");
             Integer isPanelIndex = fieldsIndexMap.get("IsPanel");
             Integer amberExtraTumorIdIndex = fieldsIndexMap.get("AmberExtraTumorId");
@@ -87,10 +93,11 @@ public class SampleData
 
                 String patientId = values[patientIndex];
                 String tumorId = values[tumorIndex];
+                String referenceId = referenceIndex != null ? values[referenceIndex] : "";
                 String amberExtraTumorId = amberExtraTumorIdIndex != null ? values[amberExtraTumorIdIndex] : null;
                 List<String> sampleIds = sampleIdsFromStr(values[sampleIdsIndex]);
 
-                samples.add(new SampleData(patientId, tumorId, sampleIds, vcfTag, isPanel, amberExtraTumorId));
+                samples.add(new SampleData(patientId, tumorId, referenceId, sampleIds, vcfTag, isPanel, amberExtraTumorId));
             }
         }
         catch (IOException e)

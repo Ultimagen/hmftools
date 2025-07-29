@@ -10,10 +10,10 @@ import com.google.common.collect.Maps;
 import com.google.common.io.Resources;
 import com.hartwig.hmftools.common.chord.ChordTestFactory;
 import com.hartwig.hmftools.common.doid.DoidTestFactory;
-import com.hartwig.hmftools.common.flagstat.FlagstatTestFactory;
+import com.hartwig.hmftools.common.metrics.FlagstatTestFactory;
 import com.hartwig.hmftools.common.lilac.LilacTestFactory;
 import com.hartwig.hmftools.common.linx.LinxTestFactory;
-import com.hartwig.hmftools.common.metrics.WGSMetricsTestFactory;
+import com.hartwig.hmftools.common.metrics.BamMetricsTestFactory;
 import com.hartwig.hmftools.common.peach.PeachTestFactory;
 import com.hartwig.hmftools.datamodel.hla.ImmutableLilacRecord;
 import com.hartwig.hmftools.datamodel.hla.LilacAllele;
@@ -96,7 +96,7 @@ public final class TestOrangeReportFactory
     {
         return builder().experimentType(ExperimentType.WHOLE_GENOME)
                 .addConfiguredPrimaryTumor(OrangeConversion.convert(DoidTestFactory.createDoidNode("1", "cancer type")))
-                .platinumVersion("v5.35")
+                .pipelineVersion("v6.1")
                 .refSample(createMinimalOrangeSample())
                 .germlineMVLHPerGene(createTestGermlineMVLHPerGene())
                 .purple(createTestPurpleData())
@@ -114,7 +114,7 @@ public final class TestOrangeReportFactory
     private static OrangeSample createMinimalOrangeSample()
     {
         return ImmutableOrangeSample.builder()
-                .metrics(OrangeConversion.convert(WGSMetricsTestFactory.createMinimalTestWGSMetrics()))
+                .metrics(OrangeConversion.convert(BamMetricsTestFactory.createMinimalTestWGSMetrics()))
                 .flagstat(OrangeConversion.convert(FlagstatTestFactory.createMinimalTestFlagstat()))
                 .build();
     }
@@ -167,7 +167,7 @@ public final class TestOrangeReportFactory
                 .allGermlineVariants(Lists.newArrayList())
                 .reportableGermlineVariants(Lists.newArrayList())
                 .additionalSuspectGermlineVariants(Lists.newArrayList())
-                .reportableGermlineFullLosses(Lists.newArrayList())
+                .reportableGermlineFullDels(Lists.newArrayList())
                 .reportableGermlineLossOfHeterozygosities(Lists.newArrayList())
                 .build();
     }

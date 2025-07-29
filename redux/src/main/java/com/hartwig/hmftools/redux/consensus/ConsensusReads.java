@@ -1,21 +1,14 @@
 package com.hartwig.hmftools.redux.consensus;
 
 import static java.lang.Math.max;
-import static java.lang.Math.min;
 
 import static com.hartwig.hmftools.common.bam.CigarUtils.cigarBaseLength;
-import static com.hartwig.hmftools.common.bam.SamRecordUtils.MATE_CIGAR_ATTRIBUTE;
-import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_CHROMOSOME_NAME;
-import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_CIGAR;
-import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_POSITION;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.NUM_MUTATONS_ATTRIBUTE;
-import static com.hartwig.hmftools.common.bam.SamRecordUtils.UNMAP_ATTRIBUTE;
+import static com.hartwig.hmftools.common.sequencing.SequencingType.ILLUMINA;
 import static com.hartwig.hmftools.redux.ReduxConfig.RD_LOGGER;
 import static com.hartwig.hmftools.redux.common.Constants.CONSENSUS_MAX_DEPTH;
 import static com.hartwig.hmftools.redux.common.Constants.CONSENSUS_PREFIX;
-import static com.hartwig.hmftools.redux.common.FragmentUtils.readToString;
-import static com.hartwig.hmftools.redux.common.ReadUnmapper.parseUnmappedCoords;
-import static com.hartwig.hmftools.redux.consensus.CigarFrequency.selectTemplateRead;
+import static com.hartwig.hmftools.redux.common.ReadInfo.readToString;
 import static com.hartwig.hmftools.redux.consensus.ConsensusOutcome.ALIGNMENT_ONLY;
 import static com.hartwig.hmftools.redux.consensus.ConsensusOutcome.INDEL_FAIL;
 import static com.hartwig.hmftools.redux.consensus.ConsensusOutcome.SUPPLEMENTARY;
@@ -28,12 +21,15 @@ import static htsjdk.samtools.CigarOperator.I;
 import static htsjdk.samtools.CigarOperator.M;
 
 import java.util.List;
+import java.util.Map;
 
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
+import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
+import com.hartwig.hmftools.common.sequencing.SequencingType;
+import com.hartwig.hmftools.redux.common.FragmentCoords;
 
 import htsjdk.samtools.Cigar;
 import htsjdk.samtools.CigarElement;
@@ -41,59 +37,61 @@ import htsjdk.samtools.SAMRecord;
 
 public class ConsensusReads
 {
-    private final RefGenomeInterface mRefGenome;
+    private final RefGenome mRefGenome;
     private final BaseBuilder mBaseBuilder;
     private final IndelConsensusReads mIndelConsensusReads;
+    private final NonStandardBaseBuilder mNonStandardBaseBuilder;
 
     private final ConsensusStatistics mConsensusStats;
     private boolean mValidateConsensusReads;
 
-    public ConsensusReads(final RefGenomeInterface refGenome, final ConsensusStatistics consensusStats)
+    public ConsensusReads(final RefGenomeInterface refGenome, final SequencingType sequencingType, final ConsensusStatistics consensusStats)
     {
-        mRefGenome = refGenome;
-        mBaseBuilder = new BaseBuilder(refGenome, consensusStats);
+        mRefGenome = new RefGenome(refGenome);
+        mNonStandardBaseBuilder = NonStandardBaseBuilder.fromSequencingType(sequencingType, mRefGenome);
+        if(mNonStandardBaseBuilder == null)
+        {
+            mBaseBuilder = new BaseBuilder(mRefGenome, consensusStats);
+            mIndelConsensusReads = new IndelConsensusReads(mBaseBuilder);
+        }
+        else
+        {
+            mBaseBuilder = null;
+            mIndelConsensusReads = null;
+        }
+
         mConsensusStats = consensusStats;
-        mIndelConsensusReads = new IndelConsensusReads(mBaseBuilder);
         mValidateConsensusReads = false;
+    }
+
+    @VisibleForTesting
+    public ConsensusReads(final RefGenomeInterface refGenome, final SequencingType sequencingType)
+    {
+        this(refGenome, sequencingType, new ConsensusStatistics());
     }
 
     @VisibleForTesting
     public ConsensusReads(final RefGenomeInterface refGenome)
     {
-        this(refGenome, new ConsensusStatistics());
+        this(refGenome, ILLUMINA);
     }
 
     public void setDebugOptions(boolean validateConsensusReads)
     {
         mValidateConsensusReads = validateConsensusReads;
     }
-    public ConsensusStatistics consensusStats() { return mConsensusStats; }
 
     public ConsensusReadInfo createConsensusRead(
-            final List<SAMRecord> reads, @Nullable final SAMRecord previousTemplateRead,
-            @Nullable final String groupReadId, @Nullable final String umiId)
+            final List<SAMRecord> reads, final FragmentCoords fragmentCoords, @Nullable final String umiId)
     {
-        String consensusReadId;
-        SAMRecord templateRead;
+        String consensusReadId  = "";
 
-        if(previousTemplateRead == null)
-        {
-            templateRead = selectTemplateRead(reads);
-            consensusReadId = formConsensusReadId(templateRead, umiId);
-        }
-        else
-        {
-            // match the mate or supplmentary template read to that of the primary
-            templateRead = reads.stream().filter(x -> x.getReadName().equals(previousTemplateRead.getReadName())).findFirst().orElse(null);
-            consensusReadId = groupReadId;
-        }
+        SAMRecord templateRead = TemplateReads.selectTemplateRead(reads, fragmentCoords);
+        consensusReadId = formConsensusReadId(templateRead, umiId);
 
-        if(reads.size() <= 1 || reads.get(0).getReadUnmappedFlag() || templateRead == null)
+        if(reads.size() <= 1 || reads.get(0).getReadUnmappedFlag())
         {
-            SAMRecord consensusRead = buildFromRead(
-                    templateRead != null ? templateRead : reads.get(0),
-                    consensusReadId,
-                    templateRead == null ? previousTemplateRead : null);
+            SAMRecord consensusRead = buildFromRead(templateRead, consensusReadId, templateRead.getFirstOfPairFlag());
 
             return new ConsensusReadInfo(consensusRead, templateRead, SUPPLEMENTARY);
         }
@@ -106,7 +104,7 @@ public class ConsensusReads
         }
         else
         {
-            readsView = reads.subList(0, CONSENSUS_MAX_DEPTH);
+            readsView = Lists.newArrayList(reads.subList(0, CONSENSUS_MAX_DEPTH));
 
             if(readsView.stream().noneMatch(x -> x == templateRead)) // ensure it is included since it drives cigar selection
                 readsView.add(templateRead);
@@ -124,7 +122,11 @@ public class ConsensusReads
             consensusState.MapQuality = max(consensusState.MapQuality, read.getMappingQuality());
         }
 
-        if(hasIndels)
+        if(mNonStandardBaseBuilder != null)
+        {
+            mNonStandardBaseBuilder.buildConsensusRead(readsView, consensusState, hasIndels);
+        }
+        else if(hasIndels)
         {
             mIndelConsensusReads.buildIndelComponents(readsView, consensusState, templateRead);
 
@@ -136,7 +138,7 @@ public class ConsensusReads
 
                 // fall-back to selecting the read with the longest aligned bases, highest average qual
                 SAMRecord primaryRead = selectPrimaryRead(readsView);
-                SAMRecord consensusRead = buildFromRead(primaryRead, consensusReadId, null);
+                SAMRecord consensusRead = buildFromRead(primaryRead, consensusReadId, templateRead.getFirstOfPairFlag());
 
                 return new ConsensusReadInfo(consensusRead, templateRead, consensusState.outcome());
             }
@@ -156,11 +158,6 @@ public class ConsensusReads
         consensusState.setNumMutations();
         SAMRecord consensusRead = createConsensusRead(consensusState, templateRead, consensusReadId);
 
-        if(consensusRead.getMateUnmappedFlag())
-        {
-            checkNonHumanMates(consensusRead, readsView);
-        }
-
         if(mValidateConsensusReads)
         {
             ValidationReason validReason = isValidConsensusRead(consensusRead);
@@ -175,37 +172,13 @@ public class ConsensusReads
 
     public void setChromosomeLength(int chromosomeLength)
     {
-        mBaseBuilder.setChromosomLength(chromosomeLength);
-    }
-
-    private static void checkNonHumanMates(final SAMRecord consensusRead, final List<SAMRecord> reads)
-    {
-        // if all mates were unmapped from non-human contigs, then mark this read as unpaired
-        for(SAMRecord read : reads)
+        if(mBaseBuilder != null)
         {
-            if(!read.getMateUnmappedFlag())
-                return;
-
-            String mateCoordsStr = read.getStringAttribute(UNMAP_ATTRIBUTE);
-
-            if(mateCoordsStr == null)
-                return;
-
-            String[] mateCoords = parseUnmappedCoords(mateCoordsStr);
-            String mateChr = mateCoords[0];
-
-            if(HumanChromosome.contains(mateChr))
-                return;
+            mBaseBuilder.setChromosomLength(chromosomeLength);
+            return;
         }
 
-        // mark this consensus as unpaired since no duplicates will be formed for the mates
-        consensusRead.setReadPairedFlag(false);
-        consensusRead.setFirstOfPairFlag(false);
-        consensusRead.setSecondOfPairFlag(false);
-        consensusRead.setMateUnmappedFlag(false);
-        consensusRead.setMateNegativeStrandFlag(false);
-        consensusRead.setMateAlignmentStart(NO_POSITION);
-        consensusRead.setMateReferenceName(NO_CHROMOSOME_NAME);
+        mNonStandardBaseBuilder.setChromosomeLength(chromosomeLength);
     }
 
     private static SAMRecord createConsensusRead(final ConsensusState state, final SAMRecord templateRead, final String groupReadId)
@@ -227,6 +200,18 @@ public class ConsensusReads
 
         templateRead.getAttributes().forEach(x -> record.setAttribute(x.tag, x.value));
         record.setFlags(templateRead.getFlags());
+        record.setDuplicateReadFlag(false); // being the new primary
+        record.setAttribute(NUM_MUTATONS_ATTRIBUTE, state.NumMutations);
+
+        for(Map.Entry<String, Object> tagAndValue : state.Attributes.entrySet())
+        {
+            String tag = tagAndValue.getKey();
+            Object value = tagAndValue.getValue();
+            record.setAttribute(tag, value);
+        }
+
+        if(!record.getReadPairedFlag())
+            return record;
 
         if(templateRead.getMateReferenceIndex() >= 0)
         {
@@ -240,10 +225,7 @@ public class ConsensusReads
             record.setMateAlignmentStart(templateRead.getMateAlignmentStart());
         }
 
-        record.setDuplicateReadFlag(false); // being the new primary
-
         record.setInferredInsertSize(templateRead.getInferredInsertSize());
-        record.setAttribute(NUM_MUTATONS_ATTRIBUTE, state.NumMutations);
         return record;
     }
 
@@ -268,7 +250,7 @@ public class ConsensusReads
             return groupId + readId.substring(lastDelim + 1);
     }
 
-    public SAMRecord buildFromRead(final SAMRecord read, final String groupReadId, @Nullable final SAMRecord primaryTemplateRead)
+    public SAMRecord buildFromRead(final SAMRecord read, final String groupReadId, boolean isFirstOfPair)
     {
         SAMRecord record = new SAMRecord(read.getHeader());
 
@@ -280,39 +262,18 @@ public class ConsensusReads
 
         read.getAttributes().forEach(x -> record.setAttribute(x.tag, x.value));
 
-        if(read.getReadUnmappedFlag() && primaryTemplateRead != null)
-        {
-            // rather than use this duplicate's unmapped fields, infer from the mapped primary used for the consensus for consistency
-            record.setReadUnmappedFlag(true);
-            record.setMateReferenceName(primaryTemplateRead.getReferenceName());
-            record.setMateAlignmentStart(primaryTemplateRead.getAlignmentStart());
-            record.setMateReferenceIndex(primaryTemplateRead.getReferenceIndex());
-
-            record.setAlignmentStart(primaryTemplateRead.getAlignmentStart());
-            record.setCigarString(NO_CIGAR);
-
-            record.setAttribute(MATE_CIGAR_ATTRIBUTE, primaryTemplateRead.getCigarString());
-            record.setReadPairedFlag(true);
-
-            if(primaryTemplateRead.getFirstOfPairFlag())
-                record.setSecondOfPairFlag(true);
-            else
-                record.setFirstOfPairFlag(true);
-
-            record.setMateNegativeStrandFlag(primaryTemplateRead.getReadNegativeStrandFlag());
-            record.setReadNegativeStrandFlag(primaryTemplateRead.getMateNegativeStrandFlag());
-        }
-        else
-        {
-            record.setAlignmentStart(read.getAlignmentStart());
-            record.setCigar(read.getCigar());
-            record.setMateReferenceName(read.getMateReferenceName());
-            record.setMateAlignmentStart(read.getMateAlignmentStart());
-            record.setMateReferenceIndex(read.getMateReferenceIndex());
-            record.setFlags(read.getFlags());
-        }
-
+        record.setAlignmentStart(read.getAlignmentStart());
+        record.setCigar(read.getCigar());
+        record.setFlags(read.getFlags());
+        record.setFirstOfPairFlag(isFirstOfPair);
+        record.setSecondOfPairFlag(!isFirstOfPair);
         record.setDuplicateReadFlag(false);
+        if(!record.getReadPairedFlag())
+            return record;
+
+        record.setMateReferenceName(read.getMateReferenceName());
+        record.setMateAlignmentStart(read.getMateAlignmentStart());
+        record.setMateReferenceIndex(read.getMateReferenceIndex());
 
         record.setInferredInsertSize(read.getInferredInsertSize());
 

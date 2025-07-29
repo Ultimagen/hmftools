@@ -1,12 +1,14 @@
 package com.hartwig.hmftools.pave.impact;
 
+import static java.lang.String.format;
+
 import static com.hartwig.hmftools.common.gene.CodingBaseData.PHASE_NONE;
 import static com.hartwig.hmftools.common.gene.TranscriptCodingType.CODING;
 import static com.hartwig.hmftools.common.gene.TranscriptRegionType.EXONIC;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
 
 import java.util.StringJoiner;
 
@@ -120,5 +122,11 @@ public class CodingContext
         sj.add(String.valueOf(NearestExonDistance));
 
         return sj.toString();
+    }
+
+    public String toString()
+    {
+        return format("codingBase(%d range %d-%d) upstreamPhase(%d) exonDist(%d)",
+                CodingBase, CodingPositionRange[SE_START], CodingPositionRange[SE_END], UpstreamPhase,  NearestExonDistance);
     }
 }

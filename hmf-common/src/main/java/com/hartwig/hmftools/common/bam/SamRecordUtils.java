@@ -1,16 +1,18 @@
 package com.hartwig.hmftools.common.bam;
 
+import static java.lang.Math.abs;
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.common.bam.CigarUtils.getReadBoundaryPosition;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.NEG_ORIENT;
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.POS_ORIENT;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_REV;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_FWD;
 
 import static htsjdk.samtools.CigarOperator.D;
 
 import java.util.List;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 
 import org.apache.logging.log4j.LogManager;
@@ -28,23 +30,33 @@ public final class SamRecordUtils
 {
     public static final String SUPPLEMENTARY_ATTRIBUTE = SAMTag.SA.name();
     public static final String MATE_CIGAR_ATTRIBUTE = SAMTag.MC.name();
+    public static final String MATE_QUALITY_ATTRIBUTE = SAMTag.MQ.name();
     public static final String NUM_MUTATONS_ATTRIBUTE = SAMTag.NM.name();
+    public static final String MISMATCHES_AND_DELETIONS_ATTRIBUTE = SAMTag.MD.name();
     public static final String SECONDARY_ATTRIBUTE = SAMTag.HI.name();
     public static final String ALIGNMENT_SCORE_ATTRIBUTE = SAMTag.AS.name();
+    public static final String READ_GROUP_ATTRIBUTE = SAMTag.RG.name();
 
-    // in-house attributes
+    public static final String XS_ATTRIBUTE = "XS";
+
+
+    // Redux tags
     public static final String CONSENSUS_READ_ATTRIBUTE = "CR";
-    public static final String UMI_TYPE_ATTRIBUTE = "UT";
-    public static final String UMI_ATTRIBUTE = "UI";
+    public static final String UMI_TYPE_ATTRIBUTE = "UT"; // UMI type - single, dual/duplex or no duplicates
+    public static final String UMI_ATTRIBUTE = "UI"; // the UMI group ID
     public static final String CONSENSUS_INFO_DELIM = ";";
+    public static final String BASE_MODIFICATIONS_ATTRIBUTE = "MM";
 
-    public static final String UNMAP_ATTRIBUTE = "UM"; // a read has been unmapped (ie by MarkDups)
+    public static final String UNMAP_ATTRIBUTE = "UM"; // the read was unmapped
+    public static final String UNMAPP_COORDS_DELIM = ":";
 
     public static final String NO_CHROMOSOME_NAME = "*";
     public static final String NO_CIGAR = "*";
     public static final int NO_CHROMOSOME_INDEX = -1;
     public static final int NO_POSITION = 0;
     public static final int INVALID_READ_INDEX = -1;
+
+    public static final int UNSET_COUNT = -1;
 
     private static final int PHRED_OFFSET = 33;
 
@@ -66,6 +78,17 @@ public final class SamRecordUtils
         return record.getReadPairedFlag() && record.getMateNegativeStrandFlag();
     }
 
+    public static int inferredInsertSize(final SAMRecord record)
+    {
+        if(record.getReadPairedFlag())
+            return record.getInferredInsertSize();
+
+        int insertSize = record.getInferredInsertSize();
+        return insertSize > 0 ? insertSize : record.getReadBases().length;
+    }
+
+    public static int inferredInsertSizeAbs(final SAMRecord record) { return abs(inferredInsertSize(record)); }
+
     public static boolean properPair(final SAMRecord record)
     {
         return record.getReadPairedFlag() && record.getProperPairFlag();
@@ -76,7 +99,7 @@ public final class SamRecordUtils
         return record.getReadPairedFlag() && record.getMateUnmappedFlag();
     }
 
-    public static byte orientation(final SAMRecord read) { return !read.getReadNegativeStrandFlag() ? POS_ORIENT : NEG_ORIENT; }
+    public static byte orientation(final SAMRecord read) { return !read.getReadNegativeStrandFlag() ? ORIENT_FWD : ORIENT_REV; }
 
     public static boolean isFlagSet(final int flags, final SAMFlag flag) { return (flags & flag.intValue()) != 0; }
 
@@ -85,21 +108,28 @@ public final class SamRecordUtils
         return quality - PHRED_OFFSET;
     }
 
-    public static void addConsensusReadAttribute(final SAMRecord record, int readCount, int firstInPairCount, final UmiReadType umiReadType)
+    public static void addConsensusReadAttribute(
+            final SAMRecord record, int readCount, int firstInPairCount, final UmiReadType umiReadType, int pcrClusterCount)
     {
-        record.setAttribute(CONSENSUS_READ_ATTRIBUTE, format("%d;%d", readCount, firstInPairCount));
+        String consensusReadValue = pcrClusterCount == UNSET_COUNT
+                ? format("%d;%d", readCount, firstInPairCount)
+                : format("%d;%d;%d", readCount, firstInPairCount, pcrClusterCount);
+        record.setAttribute(CONSENSUS_READ_ATTRIBUTE, consensusReadValue);
         record.setAttribute(UMI_TYPE_ATTRIBUTE, umiReadType.toString());
     }
 
-    @Deprecated
-    private static final String DUAL_STRAND_OLD = "DUAL_STRAND";
+    @VisibleForTesting
+    public static void addConsensusReadAttribute(final SAMRecord record, int readCount, int firstInPairCount, final UmiReadType umiReadType)
+    {
+        addConsensusReadAttribute(record, readCount, firstInPairCount, umiReadType, UNSET_COUNT);
+    }
 
     public static UmiReadType extractUmiType(final SAMRecord record)
     {
         String umiTypeStr = record.getStringAttribute(UMI_TYPE_ATTRIBUTE);
 
         if(umiTypeStr != null)
-            return umiTypeStr.equals(DUAL_STRAND_OLD) ? UmiReadType.DUAL : UmiReadType.valueOf(umiTypeStr);
+            return UmiReadType.valueOf(umiTypeStr);
         else
             return UmiReadType.NONE;
     }
@@ -123,12 +153,21 @@ public final class SamRecordUtils
         return getReadBoundaryPosition(readStart, cigarStr, forwardStrand, true);
     }
 
-    public static int getFivePrimeUnclippedPosition(final SAMRecord read)
+    public static int getThreePrimeUnclippedPosition(final int readStart, @NotNull final String cigarStr, final boolean forwardStrand)
     {
-        // returns the 5' position of the read, factoring in any soft-clipped bases
+        return getReadBoundaryPosition(readStart, cigarStr, !forwardStrand, true);
+    }
+
+    public static int getFivePrimeUnclippedPosition(final SAMRecord read) { return getUnclippedPosition(read, true); }
+
+    public static int getThreePrimeUnclippedPosition(final SAMRecord read) { return getUnclippedPosition(read, false); }
+
+    public static int getUnclippedPosition(final SAMRecord read, boolean fivePrime)
+    {
+        // returns the 5' or 3' position of the read, factoring in any soft-clipped bases
         int position;
 
-        if(orientation(read) == POS_ORIENT)
+        if((orientation(read) == ORIENT_FWD) == fivePrime)
         {
             position = read.getAlignmentStart();
             if(read.getCigar().isLeftClipped())

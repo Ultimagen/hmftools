@@ -15,11 +15,6 @@
 
     <dependencies>
         <dependency>
-            <groupId>org.immutables</groupId>
-            <artifactId>value</artifactId>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
             <groupId>com.intellij</groupId>
             <artifactId>annotations</artifactId>
         </dependency>
@@ -63,9 +58,21 @@
         </dependency>
 
         <dependency>
+            <groupId>org.pcollections</groupId>
+            <artifactId>pcollections</artifactId>
+            <version>4.0.2</version>
+        </dependency>
+
+        <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.16.1</version>
+            <scope>compile</scope>
         </dependency>
     </dependencies>
 
@@ -82,16 +89,6 @@
                     </execution>
                 </executions>
             </plugin>
-
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <source>${maven.compiler.source}</source>
-                    <target>${maven.compiler.target}</target>
-                </configuration>
-            </plugin>
-
         </plugins>
     </build>
 

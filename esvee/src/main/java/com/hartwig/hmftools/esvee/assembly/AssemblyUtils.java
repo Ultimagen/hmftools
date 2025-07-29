@@ -1,23 +1,25 @@
 package com.hartwig.hmftools.esvee.assembly;
 
 import static java.lang.Math.abs;
-import static java.lang.Math.floor;
-import static java.lang.Math.log10;
+import static java.lang.Math.ceil;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
-import static com.hartwig.hmftools.esvee.AssemblyConstants.PROXIMATE_DEL_LENGTH;
-import static com.hartwig.hmftools.esvee.AssemblyConstants.PROXIMATE_DUP_LENGTH;
+import static com.hartwig.hmftools.common.codon.Nucleotides.DNA_N_BYTE;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.PROXIMATE_DEL_LENGTH;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.PROXIMATE_DUP_LENGTH;
 import static com.hartwig.hmftools.esvee.assembly.types.AssemblyOutcome.NO_LINK;
 import static com.hartwig.hmftools.esvee.assembly.types.AssemblyOutcome.SECONDARY;
 import static com.hartwig.hmftools.esvee.assembly.types.AssemblyOutcome.SUPP_ONLY;
 import static com.hartwig.hmftools.esvee.assembly.types.RepeatInfo.calcTrimmedBaseLength;
+import static com.hartwig.hmftools.esvee.common.CommonUtils.belowMinQual;
 import static com.hartwig.hmftools.esvee.common.CommonUtils.createByteArray;
 import static com.hartwig.hmftools.esvee.common.SvConstants.LOW_BASE_QUAL_THRESHOLD;
 
 import java.util.List;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.codon.Nucleotides;
 import com.hartwig.hmftools.esvee.assembly.types.AssemblyLink;
 import com.hartwig.hmftools.esvee.assembly.types.AssemblyOutcome;
 import com.hartwig.hmftools.esvee.assembly.types.SupportRead;
@@ -27,9 +29,18 @@ import com.hartwig.hmftools.esvee.assembly.read.Read;
 
 public final class AssemblyUtils
 {
+    public static final int DNA_BASE_COUNT = Nucleotides.DNA_BASES.length + 1; // allows for Ns
+    public static final byte NO_BASE = 0;
+
     public static int mismatchesPerComparisonLength(final int sequenceLength)
     {
-        return (int)floor(log10(sequenceLength + 1));
+        if(sequenceLength < 15)
+            return 0;
+
+        if(sequenceLength <= 100)
+            return 1;
+
+        return (int)ceil(sequenceLength / 200.0) + 1;
     }
 
     public static int readQualFromJunction(final Read read, final Junction junction)
@@ -63,16 +74,14 @@ public final class AssemblyUtils
         return baseQualTotal;
     }
 
-    public static final byte N_BASE = 78;
-
     public static boolean basesMatch(
-            final byte first, final byte second, final byte firstQual, final byte secondQual, final int lowQualThreshold)
+            final byte first, final byte second, final byte firstQual, final byte secondQual)
     {
-        return first == second || first == N_BASE || second == N_BASE
-                || firstQual < lowQualThreshold || secondQual < lowQualThreshold;
+        return first == second || first == DNA_N_BYTE || second == DNA_N_BYTE || belowMinQual(firstQual) || belowMinQual(secondQual);
     }
 
-    public static boolean isLocalAssemblyCandidate(final JunctionAssembly first, final JunctionAssembly second)
+    public static boolean isLocalAssemblyCandidate(
+            final JunctionAssembly first, final JunctionAssembly second, boolean checkConcordantReads, boolean checkLineInsertion)
     {
         if(!first.junction().Chromosome.equals(second.junction().Chromosome))
             return false;
@@ -88,24 +97,33 @@ public final class AssemblyUtils
         if((isDelType && junctionDistance > PROXIMATE_DEL_LENGTH) || (!isDelType && junctionDistance > PROXIMATE_DUP_LENGTH))
             return false;
 
-        // must have concordant reads with mates crossing the other junction
-        JunctionAssembly lowerAssembly = firstIsLower ? first : second;
-        JunctionAssembly upperAssembly = !firstIsLower ? first : second;
-        Junction lowerJunction = firstIsLower ? first.junction() : second.junction();
-        Junction upperJunction = !firstIsLower ? first.junction() : second.junction();
+        if(!checkConcordantReads && !checkLineInsertion)
+            return true;
 
-        if(lowerAssembly.support().stream().noneMatch(x -> isCrossingConcordantRead(x, upperJunction, false)))
-            return false;
+        if(checkLineInsertion && (first.hasLineSequence() || second.hasLineSequence()))
+            return true;
 
-        if(upperAssembly.support().stream().noneMatch(x -> isCrossingConcordantRead(x, lowerJunction, true)))
-            return false;
+        if(checkConcordantReads)
+        {
+            // must have concordant reads with mates crossing the other junction
+            JunctionAssembly lowerAssembly = firstIsLower ? first : second;
+            JunctionAssembly upperAssembly = !firstIsLower ? first : second;
+            Junction lowerJunction = firstIsLower ? first.junction() : second.junction();
+            Junction upperJunction = !firstIsLower ? first.junction() : second.junction();
 
-        return true;
+            if(lowerAssembly.support().stream().anyMatch(x -> isCrossingConcordantRead(x, upperJunction, false))
+            || upperAssembly.support().stream().anyMatch(x -> isCrossingConcordantRead(x, lowerJunction, true)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static boolean isCrossingConcordantRead(final SupportRead read, final Junction junction, boolean requireLower)
     {
-        if(read.isDiscordant() || read.isMateUnmapped() || !read.isPairedRead())
+        if(read.isDiscordant() || !read.isPairedRead() || read.isMateUnmapped())
             return false;
 
         if(requireLower)
@@ -121,7 +139,51 @@ public final class AssemblyUtils
 
     public static byte[] createMinBaseQuals(final int length) { return createByteArray(length, (byte) (LOW_BASE_QUAL_THRESHOLD + 1)); }
 
-    public static boolean hasUnsetBases(final JunctionAssembly assembly) { return !findUnsetBases(assembly.bases()).isEmpty(); }
+    public static String extractInsertSequence(
+            final JunctionAssembly first, boolean firstReversed, final JunctionAssembly second, boolean secondReversed, int insertLength)
+    {
+        int extBaseIndexStart, extBaseIndexEnd;
+
+        if(first.isForwardJunction())
+        {
+            extBaseIndexStart = first.junctionIndex() + 1;
+            extBaseIndexEnd = min(extBaseIndexStart + insertLength - 1, first.baseLength() - 1);
+        }
+        else
+        {
+            extBaseIndexEnd = first.junctionIndex() - 1;
+            extBaseIndexStart = max(extBaseIndexEnd - insertLength + 1, 0);
+        }
+
+        String insertSequence = first.formSequence(extBaseIndexStart, extBaseIndexEnd);
+
+        if(firstReversed)
+            insertSequence = Nucleotides.reverseComplementBases(insertSequence);
+
+        if(insertLength <= first.extensionLength())
+            return insertSequence;
+
+        // take the extra bases from the second assembly
+        int remainingInsertLength = insertLength - first.extensionLength();
+
+        if(second.isForwardJunction())
+        {
+            extBaseIndexStart = second.junctionIndex() + 1;
+            extBaseIndexEnd = min(extBaseIndexStart + remainingInsertLength - 1, second.baseLength() - 1);
+        }
+        else
+        {
+            extBaseIndexEnd = second.junctionIndex() - 1;
+            extBaseIndexStart = max(extBaseIndexEnd - remainingInsertLength + 1, 0);
+        }
+
+        String extraInsertSequence = second.formSequence(extBaseIndexStart, extBaseIndexEnd);
+
+        if(secondReversed)
+            extraInsertSequence = Nucleotides.reverseComplementBases(extraInsertSequence);
+
+        return insertSequence + extraInsertSequence;
+    }
 
     public static int calcTrimmedRefBaseLength(final JunctionAssembly assembly)
     {
@@ -147,6 +209,16 @@ public final class AssemblyUtils
         int seqEnd = assembly.isForwardJunction() ? seqStart + extBaseLength - 1 : extBaseLength - 1;
 
         return calcTrimmedBaseLength(seqStart, seqEnd, assembly.repeatInfo());
+    }
+
+    public static JunctionAssembly findMatchingAssembly(
+            final List<JunctionAssembly> assemblies, final JunctionAssembly assembly, boolean requireExtensionMatch)
+    {
+        return assemblies.stream()
+                .filter(x -> x != assembly)
+                .filter(x -> x.junction().compareTo(assembly.junction()) == 0)
+                .filter(x -> !requireExtensionMatch || x.extensionLength() == assembly.extensionLength())
+                .findFirst().orElse(null);
     }
 
     public static void setAssemblyOutcome(final JunctionAssembly assembly)
@@ -178,6 +250,8 @@ public final class AssemblyUtils
         assembly.setOutcome(NO_LINK);
     }
 
+    public static boolean hasUnsetBases(final JunctionAssembly assembly) { return !findUnsetBases(assembly.bases()).isEmpty(); }
+
     public static List<int[]> findUnsetBases(final byte[] bases)
     {
         List<int[]> emptyRanges = Lists.newArrayList();
@@ -208,5 +282,17 @@ public final class AssemblyUtils
             range[1] = bases.length - 1;
 
         return emptyRanges;
+    }
+
+    public static String nonNullBaseStr(final byte[] bases)
+    {
+        StringBuilder sb = new StringBuilder();
+        for(int i = 0; i < bases.length; ++i)
+        {
+            if(bases[i] != 0)
+                sb.append((char)bases[i]);
+        }
+
+        return sb.toString();
     }
 }

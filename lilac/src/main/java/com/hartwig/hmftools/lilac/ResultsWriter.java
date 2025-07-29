@@ -3,7 +3,7 @@ package com.hartwig.hmftools.lilac;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
-import static com.hartwig.hmftools.common.utils.version.VersionInfo.fromAppName;
+import static com.hartwig.hmftools.common.utils.config.VersionInfo.fromAppName;
 import static com.hartwig.hmftools.lilac.LilacConfig.LL_LOGGER;
 import static com.hartwig.hmftools.lilac.LilacConstants.APP_NAME;
 import static com.hartwig.hmftools.lilac.LilacConstants.LILAC_FILE_FRAGMENTS;
@@ -29,7 +29,7 @@ import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.hla.LilacAllele;
 import com.hartwig.hmftools.common.hla.LilacQcData;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
-import com.hartwig.hmftools.common.utils.version.VersionInfo;
+import com.hartwig.hmftools.common.utils.config.VersionInfo;
 import com.hartwig.hmftools.lilac.coverage.ComplexCoverage;
 import com.hartwig.hmftools.lilac.coverage.FragmentAlleles;
 import com.hartwig.hmftools.lilac.coverage.HlaComplexFile;
@@ -200,7 +200,7 @@ public class ResultsWriter
             for(Fragment fragment : fragments)
             {
                 StringJoiner genesStr = new StringJoiner(ITEM_DELIM);
-                fragment.getGenes().forEach(x -> genesStr.add(x));
+                fragment.genes().forEach(x -> genesStr.add(x));
 
                 mFragmentWriter.write(String.format("%s\t%s\t%s\t%s",
                         source.toString(), fragment.id(), fragment.readInfo(), genesStr));

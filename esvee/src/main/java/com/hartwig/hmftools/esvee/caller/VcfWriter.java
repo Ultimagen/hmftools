@@ -3,14 +3,18 @@ package com.hartwig.hmftools.esvee.caller;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.HOTSPOT;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.HOTSPOT_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.PON_COUNT;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.REF_DEPTH_PAIR;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REPEAT_MASK_COVERAGE_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REPEAT_MASK_REPEAT_CLASS;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REPEAT_MASK_COVERAGE;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REPEAT_MASK_REPEAT_CLASS_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REPEAT_MASK_REPEAT_TYPE;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.REPEAT_MASK_REPEAT_TYPE_DESC;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.TOTAL_FRAGS;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.VCF_ZIP_EXTENSION;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.getGenotypeAttributeAsInt;
 import static com.hartwig.hmftools.esvee.common.FileCommon.ESVEE_FILE_ID;
 import static com.hartwig.hmftools.esvee.common.FileCommon.FILE_NAME_DELIM;
 import static com.hartwig.hmftools.esvee.common.FileCommon.formOutputFile;
@@ -49,6 +53,10 @@ public class VcfWriter
     private final VariantContextWriter mSomaticWriter;
     private final VariantContextWriter mGermlineWriter;
 
+    public static final String SOMATIC_VCF_ID = "somatic";
+    public static final String GERMLINE_VCF_ID = "germline";
+    public static final String UNFILTERED_VCF_ID = "unfiltered";
+
     public VcfWriter(
             final CallerConfig config, final VCFHeader vcfHeader, final String gripssVersion, final GenotypeIds genotypeIds,
             final SvDataCache dataCache)
@@ -57,14 +65,14 @@ public class VcfWriter
         mGenotypeIds = genotypeIds;
         mDataCache = dataCache;
 
-        String fileSampleId = config.SampleId != null ? config.SampleId : config.ReferenceId;
+        String fileSampleId = config.fileSampleId();
 
-        String unfilteredVcf = formVcfFilename(fileSampleId, "unfiltered");
+        String unfilteredVcf = formVcfFilename(fileSampleId, UNFILTERED_VCF_ID);
         mUnfilteredWriter = initialiseWriter(vcfHeader, gripssVersion, unfilteredVcf);
 
         if(mConfig.hasTumor())
         {
-            String somaticVcf = formVcfFilename(fileSampleId, "somatic");
+            String somaticVcf = formVcfFilename(fileSampleId, SOMATIC_VCF_ID);
             mSomaticWriter = initialiseWriter(vcfHeader, gripssVersion, somaticVcf);
         }
         else
@@ -74,7 +82,7 @@ public class VcfWriter
 
         if(mConfig.hasReference())
         {
-            String germlineVcf = formVcfFilename(fileSampleId, "germline");
+            String germlineVcf = formVcfFilename(fileSampleId, GERMLINE_VCF_ID);
             mGermlineWriter = initialiseWriter(vcfHeader, gripssVersion, germlineVcf);
         }
         else
@@ -85,8 +93,9 @@ public class VcfWriter
 
     private String formVcfFilename(final String sampleId, final String fileId)
     {
-        String vcfFileId = ESVEE_FILE_ID + FILE_NAME_DELIM + fileId;
-        return formOutputFile(mConfig.OutputDir, sampleId, vcfFileId, VCF_ZIP_EXTENSION.substring(1), mConfig.OutputId);
+        // write in format: SAMPLE_ID.esvee.run_id.somatic.vcf.gz (or without output ID if not in config)
+        String outputId = mConfig.OutputId != null ? mConfig.OutputId + FILE_NAME_DELIM + fileId : fileId;
+        return formOutputFile(mConfig.OutputDir, sampleId, ESVEE_FILE_ID, VCF_ZIP_EXTENSION.substring(1), outputId);
     }
 
     private VariantContextWriter initialiseWriter(final VCFHeader vcfHeader, final String esveeVersion, final String vcfFilename)
@@ -100,11 +109,11 @@ public class VcfWriter
         // ensure genotype sample IDs match the config - also done per variant
         List<String> genotypeSampleNames = Lists.newArrayList();
 
-        if(!mConfig.ReferenceId.isEmpty())
+        if(mConfig.hasReference())
             genotypeSampleNames.add(mConfig.ReferenceId);
 
-        if(!mConfig.SampleId.isEmpty())
-            genotypeSampleNames.add(mConfig.SampleId);
+        if(mConfig.hasTumor())
+            genotypeSampleNames.add(mConfig.TumorId);
 
         VCFHeader newHeader = new VCFHeader(vcfHeader.getMetaDataInInputOrder(), genotypeSampleNames);
 
@@ -118,7 +127,6 @@ public class VcfWriter
         }
 
         newHeader.addMetaDataLine(new VCFInfoHeaderLine(HOTSPOT, 1, VCFHeaderLineType.Flag, HOTSPOT_DESC));
-
         newHeader.addMetaDataLine(new VCFInfoHeaderLine(PON_COUNT, 1, VCFHeaderLineType.Integer, "PON count if in PON"));
 
         newHeader.addMetaDataLine(new VCFInfoHeaderLine(
@@ -160,14 +168,13 @@ public class VcfWriter
         List<Genotype> genotypes = Lists.newArrayList();
 
         if(mGenotypeIds.hasTumor())
-            genotypes.add(new GenotypeBuilder().copy(breakend.Context.getGenotype(mGenotypeIds.TumorOrdinal)).name(mConfig.SampleId).make());
+            buildGenotype(genotypes, breakend, mConfig.TumorId);
 
         if(mGenotypeIds.hasReference())
-            genotypes.add(new GenotypeBuilder().copy(breakend.Context.getGenotype(mGenotypeIds.ReferenceOrdinal)).name(mConfig.ReferenceId).make());
+            buildGenotype(genotypes, breakend, mConfig.ReferenceId);
 
         VariantContextBuilder builder = new VariantContextBuilder(breakend.Context).genotypes(genotypes).filters();
 
-        // Qual = getGenotypeAttributeAsDouble(tumorGenotype, QUAL, 0);
         double qual = breakend.Context.getPhredScaledQual();
         builder.log10PError(qual / -10);
 
@@ -211,11 +218,23 @@ public class VcfWriter
         }
     }
 
-    private boolean isGermline(final Variant var)
+    private void buildGenotype(final List<Genotype> genotypes, final Breakend breakend, final String sampleId)
     {
-        // if a germline sample is present and the max(germline AF) > 0.1 x max(tumor AF), the variant is deemed to be germline, else somatic
-        // return breakend.ReferenceFragments + refSupportReads + refSupportReadPairs < mFilterConstants.MinNormalCoverage;
-        return false;
+        Genotype existingGenotype = breakend.Context.getGenotype(sampleId);
+
+        GenotypeBuilder genotypeBuilder = new GenotypeBuilder().copy(existingGenotype);
+
+        genotypeBuilder.name(sampleId);
+
+        int refPairSupport = getGenotypeAttributeAsInt(existingGenotype, REF_DEPTH_PAIR, 0);
+        int refSupport = getGenotypeAttributeAsInt(existingGenotype, REF_DEPTH, 0);
+        int varSupport = getGenotypeAttributeAsInt(existingGenotype, TOTAL_FRAGS, 0);
+        int totalDepth = refPairSupport + refSupport + varSupport;
+
+        genotypeBuilder.AD(new int[] { refPairSupport + refSupport, varSupport });
+        genotypeBuilder.DP(totalDepth);
+
+        genotypes.add(genotypeBuilder.make());
     }
 
     private static void writeBreakend(final VariantContextWriter writer, final VariantContextBuilder builder, final Set<FilterType> filters)

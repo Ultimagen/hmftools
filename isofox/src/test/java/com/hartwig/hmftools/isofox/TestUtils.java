@@ -7,8 +7,8 @@ import static com.hartwig.hmftools.common.test.GeneTestUtils.createTransExons;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.generateExonStarts;
 import static com.hartwig.hmftools.common.gene.TranscriptProteinData.BIOTYPE_PROTEIN_CODING;
 import static com.hartwig.hmftools.common.test.MockRefGenome.generateRandomBases;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
 import static com.hartwig.hmftools.isofox.IsofoxConstants.SINGLE_MAP_QUALITY;
 import static com.hartwig.hmftools.isofox.common.ReadRecord.findOverlappingRegions;
 
@@ -300,13 +300,13 @@ public class TestUtils
         SupplementaryReadData suppData1 = new SupplementaryReadData(
                 read2.Chromosome, read2.PosStart, '+', read2.Cigar.toString(), 255);
 
-        read1.setSuppAlignment(suppData1.asCsv());
+        read1.setSuppAlignment(suppData1.asDelimStr());
         // read1.setSuppAlignment(String.format("%s;%d;%s", read2.Chromosome, read2.PosStart, read2.Cigar.toString()));
 
         SupplementaryReadData suppData2 = new SupplementaryReadData(
                 read1.Chromosome, read1.PosStart, '+', read1.Cigar.toString(), 255);
 
-        read2.setSuppAlignment(suppData2.asCsv());
+        read2.setSuppAlignment(suppData2.asDelimStr());
         // read2.setSuppAlignment(String.format("%s;%d;%s", read1.Chromosome, read1.PosStart, read1.Cigar.toString()));
 
         return new ReadRecord[] { read1, read2 };

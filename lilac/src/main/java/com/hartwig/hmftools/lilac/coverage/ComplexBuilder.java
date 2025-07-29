@@ -7,13 +7,16 @@ import static com.hartwig.hmftools.lilac.LilacConstants.COMPLEX_PERMS_THRESHOLD;
 import static com.hartwig.hmftools.lilac.LilacConstants.GENE_A;
 import static com.hartwig.hmftools.lilac.LilacConstants.GENE_B;
 import static com.hartwig.hmftools.lilac.LilacConstants.GENE_C;
-import static com.hartwig.hmftools.lilac.LilacConstants.GENE_IDS;
-import static com.hartwig.hmftools.lilac.LilacConstants.MIN_CONF_UNIQUE_GROUP_COVERAGE;
-import static com.hartwig.hmftools.lilac.LilacConstants.MIN_CONF_UNIQUE_PROTEIN_COVERAGE;
+import static com.hartwig.hmftools.lilac.LilacConstants.MIN_HI_CONF_UNIQUE_GROUP_COVERAGE;
+import static com.hartwig.hmftools.lilac.LilacConstants.MIN_HI_CONF_UNIQUE_PROTEIN_COVERAGE;
+import static com.hartwig.hmftools.lilac.LilacConstants.MIN_LOW_CONF_GROUP_TOTAL_COVERAGE;
+import static com.hartwig.hmftools.lilac.LilacConstants.MIN_LOW_CONF_GROUP_UNIQUE_COVERAGE;
+import static com.hartwig.hmftools.lilac.LilacConstants.RARE_ALLELES_FREQ_CUTOFF;
+import static com.hartwig.hmftools.lilac.ReferenceData.GENE_CACHE;
+import static com.hartwig.hmftools.lilac.coverage.AlleleCoverage.coverageAlleles;
 import static com.hartwig.hmftools.lilac.coverage.FragmentAlleleMapper.filterUnsupportedWildcardFragments;
 import static com.hartwig.hmftools.lilac.coverage.FragmentAlleleMapper.findUnsupportedWildcards;
 import static com.hartwig.hmftools.lilac.coverage.FragmentAlleleMapper.findWildcardAlleles;
-import static com.hartwig.hmftools.lilac.coverage.AlleleCoverage.coverageAlleles;
 
 import java.util.Collections;
 import java.util.List;
@@ -23,9 +26,12 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.hartwig.hmftools.lilac.LilacConfig;
 import com.hartwig.hmftools.lilac.ReferenceData;
 import com.hartwig.hmftools.lilac.hla.HlaAllele;
+
+import org.apache.commons.lang3.tuple.Pair;
 
 public class ComplexBuilder
 {
@@ -36,6 +42,8 @@ public class ComplexBuilder
     private final List<HlaAllele> mConfirmedProteinAlleles;
     private final List<HlaAllele> mUniqueProteinAlleles;
     private final List<HlaAllele> mConfirmedRecoveredAlleles;
+
+    private static final int DIPLOID_ALLELE_COUNT = 2;
 
     public ComplexBuilder(final LilacConfig config, final ReferenceData refData)
     {
@@ -60,59 +68,101 @@ public class ComplexBuilder
         ComplexCoverage groupCoverage = calcGroupCoverage(refFragAlleles, candidateAlleles);
 
         int totalFragCount = refFragAlleles.size();
+
         List<AlleleCoverage> uniqueGroups = findUnique(groupCoverage, Lists.newArrayList(), totalFragCount);
 
-        List<AlleleCoverage> discardedGroups = groupCoverage.getAlleleCoverage().stream()
-                .filter(x -> x.UniqueCoverage > 0 && !uniqueGroups.contains(x)).collect(Collectors.toList());
+        double lowConfGroupMinUniqueFrags = totalFragCount * MIN_LOW_CONF_GROUP_UNIQUE_COVERAGE;
+        double lowConfGroupMinTotalFrags = totalFragCount * MIN_LOW_CONF_GROUP_TOTAL_COVERAGE;
 
-        Collections.sort(discardedGroups, Collections.reverseOrder());
+        List<AlleleCoverage> lowConfGroups = Lists.newArrayList();
+        List<AlleleCoverage> discardedGroups = Lists.newArrayList();
 
-        if(!uniqueGroups.isEmpty())
+        for(AlleleCoverage alleleCoverage : groupCoverage.getAlleleCoverage())
         {
-            LL_LOGGER.info("  confirmed {} unique groups: {}", uniqueGroups.size(), AlleleCoverage.toString(uniqueGroups));
-        }
-        else
-        {
-            LL_LOGGER.info("  confirmed 0 unique groups");
+            if(uniqueGroups.contains(alleleCoverage))
+                continue;
+
+            if(alleleCoverage.UniqueCoverage >= lowConfGroupMinUniqueFrags || alleleCoverage.TotalCoverage  >= lowConfGroupMinTotalFrags)
+            {
+                lowConfGroups.add(alleleCoverage);
+            }
+            else
+            {
+                discardedGroups.add(alleleCoverage);
+            }
         }
 
-        if(!discardedGroups.isEmpty())
-        {
-            LL_LOGGER.info("  found {} insufficiently unique groups: {}",
-                    discardedGroups.size(), AlleleCoverage.toString(discardedGroups));
-        }
+        LL_LOGGER.info("  confirmed {} unique allele groups{}{}",
+                uniqueGroups.size(), uniqueGroups.isEmpty() ? "" : ": ", AlleleCoverage.toString(uniqueGroups));
+
+        LL_LOGGER.info("  found {} insufficiently unique allele groups{}{}",
+                lowConfGroups.size(), lowConfGroups.isEmpty() ? "" : ": ", AlleleCoverage.toString(lowConfGroups));
+
+        LL_LOGGER.debug("  discarded {} allele groups{}{}",
+                discardedGroups.size(), discardedGroups.isEmpty() ? "" : ": ", AlleleCoverage.toString(discardedGroups));
 
         List<HlaAllele> uniqueGroupAlleles = coverageAlleles(uniqueGroups);
 
         final List<HlaAllele> candidatesAfterUniqueGroups = filterWithUniqueGroups(candidateAlleles, uniqueGroupAlleles, recoveredAlleles);
 
-        // ensure common alleles in unique groups are kept
-        List<HlaAllele> discardedUniqueGroupAlleles = coverageAlleles(discardedGroups);
-        List<HlaAllele> commonAllelesInDiscardedUniqueGroups = mRefData.CommonAlleles.stream()
+        // keep common alleles in insufficiently unique groups
+        List<HlaAllele> topLowConfGroups = getTopLowConfGroups(uniqueGroups, lowConfGroups);
+        List<HlaAllele> commonAllelesInLowConfGroups = mRefData.CommonAlleles.stream()
                 .filter(x -> !candidatesAfterUniqueGroups.contains(x))
-                .filter(x -> discardedUniqueGroupAlleles.contains(x.asAlleleGroup()))
+                .filter(x -> topLowConfGroups.contains(x.asAlleleGroup()))
                 .collect(Collectors.toList());
 
-        candidatesAfterUniqueGroups.addAll(commonAllelesInDiscardedUniqueGroups);
+        candidatesAfterUniqueGroups.addAll(commonAllelesInLowConfGroups);
 
-        // ensure known stop-loss alleles are kept
-        recoveredAlleles.stream()
+        LL_LOGGER.debug("  keeping {} common allele(s) from insufficiently unique allele groups{}{}",
+                commonAllelesInLowConfGroups.size(), commonAllelesInLowConfGroups.isEmpty() ? "" : ": ",
+                HlaAllele.toString(commonAllelesInLowConfGroups));
+
+        // keep common alleles from the same 2-digit group as rare alleles or alleles with wildcards
+        List<HlaAllele> rareAlleles = candidatesAfterUniqueGroups.stream()
+                .filter(x -> mRefData.getAlleleFrequencies().getAlleleFrequency(x) <= RARE_ALLELES_FREQ_CUTOFF)
+                .toList();
+
+        Set<HlaAllele> alleleGroupsOfDubiousAlleles = candidatesAfterUniqueGroups.stream()
+                .filter(x -> x.hasWildcards() || rareAlleles.contains(x))
+                .map(x -> x.asAlleleGroup())
+                .collect(Collectors.toSet());
+
+        List<HlaAllele> commonAllelesFromSameGroupAsDubiousAlleles = mRefData.CommonAlleles.stream()
+                .filter(x -> !candidatesAfterUniqueGroups.contains(x))
+                .filter(x -> alleleGroupsOfDubiousAlleles.contains(x.asAlleleGroup()))
+                .collect(Collectors.toList());
+
+        candidatesAfterUniqueGroups.addAll(commonAllelesFromSameGroupAsDubiousAlleles);
+
+        LL_LOGGER.debug("  keeping {} common allele(s) in the same 2-digit group as wildcard or rare allele candidates{}{}",
+                commonAllelesFromSameGroupAsDubiousAlleles.size(),
+                commonAllelesFromSameGroupAsDubiousAlleles.isEmpty() ? "" : ": ",
+                HlaAllele.toString(commonAllelesFromSameGroupAsDubiousAlleles));
+
+        // keep known stop-loss alleles
+        List<HlaAllele> allelesWithStopLossIndel = recoveredAlleles.stream()
                 .filter(x -> mRefData.KnownStopLossIndelAlleles.containsValue(x))
                 .filter(x -> !candidatesAfterUniqueGroups.contains(x))
-                .forEach(x -> candidatesAfterUniqueGroups.add(x));
+                .collect(Collectors.toList());
 
-        mConfirmedRecoveredAlleles.addAll(recoveredAlleles.stream()
-                .filter(x -> candidatesAfterUniqueGroups.contains(x)).collect(Collectors.toList()));
+        candidatesAfterUniqueGroups.addAll(allelesWithStopLossIndel);
+
+        LL_LOGGER.debug("  keeping {} allele(s) with stop loss indel{}{}",
+                allelesWithStopLossIndel.size(), allelesWithStopLossIndel.isEmpty() ? "" : ": ",
+                HlaAllele.toString(allelesWithStopLossIndel));
+
+        recoveredAlleles.stream().filter(x -> candidatesAfterUniqueGroups.contains(x)).forEach(x -> mConfirmedRecoveredAlleles.add(x));
 
         if(!mConfirmedRecoveredAlleles.isEmpty())
         {
             Collections.sort(mConfirmedRecoveredAlleles);
-            LL_LOGGER.info("  keeping {} recovered alleles from unique groups: {}",
+            LL_LOGGER.info("  keeping {} recovered alleles from insufficiently unique groups: {}",
                     mConfirmedRecoveredAlleles.size(), HlaAllele.toString(mConfirmedRecoveredAlleles));
         }
         else if(!recoveredAlleles.isEmpty())
         {
-            LL_LOGGER.info("  no recovered alleles kept from unique groups");
+            LL_LOGGER.info("  no recovered alleles kept from insufficiently unique groups");
         }
 
         ComplexCoverage proteinCoverage = calcProteinCoverage(refFragAlleles, candidatesAfterUniqueGroups);
@@ -121,26 +171,18 @@ public class ComplexBuilder
         List<AlleleCoverage> uniqueProteins = findUnique(proteinCoverage, uniqueGroupAlleles, totalFragCount).stream()
                 .filter(x -> !recoveredAlleles.contains(x.Allele)).collect(Collectors.toList());
 
-        List<AlleleCoverage> discardedProtein = proteinCoverage.getAlleleCoverage().stream()
+        List<AlleleCoverage> insufficientlyUniqueProteins = proteinCoverage.getAlleleCoverage().stream()
                 .filter(x -> x.UniqueCoverage > 0 && !uniqueProteins.contains(x)).collect(Collectors.toList());
-        Collections.sort(discardedProtein, Collections.reverseOrder());
+        Collections.sort(insufficientlyUniqueProteins, Collections.reverseOrder());
 
-        if(!uniqueProteins.isEmpty())
-        {
-            LL_LOGGER.info("  confirmed {} unique proteins: {}", uniqueProteins.size(), AlleleCoverage.toString(uniqueProteins));
-        }
-        else
-        {
-            LL_LOGGER.info("  confirmed 0 unique proteins");
-        }
+        LL_LOGGER.info("  confirmed {} unique proteins{}{}",
+                uniqueProteins.size(), uniqueProteins.isEmpty() ? "" : ": ", AlleleCoverage.toString(uniqueProteins));
 
-        if(!discardedProtein.isEmpty())
-        {
-            LL_LOGGER.info("  found {} insufficiently unique proteins: {}", discardedProtein.size(), AlleleCoverage.toString(discardedProtein));
-        }
+        LL_LOGGER.info("  found {} insufficiently unique proteins{}{}",
+                insufficientlyUniqueProteins.size(), insufficientlyUniqueProteins.isEmpty() ? "" : ": ",
+                AlleleCoverage.toString(insufficientlyUniqueProteins));
 
         // unique protein filtering is no longer applied
-        // mConfirmedProteinAlleles.addAall(coverageAlleles(uniqueProteins));
 
         mUniqueProteinAlleles.addAll(filterWithUniqueProteins(candidatesAfterUniqueGroups, mConfirmedProteinAlleles));
 
@@ -164,7 +206,7 @@ public class ComplexBuilder
         List<HlaComplex> complexes;
         long simpleComplexCount = (long)aOnlyComplexes.size() * bOnlyComplexes.size() * cOnlyComplexes.size();
 
-        if (simpleComplexCount > COMPLEX_PERMS_THRESHOLD || simpleComplexCount < 0)
+        if(simpleComplexCount > COMPLEX_PERMS_THRESHOLD || simpleComplexCount < 0)
         {
             // common alleles which satisfy the filtering by unique groups will be kept regardless of any ranking
             List<HlaAllele> commonAlleles = mRefData.CommonAlleles.stream()
@@ -225,18 +267,19 @@ public class ComplexBuilder
     {
         List<HlaAllele> confirmedGroups = takeN(unfilteredGroups.stream().filter(x -> x.Gene.equals(gene)).collect(Collectors.toList()), 2);
         List<HlaAllele> candidates = unfilteredCandidates.stream().filter(x -> x.Gene.equals(gene)).collect(Collectors.toList());
+        Set<HlaAllele> candidatesSet = Sets.newHashSet(candidates);
 
         if (confirmedGroups.size() == 2)
         {
-            List<HlaAllele> first = candidates.stream().filter(x -> x.asAlleleGroup() == confirmedGroups.get(0)).collect(Collectors.toList());
-            List<HlaAllele> second = candidates.stream().filter(x -> x.asAlleleGroup() == confirmedGroups.get(1)).collect(Collectors.toList());
+            Set<HlaAllele> first = candidates.stream().filter(x -> x.asAlleleGroup() == confirmedGroups.get(0)).collect(Collectors.toCollection(Sets::newHashSet));
+            Set<HlaAllele> second = candidates.stream().filter(x -> x.asAlleleGroup() == confirmedGroups.get(1)).collect(Collectors.toCollection(Sets::newHashSet));
             return combineAlleles(first, second);
         }
 
         if (confirmedGroups.size() == 1)
         {
-            List<HlaAllele> first = candidates.stream().filter(x -> x.asAlleleGroup() == confirmedGroups.get(0)).collect(Collectors.toList());
-            List<HlaAllele> second = candidates;
+            Set<HlaAllele> first = candidates.stream().filter(x -> x.asAlleleGroup() == confirmedGroups.get(0)).collect(Collectors.toCollection(Sets::newHashSet));
+            Set<HlaAllele> second = candidatesSet;
 
             List<HlaComplex> complexes = first.stream().map(x -> new HlaComplex(Lists.newArrayList(x))).collect(Collectors.toList());
             complexes.addAll(combineAlleles(first, second));
@@ -244,7 +287,7 @@ public class ComplexBuilder
         }
 
         List<HlaComplex> complexes = candidates.stream().map(x -> new HlaComplex(Lists.newArrayList(x))).collect(Collectors.toList());
-        complexes.addAll(combineAlleles(candidates, candidates));
+        complexes.addAll(combineAlleles(candidatesSet, candidatesSet));
         return complexes;
     }
 
@@ -284,27 +327,28 @@ public class ComplexBuilder
         return results;
     }
 
-    private static List<HlaComplex> combineAlleles(final List<HlaAllele> first, final List<HlaAllele> second)
+    private static List<HlaComplex> combineAlleles(final Set<HlaAllele> first, final Set<HlaAllele> second)
     {
-        List<List<HlaAllele>> allelePairs = cartesianAlleleProduct(first, second);
-        return allelePairs.stream().map(x -> new HlaComplex(x)).collect(Collectors.toList());
+        Set<Pair<HlaAllele, HlaAllele>> allelePairs = cartesianAlleleProduct(first, second);
+        return allelePairs.stream().map(x -> new HlaComplex(Lists.newArrayList(x.getLeft(), x.getRight()))).collect(Collectors.toList());
     }
 
-    private static List<List<HlaAllele>> cartesianAlleleProduct(final List<HlaAllele> first, final List<HlaAllele> second)
+    private static Set<Pair<HlaAllele, HlaAllele>> cartesianAlleleProduct(final Set<HlaAllele> first, final Set<HlaAllele> second)
     {
         // make a list of all possible combinations of the alleles in each of the 2 lists
-        List<List<HlaAllele>> results = Lists.newArrayList();
+        Set<Pair<HlaAllele, HlaAllele>> results = Sets.newHashSet();
 
-        for(HlaAllele i : first)
+        for(HlaAllele allele1 : first)
         {
-            for(HlaAllele j : second)
+            for(HlaAllele allele2 : second)
             {
-                if(i != j)
+                if(allele1 != allele2)
                 {
-                    List<HlaAllele> pairing = Lists.newArrayList(i, j);
-                    Collections.sort(pairing);
-                    if(results.stream().anyMatch(x -> x.get(0) == pairing.get(0) && x.get(1) == pairing.get(1)))
-                        continue;
+                    Pair<HlaAllele, HlaAllele> pairing;
+                    if(allele1.compareTo(allele2) <= 0)
+                        pairing = Pair.of(allele1, allele2);
+                    else
+                        pairing = Pair.of(allele2, allele1);
 
                     results.add(pairing);
                 }
@@ -324,7 +368,7 @@ public class ComplexBuilder
     {
         Map<String,List<HlaAllele>> map = Maps.newHashMap();
 
-        GENE_IDS.forEach(x -> map.put(x, confirmedGroups.stream().filter(y -> y.Gene.equals(x)).collect(Collectors.toList())));
+        GENE_CACHE.GeneIds.forEach(x -> map.put(x, confirmedGroups.stream().filter(y -> y.Gene.equals(x)).collect(Collectors.toList())));
 
         List<HlaAllele> results = Lists.newArrayList();
         for(HlaAllele allele : alleles)
@@ -342,9 +386,31 @@ public class ComplexBuilder
         return results;
     }
 
+    private static List<HlaAllele> getTopLowConfGroups(
+            List<AlleleCoverage> uniqueGroups, List<AlleleCoverage> lowConfGroups)
+    {
+        Map<String, Integer> groupCountsPerGene = Maps.newHashMap();
+        for(AlleleCoverage alleleCoverage : uniqueGroups)
+            groupCountsPerGene.merge(alleleCoverage.Allele.Gene, 1, Integer::sum);
+
+        List<AlleleCoverage> topLowConfGroups = Lists.newArrayList();
+        for(AlleleCoverage alleleCoverage : lowConfGroups)
+        {
+            String gene = alleleCoverage.Allele.Gene;
+            groupCountsPerGene.putIfAbsent(gene, 0);
+
+            if(groupCountsPerGene.get(gene) < DIPLOID_ALLELE_COUNT)
+                topLowConfGroups.add(alleleCoverage);
+
+            groupCountsPerGene.put(gene, groupCountsPerGene.get(gene) + 1);
+        }
+
+        return coverageAlleles(topLowConfGroups);
+    }
+
     private static double requiredUniqueGroupCoverage(double totalCoverage, boolean isGroup)
     {
-        return isGroup ? totalCoverage * MIN_CONF_UNIQUE_GROUP_COVERAGE : totalCoverage * MIN_CONF_UNIQUE_PROTEIN_COVERAGE;
+        return isGroup ? totalCoverage * MIN_HI_CONF_UNIQUE_GROUP_COVERAGE : totalCoverage * MIN_HI_CONF_UNIQUE_PROTEIN_COVERAGE;
     }
 
     private List<AlleleCoverage> findUnique(
@@ -359,7 +425,7 @@ public class ComplexBuilder
         List<AlleleCoverage> results = Lists.newArrayList();
 
         // take at most 2 alleles for each gene, and at most 1 unique protein if more than 1 unique group is provided
-        for(String gene : GENE_IDS)
+        for(String gene : GENE_CACHE.GeneIds)
         {
             List<AlleleCoverage> geneCoverage = unique.stream().filter(x -> x.Allele.Gene.equals(gene)).collect(Collectors.toList());
 
@@ -386,7 +452,7 @@ public class ComplexBuilder
 
                 ++geneCount;
 
-                if(geneCount >= 2)
+                if(geneCount >= DIPLOID_ALLELE_COUNT)
                     break;
             }
         }

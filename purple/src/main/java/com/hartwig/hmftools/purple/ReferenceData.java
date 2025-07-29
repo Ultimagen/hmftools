@@ -24,10 +24,10 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanelConfig;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGene;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanel;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanelFactory;
+import com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig;
+import com.hartwig.hmftools.common.driver.panel.DriverGene;
+import com.hartwig.hmftools.common.driver.panel.DriverGenePanel;
+import com.hartwig.hmftools.common.driver.panel.DriverGenePanelFactory;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
 import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
@@ -37,8 +37,8 @@ import com.hartwig.hmftools.common.genome.refgenome.RefGenomeCoordinates;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.hla.HlaCommon;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
-import com.hartwig.hmftools.common.variant.hotspot.VariantHotspot;
-import com.hartwig.hmftools.common.variant.hotspot.VariantHotspotFile;
+import com.hartwig.hmftools.common.variant.VariantHotspot;
+import com.hartwig.hmftools.common.variant.VariantHotspotFile;
 import com.hartwig.hmftools.purple.germline.GermlineDeletionFrequency;
 import com.hartwig.hmftools.purple.region.ObservedRegionFactory;
 
@@ -78,7 +78,7 @@ public class ReferenceData
     {
         mIsValid = true;
 
-        if(!configBuilder.hasValue(REF_GENOME) && !config.DriversOnly)
+        if(!configBuilder.hasValue(REF_GENOME))
         {
             mIsValid = false;
             PPL_LOGGER.error(REF_GENOME + " is a mandatory argument");
@@ -89,17 +89,14 @@ public class ReferenceData
 
         IndexedFastaSequenceFile refGenome = null;
 
-        if(!config.DriversOnly)
+        try
         {
-            try
-            {
-                refGenome = new IndexedFastaSequenceFile(new File(refGenomePath));
-            }
-            catch(Exception e)
-            {
-                mIsValid = false;
-                PPL_LOGGER.error("failed to load ref genome: {}", e.toString());
-            }
+            refGenome = new IndexedFastaSequenceFile(new File(refGenomePath));
+        }
+        catch(Exception e)
+        {
+            mIsValid = false;
+            PPL_LOGGER.error("failed to load ref genome: {}", e.toString());
         }
 
         RefGenome = refGenome;
@@ -116,7 +113,7 @@ public class ReferenceData
         String somaticHotspotVcf = configBuilder.getValue(SOMATIC_HOTSPOT);
         String germlineHotspotVcf = configBuilder.getValue(GERMLINE_HOTSPOT);
 
-        if(config.RunDrivers || config.DriversOnly)
+        if(config.RunDrivers)
         {
             if(!config.germlineMode())
             {
@@ -194,9 +191,9 @@ public class ReferenceData
         CohortGermlineDeletions = new GermlineDeletionFrequency(configBuilder.getValue(COHORT_DEL_FREQ_FILE));
 
         TargetRegions = new TargetRegionsData(
-                configBuilder.getValue(TARGET_REGIONS_BED),
-                configBuilder.getValue(TARGET_REGIONS_RATIOS),
-                configBuilder.getValue(TARGET_REGION_MSI_INDELS));
+                configBuilder.getValue(TARGET_REGIONS_RATIOS), configBuilder.getValue(TARGET_REGION_MSI_INDELS));
+
+        TargetRegions.loadTargetRegionsBed(configBuilder.getValue(TARGET_REGIONS_BED), GeneTransCache);
     }
 
     private void loadGeneTransCache()
@@ -275,6 +272,6 @@ public class ReferenceData
         SomaticHotspots = ArrayListMultimap.create();
         GermlineHotspots = ArrayListMultimap.create();
         CohortGermlineDeletions = new GermlineDeletionFrequency(null);
-        TargetRegions = new TargetRegionsData(null, null, null);
+        TargetRegions = new TargetRegionsData(null, null);
     }
 }

@@ -1,13 +1,18 @@
 package com.hartwig.hmftools.esvee.assembly.types;
 
 import static java.lang.Math.abs;
+import static java.lang.Math.max;
 import static java.lang.String.format;
 
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_CHROMOSOME_NAME;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_POSITION;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.inferredInsertSize;
 import static com.hartwig.hmftools.common.genome.region.Orientation.FORWARD;
 import static com.hartwig.hmftools.common.genome.region.Orientation.REVERSE;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.READ_ID_TRIMMER;
 import static com.hartwig.hmftools.esvee.assembly.read.ReadUtils.isDiscordantFragment;
+import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_INDEL_LENGTH;
 
+import static htsjdk.samtools.SAMFlag.FIRST_OF_PAIR;
 import static htsjdk.samtools.SAMFlag.MATE_REVERSE_STRAND;
 import static htsjdk.samtools.SAMFlag.MATE_UNMAPPED;
 import static htsjdk.samtools.SAMFlag.READ_PAIRED;
@@ -21,6 +26,7 @@ import com.hartwig.hmftools.common.bam.SamRecordUtils;
 import com.hartwig.hmftools.common.bam.SupplementaryReadData;
 import com.hartwig.hmftools.common.genome.region.Orientation;
 import com.hartwig.hmftools.esvee.assembly.read.Read;
+import com.hartwig.hmftools.esvee.common.IndelCoords;
 
 import org.jetbrains.annotations.Nullable;
 
@@ -32,7 +38,6 @@ public class SupportRead
 
     // inherited read properties & state
     private final String mId;
-    private final String mFullReadId;
 
     private final String mChromosome;
     private final int mAlignmentStart;
@@ -45,6 +50,7 @@ public class SupportRead
     private final String mMateChromosome;
     private final int mMateAlignmentStart;
     private final int mMateAlignmentEnd;
+    private final int mMateFragmentEnd; // 5' unclipped position of mate
     private final int mFlags;
     private final int mBaseLength;
 
@@ -55,31 +61,33 @@ public class SupportRead
     // fragment state
     private final SupplementaryReadData mSupplementaryData;
     private final int mMapQual;
-    private final int mNumOfEvents;
     private final int mInsertSize;
     private final int mTrimCount;
     private final boolean mHasIndel;
+    private IndelCoords mIndelCoords;
+    private final boolean mHasLineTail;
 
-    // TODO: make this the distance from the read's start (ie index not position) to the assembly junction index
-    private final int mJunctionReadIndex;
+    // the distance from the read's start (ie index not position) to the assembly junction index
+    // if the read start is before the junction index then the value is positive
+    private final int mJunctionReadStartDistance;
 
-    private int mJunctionAssemblyIndex; // index within this read's junction assembly of the read's start position
-    private int mLinkedAssemblyIndex; // index within this read's full linked assembly (if exists) if the read's start position
+    private int mFullAssemblyIndex; // index within this read's full linked assembly sequence (if exists) if the read's start position
+    private Orientation mFullAssemblyOrientation;
     private int mInferredFragmentLength;
+    private SupportType mBreakendType;
 
     // those past the junction
-    private int mJunctionMatches;
-    private int mJunctionMismatches;
-    private int mReferenceMismatches;
+    private int mExtBaseMatches;
+    private int mExtBaseMismatches;
+    private Integer mRefBaseMismatches;
 
     private Read mRead; // expect to be null unless required for BAM or read TSV writing
 
-    public SupportRead(final Read read, final SupportType type, final int junctionReadIndex, final int matches, final int mismatches)
+    public SupportRead(final Read read, final SupportType type, final int junctReadStartDistance, final int matches, final int mismatches)
     {
         mType = type;
 
-        mFullReadId = read.id();
-        mId = READ_ID_TRIMMER.trim(mFullReadId);
+        mId = read.id();
 
         mChromosome = read.chromosome();
         mAlignmentStart = read.alignmentStart();
@@ -90,28 +98,42 @@ public class SupportRead
         mUnclippedStart = read.unclippedStart();
         mUnclippedEnd = read.unclippedEnd();
 
-        mMateChromosome = read.mateChromosome();
-        mMateAlignmentStart = read.mateAlignmentStart();
-        mMateAlignmentEnd = read.mateAlignmentEnd();
+        if(read.isPairedRead())
+        {
+            mMateChromosome = read.mateChromosome();
+            mMateAlignmentStart = read.mateAlignmentStart();
+            mMateAlignmentEnd = read.mateAlignmentEnd();
+            mMateFragmentEnd = read.mateFragmentEnd();
+        }
+        else
+        {
+            mMateChromosome = NO_CHROMOSOME_NAME;
+            mMateAlignmentStart = NO_POSITION;
+            mMateAlignmentEnd = NO_POSITION;
+            mMateFragmentEnd = NO_POSITION;
+        }
+
         mIsReference = read.isReference();
         mSampleIndex = read.sampleIndex();
         mIsDiscordant = isDiscordantFragment(read);
         mSupplementaryData = read.supplementaryData();
         mBaseLength = read.basesLength();
-        mInsertSize = abs(read.bamRecord().getInferredInsertSize());
+        mInsertSize = abs(inferredInsertSize(read.bamRecord()));
         mTrimCount = read.baseTrimCount();
         mMapQual = read.mappingQuality();
-        mNumOfEvents = read.numOfEvents();
         mHasIndel = read.indelCoords() != null;
+        mIndelCoords = read.indelCoords() != null && read.indelCoords().Length >= MIN_INDEL_LENGTH ? read.indelCoords() : null;
+        mHasLineTail = read.hasLineTail();
 
-        mJunctionMatches = matches;
-        mJunctionMismatches = mismatches;
-        mReferenceMismatches = 0;
+        mExtBaseMatches = matches;
+        mExtBaseMismatches = mismatches;
+        mRefBaseMismatches =  null;
 
-        mJunctionReadIndex = junctionReadIndex;
-        mJunctionAssemblyIndex = -1;
-        mLinkedAssemblyIndex = -1;
+        mJunctionReadStartDistance = junctReadStartDistance;
+        mFullAssemblyIndex = -1;
+        mFullAssemblyOrientation = FORWARD;
         mInferredFragmentLength = -1;
+        mBreakendType = null;
 
         mRead = read;
     }
@@ -119,7 +141,6 @@ public class SupportRead
     public SupportType type() { return mType; }
 
     public String id() { return mId; }
-    public String fullReadId() { return mFullReadId; }
     public String chromosome() { return mChromosome; }
     public int alignmentStart() { return mAlignmentStart; }
     public int alignmentEnd() { return mAlignmentEnd; }
@@ -127,6 +148,8 @@ public class SupportRead
     public int unclippedEnd() { return mUnclippedEnd; }
     public boolean isLeftClipped() { return mUnclippedStart < mAlignmentStart; }
     public boolean isRightClipped() { return mUnclippedEnd > mAlignmentEnd; }
+    public int leftClipLength() { return max(mAlignmentStart - mUnclippedStart, 0); }
+    public int rightClipLength() { return max(mUnclippedEnd - mAlignmentEnd, 0); }
     public String mateChromosome() { return mMateChromosome; }
     public int mateAlignmentStart() { return mMateAlignmentStart; }
     public int mateAlignmentEnd() { return mMateAlignmentEnd; }
@@ -134,12 +157,13 @@ public class SupportRead
     public int insertSize() { return mInsertSize; }
     public int trimCount() { return mTrimCount; }
     public boolean hasIndel() { return mHasIndel; }
+    public IndelCoords indelCoords() { return mIndelCoords; }
     public String cigar() { return mCigar; }
     public Orientation orientation() { return isFlagSet(READ_REVERSE_STRAND) ? REVERSE : FORWARD; }
     public Orientation mateOrientation() { return isFlagSet(MATE_REVERSE_STRAND) ? REVERSE : FORWARD; }
     public SupplementaryReadData supplementaryData() { return mSupplementaryData; }
     public int mapQual() { return mMapQual; }
-    public int numOfEvents() { return mNumOfEvents; }
+    public boolean hasLineTail() { return mHasLineTail; }
 
     public boolean isReference() { return mIsReference; }
     public int sampleIndex() { return mSampleIndex; }
@@ -147,12 +171,47 @@ public class SupportRead
     public int flags() { return mFlags; }
     public boolean isSupplementary() { return isFlagSet(SUPPLEMENTARY_ALIGNMENT); }
     public boolean isPairedRead() { return isFlagSet(READ_PAIRED); }
+    public boolean firstInPair() { return isFlagSet(FIRST_OF_PAIR); }
     public boolean isUnmapped() { return isFlagSet(READ_UNMAPPED); }
     public boolean isMateUnmapped() { return isFlagSet(MATE_UNMAPPED); }
     public boolean isMateMapped() { return isFlagSet(READ_PAIRED) && !isFlagSet(MATE_UNMAPPED); }
+
+    public int fivePrimeFragmentPosition() { return orientation().isForward() ? mUnclippedStart : mUnclippedEnd; }
+
     public boolean isDiscordant() { return mIsDiscordant; }
 
     public boolean isFlagSet(final SAMFlag flag) { return SamRecordUtils.isFlagSet(mFlags, flag); }
+
+    public int extensionBaseMismatches() { return mExtBaseMismatches; }
+    public int extensionBaseMatches() { return mExtBaseMatches; }
+
+    public int referenceMismatches() { return mRefBaseMismatches != null ? mRefBaseMismatches : -1; }
+    public boolean hasReferenceMismatches() { return mRefBaseMismatches != null; }
+
+    public void setReferenceMismatches(int mismatches) { mRefBaseMismatches = mismatches; }
+
+    @Nullable
+    public Read cachedRead() { return mRead; }
+
+    public void clearCachedRead() { mRead = null; }
+
+    public int junctionReadStartDistance() { return mJunctionReadStartDistance; }
+
+    public void setFullAssemblyInfo(int assemblyIndex, final Orientation orientation)
+    {
+        mFullAssemblyIndex = assemblyIndex;
+        mFullAssemblyOrientation = orientation;
+    }
+
+    public int fullAssemblyIndexStart() { return mFullAssemblyIndex; }
+    public int fullAssemblyIndexEnd() { return mFullAssemblyIndex + mBaseLength - 1; }
+    public Orientation fullAssemblyOrientation() { return mFullAssemblyOrientation; }
+
+    public int inferredFragmentLength() { return mInferredFragmentLength; }
+    public void setInferredFragmentLength(int length) { mInferredFragmentLength = length; }
+
+    public SupportType breakendSupportType() { return mBreakendType; }
+    public void setBreakendSupportType(final SupportType breakendType) { mBreakendType = breakendType; }
 
     public boolean matchesFragment(final SupportRead other, boolean allowReadMatch)
     {
@@ -164,33 +223,11 @@ public class SupportRead
 
     public boolean matchesFragment(final Read other, boolean allowReadMatch)
     {
-        if(!mFullReadId.equals(other.id()))
+        if(!mId.equals(other.id()))
             return false;
 
         return allowReadMatch || mFlags != other.getFlags();
     }
-
-    public void clearCachedRead() { mRead = null; }
-
-    @Nullable
-    public Read cachedRead() { return mRead; }
-
-    public int junctionReadIndex() { return mJunctionReadIndex; }
-
-    public void setJunctionAssemblyIndex(int index) { mJunctionAssemblyIndex = index; }
-    public int junctionAssemblyIndex() { return mJunctionAssemblyIndex; }
-
-    public void setLinkedAssemblyIndex(int index) { mLinkedAssemblyIndex = index; }
-    public int linkedAssemblyIndex() { return mLinkedAssemblyIndex; }
-
-    public int mismatchCount() { return mJunctionMismatches + mReferenceMismatches; }
-    public int junctionMismatches() { return mJunctionMismatches; }
-    public int junctionMatches() { return mJunctionMatches; }
-    public int referenceMismatches() { return mReferenceMismatches; }
-    public void setReferenceMismatches(int mismatches) { mReferenceMismatches = mismatches; }
-
-    public int inferredFragmentLength() { return mInferredFragmentLength; }
-    public void setInferredFragmentLength(int length) { mInferredFragmentLength = length; }
 
     public static boolean hasFragmentOtherRead(final List<SupportRead> support, final SupportRead read)
     {
@@ -214,8 +251,9 @@ public class SupportRead
 
     public String toString()
     {
-        return format("type(%s) read(%s %s:%d-%d %s %d) index(junc=%d asm=%d linked=%s) hqMatch(%d) mismatch(junc=%d ref=%d)",
-                mType, mId, mChromosome, mAlignmentStart, mAlignmentEnd, mCigar, orientation().asByte(), mJunctionReadIndex,
-                mJunctionAssemblyIndex, mLinkedAssemblyIndex, mJunctionMatches, mJunctionMismatches, mReferenceMismatches);
+        return format("type(%s) read(%s %s:%d-%d %s %d) index(juncDist=%d asm=%d:%d) hqMatch(%d) mismatch(junc=%d ref=%d)",
+                mType, mId, mChromosome, mAlignmentStart, mAlignmentEnd, mCigar, orientation().asByte(), mJunctionReadStartDistance,
+                mFullAssemblyIndex, mFullAssemblyOrientation != null ? mFullAssemblyOrientation.asByte() : 0,
+                mExtBaseMatches, mExtBaseMismatches, mRefBaseMismatches != null ? mRefBaseMismatches : -1);
     }
 }

@@ -4,9 +4,9 @@ import static com.hartwig.hmftools.common.fusion.FusionCommon.FS_DOWN;
 import static com.hartwig.hmftools.common.fusion.FusionCommon.FS_UP;
 import static com.hartwig.hmftools.common.fusion.KnownFusionType.IG_PROMISCUOUS;
 import static com.hartwig.hmftools.common.fusion.KnownFusionType.NONE;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.isStart;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.isStart;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
 import static com.hartwig.hmftools.linx.fusion.DisruptionFinder.getUndisruptedCopyNumber;
 import static com.hartwig.hmftools.linx.fusion.FusionConfig.WRITE_NEO_EPITOPES;
@@ -29,7 +29,7 @@ import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
 import com.hartwig.hmftools.linx.gene.BreakendGeneData;
 import com.hartwig.hmftools.common.fusion.KnownFusionType;
 import com.hartwig.hmftools.linx.gene.BreakendTransData;
-import com.hartwig.hmftools.common.utils.PerformanceCounter;
+import com.hartwig.hmftools.common.perf.PerformanceCounter;
 import com.hartwig.hmftools.common.linx.LinxBreakend;
 import com.hartwig.hmftools.common.linx.LinxFusion;
 import com.hartwig.hmftools.linx.LinxConfig;
@@ -771,8 +771,6 @@ public class FusionDisruptionAnalyser
             return genesList.stream()
                     .filter(x -> mFusionFinder.getKnownFusionCache().isSingleBreakendCandidate(x.geneName(), x.isUpstream()))
                     .collect(Collectors.toList());
-
-            // mFusionFinder.getKnownFusionCache().withinIgRegion(var.chromosome(false), var.position(false))
         }
 
         return var.getGenesList(isStart);
@@ -972,7 +970,7 @@ public class FusionDisruptionAnalyser
 
     private void addVisualisationData(final List<GeneFusion> fusionList)
     {
-        if(mVisSampleData == null || !mConfig.Output.WriteVisualisationData)
+        if(mVisSampleData == null || !mConfig.Output.writeVisualisationData())
             return;
 
         final List<VisFusion> visFusions = Lists.newArrayList();

@@ -8,14 +8,15 @@ import static com.hartwig.hmftools.common.utils.config.CommonConfig.TUMOR_IDS_DE
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDirSeparator;
 import static com.hartwig.hmftools.sage.SageCommon.SAMPLE_DELIM;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
-import static com.hartwig.hmftools.sage.SageConfig.registerCommonConfig;
 
 import java.io.File;
 import java.util.Arrays;
 import java.util.List;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
+import com.hartwig.hmftools.sage.tinc.TincConfig;
 
 import org.apache.logging.log4j.util.Strings;
 
@@ -26,19 +27,20 @@ public class SageCallConfig
     public final List<String> TumorIds;
     public final List<String> TumorBams;
     public final String HighConfidenceBed;
-    public final String CoverageBed;
     public final String PanelBed;
     public final String Hotspots;
     public final boolean PanelOnly;
+    public final boolean RunTinc;
 
     private final String mResourceDir;
 
-    private static final String COVERAGE_BED = "coverage_bed";
     private static final String RESOURCE_DIR = "resource_dir";
     private static final String HIGH_CONFIDENCE_BED = "high_confidence_bed";
     private static final String PANEL_BED = "panel_bed";
     private static final String HOTSPOTS = "hotspots";
     private static final String PANEL_ONLY = "panel_only";
+
+    public static final String RUN_TINC = "run_tinc";
 
     public SageCallConfig(final String version, final ConfigBuilder configBuilder)
     {
@@ -60,11 +62,13 @@ public class SageCallConfig
 
         mResourceDir = checkAddDirSeparator(configBuilder.getValue(RESOURCE_DIR, ""));
         PanelBed = getReferenceFile(configBuilder, PANEL_BED);
-        CoverageBed = getReferenceFile(configBuilder, COVERAGE_BED);
         HighConfidenceBed = getReferenceFile(configBuilder, HIGH_CONFIDENCE_BED);
         Hotspots = getReferenceFile(configBuilder, HOTSPOTS);
 
         PanelOnly = configBuilder.hasFlag(PANEL_ONLY);
+
+        // TINC can only run with a single germline sample
+        RunTinc = configBuilder.hasFlag(RUN_TINC) && Common.ReferenceIds.size() == 1;
     }
 
     public boolean isValid()
@@ -111,15 +115,18 @@ public class SageCallConfig
     {
         configBuilder.addConfigItem(TUMOR, true, TUMOR_IDS_DESC);
         configBuilder.addConfigItem(TUMOR_BAM, true, TUMOR_BAMS_DESC);
+        SageConfig.registerCommonConfig(configBuilder);
 
         configBuilder.addPath(RESOURCE_DIR, false, "Path to Sage resource files");
         configBuilder.addPrefixedPath(HIGH_CONFIDENCE_BED, false, "High confidence regions bed file", RESOURCE_DIR);
         configBuilder.addPrefixedPath(PANEL_BED, false, "Panel regions bed file", RESOURCE_DIR);
         configBuilder.addPrefixedPath(HOTSPOTS, false, "Hotspots", RESOURCE_DIR);
-        configBuilder.addPrefixedPath(COVERAGE_BED, false, "Coverage is calculated for optionally supplied bed", RESOURCE_DIR);
+        DriverGenePanelConfig.addGenePanelOption(configBuilder, false);
         configBuilder.addFlag(PANEL_ONLY, "Only examine panel for variants");
 
-        registerCommonConfig(configBuilder);
+        configBuilder.addFlag(RUN_TINC, "Run TINC routine");
+        TincConfig.registerCommonConfig(configBuilder);
+
         addEnsemblDir(configBuilder);
     }
 
@@ -129,10 +136,10 @@ public class SageCallConfig
         TumorIds = Lists.newArrayList();
         TumorBams = Lists.newArrayList();
         HighConfidenceBed = "highConf";
-        CoverageBed = "coverage";
         PanelBed = "panel";
         Hotspots = "hotspots";
         PanelOnly = false;
+        RunTinc = false;
         mResourceDir = "";
     }
 }

@@ -19,10 +19,18 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.hartwig.hmftools.common.amber.AmberBAF;
 import com.hartwig.hmftools.common.circos.CircosExecution;
+import com.hartwig.hmftools.common.cobalt.CobaltRatio;
+import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
+import com.hartwig.hmftools.common.gene.GeneData;
+import com.hartwig.hmftools.common.gene.TranscriptData;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.genome.position.GenomePosition;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeFunctions;
+import com.hartwig.hmftools.common.genome.region.GenomeRegion;
+import com.hartwig.hmftools.common.genome.region.GenomeRegions;
+import com.hartwig.hmftools.common.purple.PurpleSegment;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.linx.visualiser.circos.ChromosomeRangeExecution;
 import com.hartwig.hmftools.linx.visualiser.circos.CircosConfigWriter;
@@ -33,6 +41,7 @@ import com.hartwig.hmftools.linx.visualiser.circos.FusionDataWriter;
 import com.hartwig.hmftools.linx.visualiser.circos.FusionExecution;
 import com.hartwig.hmftools.linx.visualiser.circos.Span;
 import com.hartwig.hmftools.linx.visualiser.data.VisCopyNumbers;
+import com.hartwig.hmftools.linx.visualiser.data.VisExons;
 import com.hartwig.hmftools.linx.visualiser.data.VisLinks;
 import com.hartwig.hmftools.linx.visualiser.data.VisSegments;
 import com.hartwig.hmftools.linx.visualiser.file.VisCopyNumber;
@@ -44,7 +53,7 @@ import com.hartwig.hmftools.linx.visualiser.file.VisSvData;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 public class SvVisualiser implements AutoCloseable
 {
@@ -52,11 +61,17 @@ public class SvVisualiser implements AutoCloseable
 
     private final VisualiserConfig mConfig;
     private final SampleData mSampleData;
+
+    @Nullable
+    private final EnsemblDataCache mEnsemblDataCache;
+
     private final CircosConfig mCircosConfig;
     private final ExecutorService mExecutorService;
 
     private final List<Callable<Object>> mCallableImages;
     private final List<Callable<Object>> mCallableConfigs;
+
+    private final boolean mPlottingSelectedLoci;
 
     private SvVisualiser(final ConfigBuilder configBuilder) throws Exception
     {
@@ -64,11 +79,26 @@ public class SvVisualiser implements AutoCloseable
 
         mCircosConfig = new CircosConfig(configBuilder);
         mConfig = new VisualiserConfig(configBuilder);
-        mSampleData = new SampleData(mConfig);
         mExecutorService = Executors.newFixedThreadPool(mConfig.Threads);
 
         mCallableImages = Lists.newArrayList();
         mCallableConfigs = Lists.newArrayList();
+
+        mPlottingSelectedLoci = !mConfig.Chromosomes.isEmpty() || !mConfig.Genes.isEmpty();
+
+        if(mConfig.Genes.isEmpty())
+        {
+            mEnsemblDataCache = null;
+        }
+        else
+        {
+            EnsemblDataCache ensemblDataCache = new EnsemblDataCache(mConfig.EnsemblDataDir, mConfig.RefGenVersion);
+            ensemblDataCache.setRequiredData(true, false, false, true);
+            ensemblDataCache.load(false);
+            mEnsemblDataCache = ensemblDataCache;
+        }
+
+        mSampleData = new SampleData(mConfig);
     }
 
     private void run() throws Exception
@@ -78,7 +108,7 @@ public class SvVisualiser implements AutoCloseable
             System.exit(1);
         }
 
-        final List<Future<Object>> futures = Lists.newArrayList();
+        List<Future<Object>> futures = Lists.newArrayList();
 
         if(mConfig.PlotReportableEvents)
         {
@@ -89,7 +119,7 @@ public class SvVisualiser implements AutoCloseable
                 submitCluster(Lists.newArrayList(clusterId), Collections.EMPTY_LIST, true);
             }
         }
-        else if(!mConfig.ClusterIds.isEmpty() || !mConfig.Chromosomes.isEmpty())
+        else if(!mConfig.ClusterIds.isEmpty() || !mConfig.Chromosomes.isEmpty() || !mConfig.Genes.isEmpty())
         {
             if(!mConfig.ClusterIds.isEmpty())
             {
@@ -98,24 +128,33 @@ public class SvVisualiser implements AutoCloseable
 
             if(!mConfig.Chromosomes.isEmpty())
             {
-                submitChromosome(mConfig.Chromosomes);
+                submitChromosome(mConfig.Chromosomes, null);
+            }
+
+            if(!mConfig.Genes.isEmpty())
+            {
+                for(String geneName : mConfig.Genes)
+                {
+                    String geneChromosome = mEnsemblDataCache.getGeneDataByName(geneName).Chromosome;
+                    submitChromosome(Lists.newArrayList(geneChromosome), geneName);
+                }
             }
         }
         else
         {
-            final List<Integer> clusterIds = mSampleData.SvData.stream().map(x -> x.ClusterId).distinct().sorted().collect(toList());
+            List<Integer> clusterIds = mSampleData.SvData.stream().map(x -> x.ClusterId).distinct().sorted().collect(toList());
 
             for(Integer clusterId : clusterIds)
             {
                 submitCluster(Lists.newArrayList(clusterId), Collections.EMPTY_LIST, true);
             }
 
-            final Set<String> chromosomes = Sets.newHashSet();
+            Set<String> chromosomes = Sets.newHashSet();
             mSampleData.SvData.stream().map(x -> x.ChrStart).filter(HumanChromosome::contains).forEach(chromosomes::add);
             mSampleData.SvData.stream().map(x -> x.ChrEnd).filter(HumanChromosome::contains).forEach(chromosomes::add);
-            for(final String chromosome : chromosomes)
+            for(String chromosome : chromosomes)
             {
-                submitChromosome(Lists.newArrayList(chromosome));
+                submitChromosome(Lists.newArrayList(chromosome), null);
             }
         }
 
@@ -130,7 +169,7 @@ public class SvVisualiser implements AutoCloseable
         VIS_LOGGER.info("Linx Visualiser complete");
     }
 
-    private void submitChromosome(final List<String> chromosomes)
+    private void submitChromosome(List<String> chromosomes, @Nullable final String geneName)
     {
         if(chromosomes.stream().anyMatch(x -> !HumanChromosome.contains(x)))
         {
@@ -138,24 +177,22 @@ public class SvVisualiser implements AutoCloseable
             return;
         }
 
-        final String chromosomesStr = chromosomes.size() >= HumanChromosome.values().length
+        String chromosomesStr = chromosomes.size() >= HumanChromosome.values().length
                 ? "All"
                 : chromosomes.stream().map(RefGenomeFunctions::stripChrPrefix).collect(Collectors.joining("-"));
 
-        final Predicate<VisSvData> linePredicate = x -> !x.isLineElement() || mConfig.IncludeLineElements;
-        final Predicate<VisSvData> chromosomePredicate = x -> chromosomes.contains(x.ChrStart) || chromosomes.contains(x.ChrEnd);
-        final Predicate<VisSvData> combinedPredicate = chromosomePredicate.and(linePredicate);
+        Predicate<VisSvData> linePredicate = x -> !x.isLineElement() || mConfig.IncludeLineElements;
+        Predicate<VisSvData> chromosomePredicate = x -> chromosomes.contains(x.ChrStart) || chromosomes.contains(x.ChrEnd);
+        Predicate<VisSvData> combinedPredicate = chromosomePredicate.and(linePredicate);
 
-        final String sample = mConfig.Sample + ".chr" + chromosomesStr + (mConfig.Debug ? ".debug" : "");
-
-        final Set<Integer> clusterIds = mSampleData.SvData
+        Set<Integer> clusterIds = mSampleData.SvData
                 .stream()
                 .filter(combinedPredicate)
                 .map(x -> x.ClusterId)
                 .collect(toSet());
 
-        final List<VisSvData> chromosomeLinks = mSampleData.SvData.stream().filter(x -> clusterIds.contains(x.ClusterId)).collect(toList());
-        if(chromosomeLinks.isEmpty())
+        List<VisSvData> chromosomeLinks = mSampleData.SvData.stream().filter(x -> clusterIds.contains(x.ClusterId)).collect(toList());
+        if(!mPlottingSelectedLoci && chromosomeLinks.isEmpty())
         {
             VIS_LOGGER.warn("chromosomes({}) not present in file", chromosomesStr);
             return;
@@ -168,7 +205,7 @@ public class SvVisualiser implements AutoCloseable
             return;
         }
 
-        final List<VisSegment> chromosomeSegments =
+        List<VisSegment> chromosomeSegments =
                 mSampleData.Segments.stream().filter(x -> clusterIds.contains(x.ClusterId)).collect(toList());
 
         for(String chromosome : chromosomes)
@@ -176,7 +213,7 @@ public class SvVisualiser implements AutoCloseable
             chromosomeSegments.add(VisSegments.entireChromosome(mConfig.Sample, chromosome, mConfig.RefGenomeCoords));
         }
 
-        final Set<String> chromosomesOfInterest = Sets.newHashSet(chromosomes);
+        Set<String> chromosomesOfInterest = Sets.newHashSet(chromosomes);
         chromosomeLinks.forEach(x ->
         {
             chromosomesOfInterest.add(x.ChrStart);
@@ -184,19 +221,65 @@ public class SvVisualiser implements AutoCloseable
         });
         chromosomeSegments.forEach(x -> chromosomesOfInterest.add(x.chromosome()));
 
-        final List<VisGeneExon> chromosomeExons =
-                mSampleData.Exons.stream().filter(x -> chromosomesOfInterest.contains(x.Chromosome)).collect(toList());
+        List<VisGeneExon> chromosomeExons;
+        if(geneName == null)
+        {
+            chromosomeExons = mSampleData.Exons.stream().filter(x -> chromosomesOfInterest.contains(x.Chromosome)).collect(toList());
 
-        final List<VisProteinDomain> chromosomeProteinDomains =
+            if(!mConfig.Genes.isEmpty())
+                chromosomeExons.addAll(getExonDataFromCache(mConfig.Genes, mConfig.ClusterIds, chromosomeExons));
+        }
+        else
+        {
+            chromosomeExons = getExonDataFromCache(Set.of(geneName), mConfig.ClusterIds, Lists.newArrayList());
+        }
+
+        List<VisProteinDomain> chromosomeProteinDomains =
                 mSampleData.ProteinDomains.stream().filter(x -> chromosomesOfInterest.contains(x.chromosome())).collect(toList());
 
-        submitFiltered(ColorPicker::clusterColors, sample, chromosomeLinks, chromosomeSegments, chromosomeExons, chromosomeProteinDomains,
+        String fileId = mConfig.Sample + ".";
+        fileId += geneName == null ? "chr" + chromosomesStr : geneName;
+        fileId += mConfig.Debug ? ".debug" : "";
+
+        submitFiltered(ColorPicker::clusterColors, fileId, chromosomeLinks, chromosomeSegments, chromosomeExons, chromosomeProteinDomains,
                 Collections.emptyList(), false);
+    }
+
+    private List<VisGeneExon> getExonDataFromCache(
+            final Set<String> geneList, final List<Integer> clusterIds, final List<VisGeneExon> currentExons)
+    {
+        final List<VisGeneExon> exonList = Lists.newArrayList();
+
+        final List<Integer> allClusterIds = clusterIds.isEmpty() ? Lists.newArrayList(0) : clusterIds;
+
+        for(final String geneName : geneList)
+        {
+            if(currentExons.stream().anyMatch(x -> x.Gene.equals(geneName) && clusterIds.contains(x.ClusterId)))
+                continue;
+
+            VIS_LOGGER.info("loading exon data for additional gene({})", geneName);
+
+            GeneData geneData = mEnsemblDataCache.getGeneDataByName(geneName);
+            TranscriptData transcriptData = geneData != null ? mEnsemblDataCache.getCanonicalTranscriptData(geneData.GeneId) : null;
+
+            if(transcriptData == null)
+            {
+                VIS_LOGGER.warn("data not found for specified gene({})", geneName);
+                continue;
+            }
+
+            for(Integer clusterId : allClusterIds)
+            {
+                exonList.addAll(VisExons.extractExonList(mConfig.Sample, clusterId, geneData, transcriptData));
+            }
+        }
+
+        return exonList;
     }
 
     private void submitCluster(final List<Integer> clusterIds, final List<Integer> chainIds, boolean skipSingles)
     {
-        final List<VisSvData> clusterSvs = mSampleData.SvData.stream()
+        List<VisSvData> clusterSvs = mSampleData.SvData.stream()
                 .filter(x -> clusterIds.contains(x.ClusterId))
                 .filter(x -> chainIds.isEmpty() || chainIds.contains(x.ChainId))
                 .collect(toList());
@@ -210,12 +293,12 @@ public class SvVisualiser implements AutoCloseable
             return;
         }
 
-        final List<VisSegment> clusterSegments = mSampleData.Segments.stream()
+        List<VisSegment> clusterSegments = mSampleData.Segments.stream()
                 .filter(x -> clusterIds.contains(x.ClusterId))
                 .filter(x -> chainIds.isEmpty() || chainIds.contains(x.ChainId))
                 .collect(toList());
 
-        final List<VisGeneExon> clusterExons =
+        List<VisGeneExon> clusterExons =
                 mSampleData.Exons.stream().filter(x -> clusterIds.contains(x.ClusterId)).distinct().collect(toList());
 
         if(clusterSvs.isEmpty())
@@ -230,8 +313,8 @@ public class SvVisualiser implements AutoCloseable
             return;
         }
 
-        final Set<Integer> linkChainIds = clusterSvs.stream().map(x -> x.ChainId).collect(Collectors.toSet());
-        final Set<Integer> segmentChainIds = clusterSegments.stream().map(x -> x.ChainId).collect(Collectors.toSet());
+        Set<Integer> linkChainIds = clusterSvs.stream().map(x -> x.ChainId).collect(Collectors.toSet());
+        Set<Integer> segmentChainIds = clusterSegments.stream().map(x -> x.ChainId).collect(Collectors.toSet());
         segmentChainIds.removeAll(linkChainIds);
         if(!segmentChainIds.isEmpty())
         {
@@ -256,7 +339,7 @@ public class SvVisualiser implements AutoCloseable
 
             if(mConfig.ClusterIds.size() == 1)
             {
-                final String resolvedTypeString = clusterSvs.get(0).ClusterResolvedType.toString();
+                String resolvedTypeString = clusterSvs.get(0).ClusterResolvedType.toString();
                 fileId += "." + resolvedTypeString;
             }
         }
@@ -266,17 +349,17 @@ public class SvVisualiser implements AutoCloseable
         if(mConfig.Debug)
             fileId += ".debug";
 
-        final List<VisProteinDomain> clusterProteinDomains =
+        List<VisProteinDomain> clusterProteinDomains =
                 mSampleData.ProteinDomains.stream().filter(x -> clusterIds.contains(x.ClusterId)).distinct().collect(toList());
 
-        final List<VisFusion> clusterFusions = mSampleData.Fusions.stream().filter(x -> clusterIds.contains(x.ClusterId)).collect(toList());
+        List<VisFusion> clusterFusions = mSampleData.Fusions.stream().filter(x -> clusterIds.contains(x.ClusterId)).collect(toList());
 
         submitFiltered(clusterIds.size() == 1 ? ColorPicker::chainColors : ColorPicker::clusterColors,
                 fileId, clusterSvs, clusterSegments, clusterExons, clusterProteinDomains, clusterFusions, true);
     }
 
     private void submitFiltered(final ColorPickerFactory colorPickerFactory,
-            final String sample,
+            final String fileId,
             final List<VisSvData> filteredLinks,
             final List<VisSegment> filteredSegments,
             final List<VisGeneExon> filteredExons,
@@ -284,41 +367,105 @@ public class SvVisualiser implements AutoCloseable
             final List<VisFusion> filteredFusions,
             boolean showSimpleSvSegments)
     {
-
-        final List<GenomePosition> positionsToCover = Lists.newArrayList();
+        List<GenomePosition> positionsToCover = Lists.newArrayList();
         positionsToCover.addAll(VisLinks.allPositions(filteredLinks));
         positionsToCover.addAll(Span.allPositions(filteredSegments));
         positionsToCover.addAll(Span.allPositions(filteredExons));
 
         // Limit copy numbers to within segments, links and exons (plus a little extra)
-        final List<VisCopyNumber> copyNumbers = VisCopyNumbers.copyNumbers(mSampleData.CopyNumbers, Span.spanPositions(positionsToCover));
+        List<VisCopyNumber> copyNumbers = VisCopyNumbers.copyNumbers(mSampleData.CopyNumbers, Span.spanPositions(positionsToCover));
         positionsToCover.addAll(Span.allPositions(copyNumbers));
 
-        // Need to extend terminal segments past any current segments, links and exons and copy numbers
-        final List<VisSegment> segments = VisSegments.extendTerminals(
-                0, filteredSegments, filteredLinks, positionsToCover, showSimpleSvSegments, mConfig.RefGenomeCoords);
+        positionsToCover = positionsToCover.stream().distinct().collect(toList());
+        Collections.sort(positionsToCover);
 
-        final List<VisSvData> links = VisLinks.addFrame(segments, filteredLinks);
-
-        final ColorPicker color = colorPickerFactory.create(links);
-
-        final CircosData circosData = new CircosData(
-                showSimpleSvSegments, mCircosConfig, segments, links, copyNumbers, filteredExons, filteredFusions);
-
-        final CircosConfigWriter confWrite = new CircosConfigWriter(sample, mConfig.OutputConfPath, circosData, mCircosConfig);
-        final FusionDataWriter fusionDataWriter = new FusionDataWriter(filteredFusions, filteredExons, filteredProteinDomains);
-
-        mCallableConfigs.add(() -> new CircosDataWriter(color, sample, mConfig.OutputConfPath, mCircosConfig, confWrite, circosData).write());
-        if(!fusionDataWriter.finalExons().isEmpty())
+        List<GenomeRegion> regionsToCover = Span.spanPositions(positionsToCover);
+        List<AmberBAF> filteredAmberBAFs = Lists.newArrayList();
+        List<CobaltRatio> filteredCobaltRatios = Lists.newArrayList();
+        List<PurpleSegment> filteredPurpleSegments = Lists.newArrayList();
+        for(GenomeRegion region : regionsToCover)
         {
-            mCallableConfigs.add(() -> fusionDataWriter.write(sample, mConfig.OutputConfPath));
+            if(mConfig.AmberDir != null)
+            {
+                List<AmberBAF> regionAmberBAFs = mSampleData.AmberBAFs.stream()
+                        .filter(x -> x.Chromosome.equals(region.chromosome()) && region.start()<=x.position() && region.end()>=x.position())
+                        .toList();
+
+                filteredAmberBAFs.addAll(regionAmberBAFs);
+            }
+
+            if(mConfig.CobaltDir != null)
+            {
+                List<CobaltRatio> regionCobaltRatios = mSampleData.CobaltRatios.stream()
+                        .filter(x -> x.chromosome().equals(region.chromosome()) && region.start()<=x.position() && region.end()>=x.position())
+                        .toList();
+
+                filteredCobaltRatios.addAll(regionCobaltRatios);
+            }
+
+            if(mConfig.PurpleDir != null)
+            {
+                List<PurpleSegment> regionPurpleSegments = Lists.newArrayList();
+                for(PurpleSegment purpleSegment : mSampleData.PurpleSegments)
+                {
+                    GenomeRegion purpleSegmentRegion = GenomeRegions.create(
+                            purpleSegment.Chromosome, purpleSegment.PosStart, purpleSegment.PosEnd);
+
+                    if(!region.overlaps(purpleSegmentRegion))
+                        continue;
+
+                    PurpleSegment newPurpleSegment = purpleSegment.withModifiedCoordinates(
+                            purpleSegment.Chromosome,
+                            Math.max(purpleSegment.PosStart, region.start()),
+                            Math.min(purpleSegment.PosEnd, region.end())
+                    );
+
+                    regionPurpleSegments.add(newPurpleSegment);
+                }
+
+                filteredPurpleSegments.addAll(regionPurpleSegments);
+            }
         }
 
-        int minFrame = mCircosConfig.Step ? 0 : circosData.maxFrame();
-        for(int frame = minFrame; frame <= circosData.maxFrame(); frame++)
+        // Need to extend terminal segments past any current segments, links and exons and copy numbers
+        List<VisSegment> segments = VisSegments.extendTerminals(
+                0, filteredSegments, filteredLinks, positionsToCover, showSimpleSvSegments, mConfig.RefGenomeCoords);
+
+        List<VisSvData> links = VisLinks.addFrame(segments, filteredLinks);
+
+        if(!mPlottingSelectedLoci && (copyNumbers.isEmpty() || segments.isEmpty() || links.isEmpty()))
+        {
+            List<String> missingDataTypes = Lists.newArrayList();
+            if(copyNumbers.isEmpty()) missingDataTypes.add("copy numbers");
+            if(segments.isEmpty())    missingDataTypes.add("segments");
+            if(links.isEmpty())       missingDataTypes.add("links");
+
+            VIS_LOGGER.warn("plot({}) has missing required data: {}", fileId, String.join(", ", missingDataTypes));
+            return;
+        }
+
+        ColorPicker color = colorPickerFactory.create(links);
+
+        CircosData circosData = new CircosData(
+                mCircosConfig,
+                segments, links, copyNumbers, filteredExons, filteredFusions, filteredAmberBAFs, filteredCobaltRatios, filteredPurpleSegments,
+                showSimpleSvSegments,  mConfig.IncludeFragileSites, mConfig.IncludeLineElements
+        );
+
+        CircosConfigWriter confWrite = new CircosConfigWriter(fileId, mConfig.OutputConfPath, circosData, mCircosConfig);
+        FusionDataWriter fusionDataWriter = new FusionDataWriter(filteredFusions, filteredExons, filteredProteinDomains);
+
+        mCallableConfigs.add(() -> new CircosDataWriter(color, fileId, mConfig.OutputConfPath, mCircosConfig, confWrite, circosData).write());
+        if(!fusionDataWriter.finalExons().isEmpty())
+        {
+            mCallableConfigs.add(() -> fusionDataWriter.write(fileId, mConfig.OutputConfPath));
+        }
+
+        int minFrame = mCircosConfig.Step ? 0 : circosData.MaxFrame;
+        for(int frame = minFrame; frame <= circosData.MaxFrame; frame++)
         {
             boolean plotFusion = !fusionDataWriter.finalExons().isEmpty();
-            submitFrame(frame, plotFusion, circosData.labelSize(), sample, confWrite);
+            submitFrame(frame, plotFusion, circosData.labelSize(), fileId, confWrite);
         }
     }
 
@@ -334,12 +481,12 @@ public class SvVisualiser implements AutoCloseable
     private Object createImageFrame(
             int frame, double labelSize, final String sample, boolean plotFusion, boolean plotChromosome) throws Exception
     {
-        final String confFileName = sample + ".circos." + String.format("%03d", frame) + ".conf";
-        final String outputFileName = sample + "." + String.format("%03d", frame) + ".png";
+        String confFileName = sample + ".circos." + String.format("%03d", frame) + ".conf";
+        String outputFileName = sample + "." + String.format("%03d", frame) + ".png";
 
         double rLabelSize = 1.2 * labelSize;
 
-        final Object circosResult = new CircosExecution(
+        Object circosResult = new CircosExecution(
                 mConfig.CircosBin).generateCircos(mConfig.OutputConfPath + File.separator + confFileName,
                 mConfig.OutputPlotPath, outputFileName);
 
@@ -374,7 +521,7 @@ public class SvVisualiser implements AutoCloseable
 
         configBuilder.checkAndParseCommandLine(args);
 
-        try(final SvVisualiser application = new SvVisualiser(configBuilder))
+        try(SvVisualiser application = new SvVisualiser(configBuilder))
         {
             application.run();
         }

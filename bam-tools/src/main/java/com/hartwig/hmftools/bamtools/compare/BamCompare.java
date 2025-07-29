@@ -4,8 +4,8 @@ import static com.hartwig.hmftools.bamtools.common.CommonUtils.APP_NAME;
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.BT_LOGGER;
 import static com.hartwig.hmftools.common.region.PartitionUtils.buildPartitions;
 import static com.hartwig.hmftools.common.region.PartitionUtils.partitionChromosome;
-import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.executeRunnables;
+import static com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.executeRunnables;
 
 import java.io.File;
 import java.io.IOException;
@@ -116,8 +116,10 @@ public class BamCompare
         try(SamReader samReaderOrig = samReaderFactory.open(new File(mConfig.OrigBamFile));
             SamReader samReaderNew = samReaderFactory.open(new File(mConfig.NewBamFile)))
         {
-            sequenceRecords.addAll(samReaderOrig.getFileHeader().getSequenceDictionary().getSequences());
-            sequenceRecords.addAll(samReaderNew.getFileHeader().getSequenceDictionary().getSequences());
+            final List<SAMSequenceRecord> sequencesOriginal = samReaderOrig.getFileHeader().getSequenceDictionary().getSequences();
+            sequenceRecords.addAll(sequencesOriginal);
+            final List<SAMSequenceRecord> sequencesNew = samReaderNew.getFileHeader().getSequenceDictionary().getSequences();
+            sequenceRecords.addAll(sequencesNew);
         }
         catch(IOException e)
         {
@@ -152,10 +154,11 @@ public class BamCompare
         return partitions;
     }
 
-    // pass all unmapped reads to the unmatched read handler
-    private void addProcessUnmappedTasks(List<Runnable> tasks, BamReaderProvider origBamReaderProvider,
-            BamReaderProvider newBamReaderProvider, UnmatchedReadHandler unmatchedReadHandler)
+    private void addProcessUnmappedTasks(
+            final List<Runnable> tasks, BamReaderProvider origBamReaderProvider,
+            final BamReaderProvider newBamReaderProvider, final UnmatchedReadHandler unmatchedReadHandler)
     {
+        // pass all unmapped reads to the unmatched read handler
         if(!mConfig.ignoreUnmapped())
         {
             tasks.add(() ->
@@ -163,7 +166,11 @@ public class BamCompare
                 try(SAMRecordIterator itr = origBamReaderProvider.getBamReader().queryUnmapped())
                 {
                     long numReads = unmatchedReadHandler.handleOrigBamReads(itr);
-                    BT_LOGGER.printf(Level.DEBUG, "finished writing %,d unmapped orig bam reads to hash bams", numReads);
+
+                    if(numReads > 0)
+                    {
+                        BT_LOGGER.debug("finished writing {} unmapped orig bam reads to hash bams", numReads);
+                    }
                 }
             });
 
@@ -172,7 +179,11 @@ public class BamCompare
                 try(SAMRecordIterator itr = newBamReaderProvider.getBamReader().queryUnmapped())
                 {
                     long numReads = unmatchedReadHandler.handleNewBamReads(itr);
-                    BT_LOGGER.printf(Level.DEBUG, "finished writing %,d unmapped new bam reads to hash bams", numReads);
+
+                    if(numReads > 0)
+                    {
+                        BT_LOGGER.trace("finished writing {} unmapped new bam reads to hash bams", numReads);
+                    }
                 }
             });
         }
@@ -184,15 +195,6 @@ public class BamCompare
         CompareConfig.addConfig(configBuilder);
 
         configBuilder.checkAndParseCommandLine(args);
-
-        // set all thread exception handler
-        // we must do this otherwise unhandled exception in other threads might not be reported
-        Thread.setDefaultUncaughtExceptionHandler((Thread t, Throwable e) ->
-        {
-            BT_LOGGER.fatal("[{}]: uncaught exception: {}", t, e);
-            e.printStackTrace(System.err);
-            System.exit(1);
-        });
 
         BamCompare bamCompare = new BamCompare(configBuilder);
         bamCompare.run();

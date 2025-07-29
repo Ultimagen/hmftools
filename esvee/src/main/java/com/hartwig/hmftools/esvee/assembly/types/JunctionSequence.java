@@ -3,8 +3,6 @@ package com.hartwig.hmftools.esvee.assembly.types;
 import static java.lang.Math.min;
 import static java.lang.String.format;
 
-import static com.hartwig.hmftools.esvee.AssemblyConstants.PHASED_ASSEMBLY_JUNCTION_OVERLAP;
-
 import java.util.Collections;
 import java.util.List;
 
@@ -14,6 +12,7 @@ import com.hartwig.hmftools.common.genome.region.Orientation;
 public class JunctionSequence
 {
     public final boolean Reversed;
+    public final Orientation JuncOrient;
     public final String FullSequence;
 
     public final int ExtensionLength;
@@ -26,22 +25,63 @@ public class JunctionSequence
     // the following are in non-reversed terms
     private final int mJunctionIndex; // as per the original assembly
 
-    // indices for the junction sequence around the junction (eg +/- 50 bases)
-    private final int mJunctionSeqIndexStart;
-    private final int mJunctionSeqIndexEnd;
+    // indices for the sequence used to match to another, typically around the junction (eg +/- 50 bases)
+    private final int mMatchSeqIndexStart;
+    private final int mMatchSeqIndexEnd;
 
     // built on demand since only used for the sequence comparison routine
     private List<RepeatInfo> mRepeatInfo;
     private byte[] mBases;
     private byte[] mBaseQuals;
 
-    public JunctionSequence(final JunctionAssembly assembly, final boolean reverseCompliment)
+    private enum MatchSequenceMode
     {
-        this(assembly, reverseCompliment, PHASED_ASSEMBLY_JUNCTION_OVERLAP, PHASED_ASSEMBLY_JUNCTION_OVERLAP);
+        STRADDLE, // form a sub-sequence taking (ideally) an equal number of ref and extension bases spanning the junction
+        FULL_EXTENSION, // uses all extension bases
+        OUTER_EXTENSION, // where the extension bases are long, take the outer-most 100 (or configured) bases
+        INNER_EXTENSION; // where the extension bases are long, take the bases starting from the junction
+    }
+
+    public static final int PHASED_ASSEMBLY_MATCH_SEQ_LENGTH = 100;
+
+    public static JunctionSequence formOuterExtensionMatchSequence(final JunctionAssembly assembly, final boolean reverseCompliment)
+    {
+        return new JunctionSequence(
+                assembly, reverseCompliment, 0, PHASED_ASSEMBLY_MATCH_SEQ_LENGTH,
+                MatchSequenceMode.OUTER_EXTENSION);
+    }
+
+    public static JunctionSequence formStraddlingMatchSequence(final JunctionAssembly assembly)
+    {
+        return new JunctionSequence(
+                assembly, false, PHASED_ASSEMBLY_MATCH_SEQ_LENGTH / 2,
+                -1, MatchSequenceMode.STRADDLE);
+    }
+
+    public static JunctionSequence formStraddlingMatchSequence(
+            final JunctionAssembly assembly, final boolean reverseCompliment, int maxMatchSeqRefBaseLength, int maxMatchSeqExtensionLength)
+    {
+        return new JunctionSequence(
+                assembly, reverseCompliment, maxMatchSeqRefBaseLength, maxMatchSeqExtensionLength, MatchSequenceMode.STRADDLE);
+    }
+
+    public static JunctionSequence formFullExtensionMatchSequence(final JunctionAssembly assembly, final boolean reverseCompliment)
+    {
+        return new JunctionSequence(
+                assembly, reverseCompliment, 0, -1, MatchSequenceMode.FULL_EXTENSION);
+    }
+
+    // currently unused
+    public static JunctionSequence formInnerExtensionMatchSequence(final JunctionAssembly assembly, final boolean reverseCompliment)
+    {
+        return new JunctionSequence(
+                assembly, reverseCompliment, 0, PHASED_ASSEMBLY_MATCH_SEQ_LENGTH,
+                MatchSequenceMode.INNER_EXTENSION);
     }
 
     public JunctionSequence(
-            final JunctionAssembly assembly, final boolean reverseCompliment, final int maxJuncSeqRefBaseLength, final int maxJuncSeqExtensionLength)
+            final JunctionAssembly assembly, final boolean reverseCompliment, int maxMatchSeqRefBaseLength, int maxMatchSeqExtensionLength,
+            final MatchSequenceMode matchSequenceMode)
     {
         mOriginalBases = assembly.bases();
         mOriginalBaseQuals = assembly.baseQuals();
@@ -51,6 +91,7 @@ public class JunctionSequence
         mBaseQuals = null;
         mRepeatInfo = null;
 
+        JuncOrient = assembly.junction().Orient;
         Reversed = reverseCompliment;
         RefBaseLength = assembly.refBaseLength();
         ExtensionLength = assembly.extensionLength();
@@ -60,44 +101,106 @@ public class JunctionSequence
 
         if(!Reversed)
         {
-            FullSequence = assembly.formJunctionSequence(RefBaseLength);
+            FullSequence = assembly.formFullSequence();
         }
         else
         {
-            FullSequence = Nucleotides.reverseComplementBases(assembly.formJunctionSequence(RefBaseLength));
+            FullSequence = Nucleotides.reverseComplementBases(assembly.formFullSequence());
         }
 
         // also make a shorter sequence centred around the junction
-        int juncSeqExtLength = maxJuncSeqExtensionLength > 0 ? min(ExtensionLength, maxJuncSeqExtensionLength) : ExtensionLength;
-        int juncSeqRefLength = min(RefBaseLength, maxJuncSeqRefBaseLength);
+        int matchSeqExtLength;
+        int matchSeqRefExtension = 0;
 
-        int juncIndexStart, juncIndexEnd;
-
-        if(assembly.isForwardJunction())
+        if(maxMatchSeqExtensionLength > 0)
         {
-            juncIndexStart = mJunctionIndex - juncSeqRefLength + 1;
-            juncIndexEnd = mJunctionIndex + juncSeqExtLength;
+            // if the specified extension length cannot be taken, then take additional length from ref bases
+            if(maxMatchSeqExtensionLength > ExtensionLength)
+            {
+                matchSeqExtLength = ExtensionLength;
+                matchSeqRefExtension = maxMatchSeqExtensionLength - ExtensionLength;
+            }
+            else
+            {
+                matchSeqExtLength = maxMatchSeqExtensionLength;
+            }
         }
         else
         {
-            juncIndexStart = mJunctionIndex - juncSeqExtLength;
-            juncIndexEnd = mJunctionIndex + juncSeqRefLength - 1;
+            matchSeqExtLength = ExtensionLength; // take the full length
+        }
+
+        int matchSeqRefLength = min(RefBaseLength, maxMatchSeqRefBaseLength + matchSeqRefExtension);
+
+        int matchIndexStart, matchIndexEnd;
+
+        if(matchSequenceMode == MatchSequenceMode.OUTER_EXTENSION && matchSeqExtLength < ExtensionLength)
+        {
+            if(assembly.isForwardJunction())
+            {
+                matchIndexEnd = BaseLength - 1;
+                matchIndexStart = matchIndexEnd - matchSeqExtLength + 1;
+            }
+            else
+            {
+                matchIndexStart = 0;
+                matchIndexEnd = matchIndexStart + matchSeqExtLength - 1;
+            }
+        }
+        else if(matchSequenceMode == MatchSequenceMode.INNER_EXTENSION && matchSeqExtLength < ExtensionLength)
+        {
+            if(assembly.isForwardJunction())
+            {
+                matchIndexStart = mJunctionIndex + 1;
+                matchIndexEnd = matchIndexStart + matchSeqExtLength - 1;
+            }
+            else
+            {
+                matchIndexEnd = mJunctionIndex - 1;
+                matchIndexStart = matchIndexEnd - matchSeqExtLength + 1;
+            }
+        }
+        else if(matchSequenceMode == MatchSequenceMode.FULL_EXTENSION)
+        {
+            if(assembly.isForwardJunction())
+            {
+                matchIndexStart = mJunctionIndex + 1;
+                matchIndexEnd = BaseLength - 1;
+            }
+            else
+            {
+                matchIndexStart = 0;
+                matchIndexEnd = mJunctionIndex - 1;
+            }
+        }
+        else
+        {
+            if(assembly.isForwardJunction())
+            {
+                matchIndexStart = mJunctionIndex - matchSeqRefLength + 1;
+                matchIndexEnd = mJunctionIndex + matchSeqExtLength;
+            }
+            else
+            {
+                matchIndexStart = mJunctionIndex - matchSeqExtLength;
+                matchIndexEnd = mJunctionIndex + matchSeqRefLength - 1;
+            }
         }
 
         if(!Reversed)
         {
-            mJunctionSeqIndexStart = juncIndexStart;
-            mJunctionSeqIndexEnd = juncIndexEnd;
+            mMatchSeqIndexStart = matchIndexStart;
+            mMatchSeqIndexEnd = matchIndexEnd;
         }
         else
         {
             // note the switches here
-            mJunctionSeqIndexStart = indexReversed(juncIndexEnd);
-            mJunctionSeqIndexEnd = indexReversed(juncIndexStart);
+            mMatchSeqIndexStart = indexReversed(matchIndexEnd);
+            mMatchSeqIndexEnd = indexReversed(matchIndexStart);
         }
     }
 
-    public JunctionSequence(final byte[] bases, final byte[] baseQuals, final Orientation orientation,final boolean reverseCompliment)
+    public JunctionSequence(final byte[] bases, final byte[] baseQuals, final Orientation orientation, final boolean reverseCompliment)
     {
         mOriginalBases = bases;
         mOriginalBaseQuals = baseQuals;
@@ -107,6 +210,7 @@ public class JunctionSequence
         mBaseQuals = null;
         mRepeatInfo = null;
 
+        JuncOrient = orientation;
         Reversed = reverseCompliment;
         RefBaseLength = 0;
         ExtensionLength = bases.length;
@@ -114,18 +218,11 @@ public class JunctionSequence
 
         mJunctionIndex = orientation.isReverse() ? 0 : bases.length - 1; // better to not set this??
 
-        if(!Reversed)
-        {
-            FullSequence = new String(bases);
-        }
-        else
-        {
-            FullSequence = Nucleotides.reverseComplementBases(new String(bases));
-        }
+        FullSequence = !Reversed ? new String(bases) : new String(Nucleotides.reverseComplementBases(bases));
 
         // unused
-        mJunctionSeqIndexStart = 0;
-        mJunctionSeqIndexEnd = 0;
+        mMatchSeqIndexStart = 0;
+        mMatchSeqIndexEnd = 0;
     }
 
     public int junctionIndex()
@@ -133,19 +230,13 @@ public class JunctionSequence
         return !Reversed ? mJunctionIndex : BaseLength - mJunctionIndex - 1;
     }
 
-    public final String junctionSequence()
+    public final String matchSequence()
     {
-        return FullSequence.substring(junctionSeqStartIndex(), junctionSeqEndIndex() + 1);
+        return FullSequence.substring(mMatchSeqIndexStart, mMatchSeqIndexEnd + 1);
     }
 
-    public int junctionSeqStartIndex() { return mJunctionSeqIndexStart; }
-    public int junctionSeqEndIndex()
-    {
-        return mJunctionSeqIndexEnd;
-    }
-
-    public byte[] originalBases() { return mOriginalBases; }
-    public byte[] originalBaseQuals() { return mOriginalBaseQuals; }
+    public int matchSeqStartIndex() { return mMatchSeqIndexStart; }
+    public int matchSeqEndIndex() { return mMatchSeqIndexEnd; }
 
     public byte[] bases()
     {
@@ -208,8 +299,8 @@ public class JunctionSequence
 
     public String toString()
     {
-        return format("len(%d ref=%d ext=%d juncIndex=%d) %s juncSeq(%d - %d)",
+        return format("len(%d ref=%d ext=%d juncIndex=%d) %s matchSeq(%d - %d)",
                 BaseLength, RefBaseLength, ExtensionLength, mJunctionIndex, Reversed ? "rev" : "fwd",
-                junctionSeqStartIndex(), junctionSeqEndIndex());
+                matchSeqStartIndex(), matchSeqEndIndex());
     }
 }

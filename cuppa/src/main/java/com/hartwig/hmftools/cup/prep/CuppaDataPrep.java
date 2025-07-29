@@ -1,9 +1,9 @@
 package com.hartwig.hmftools.cup.prep;
 
-import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
+import static com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_ZIP_EXTENSION;
-import static com.hartwig.hmftools.cup.common.CupConstants.CUP_LOGGER;
 import static com.hartwig.hmftools.cup.common.CupConstants.APP_NAME;
+import static com.hartwig.hmftools.cup.common.CupConstants.CUP_LOGGER;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -12,7 +12,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-import com.hartwig.hmftools.common.utils.TaskExecutor;
+import com.hartwig.hmftools.common.perf.TaskExecutor;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.cup.drivers.DriverPrep;
 import com.hartwig.hmftools.cup.rna.AltSpliceJunctionPrep;
@@ -41,7 +41,7 @@ public class CuppaDataPrep
         mConfig = prepConfig;
     }
 
-    public CategoryPrep createCategoryPrep(CategoryType categoryType)
+    public CategoryPrep createCategoryPrep(final CategoryType categoryType)
     {
         switch(categoryType)
         {
@@ -68,7 +68,7 @@ public class CuppaDataPrep
         }
     }
 
-    public String getOutputPath(@Nullable CategoryType categoryType)
+    public String getOutputPath(@Nullable final CategoryType categoryType)
     {
         String path = mConfig.OutputDir + "/";
 
@@ -97,10 +97,12 @@ public class CuppaDataPrep
 
         for(CategoryType categoryType : mConfig.Categories)
         {
+            CUP_LOGGER.info("Extracting category({})", categoryType);
+
             CategoryPrep categoryPrep = createCategoryPrep(categoryType);
-            SampleOneCategoryTask sampleTask = new SampleOneCategoryTask(0, mConfig, categoryPrep, null);
+            SamplePrepTask sampleTask = new SamplePrepTask(0, mConfig, categoryPrep, null);
             sampleTask.run();
-            dataItems.addAll(sampleTask.mDataItems);
+            dataItems.addAll(sampleTask.dataItems());
         }
 
         if(keepDataItems)
@@ -110,20 +112,20 @@ public class CuppaDataPrep
         DataItemsIO.writeDataItemList(dataItems, outputPath);
     }
 
-    public DataItemMatrix extractMultiSampleOneCategory(CategoryType categoryType)
+    public DataItemMatrix extractMultiSampleOneCategory(final CategoryType categoryType)
     {
         CUP_LOGGER.info("Extracting category({})", categoryType);
 
         ConcurrentHashMap<DataItem.Index, String[]> featureBySampleMatrix = new ConcurrentHashMap<>();
 
-        List<SampleOneCategoryTask> sampleTasks = new ArrayList<>();
+        List<SamplePrepTask> sampleTasks = new ArrayList<>();
         for(int sampleIndex = 0; sampleIndex < mConfig.SampleIds.size(); ++sampleIndex)
         {
             CategoryPrep categoryPrep = createCategoryPrep(categoryType);
-            sampleTasks.add(new SampleOneCategoryTask(sampleIndex, mConfig, categoryPrep, featureBySampleMatrix));
+            sampleTasks.add(new SamplePrepTask(sampleIndex, mConfig, categoryPrep, featureBySampleMatrix));
         }
 
-        List<Callable> callableTasks = sampleTasks.stream().collect(Collectors.toList());
+        List<Callable<Void>> callableTasks = sampleTasks.stream().collect(Collectors.toList());
         TaskExecutor.executeTasks(callableTasks, mConfig.Threads);
 
         DataItemMatrix matrix = new DataItemMatrix(mConfig.SampleIds, featureBySampleMatrix);
@@ -132,7 +134,7 @@ public class CuppaDataPrep
         return matrix;
     }
 
-    public void extractMultiSample(boolean keepDataItems)
+    public void extractMultiSample(final boolean keepDataItems)
     {
         CUP_LOGGER.info("Extracting CUPPA features in multi sample mode: {} samples, {} threads",
                 mConfig.SampleIds.size(), mConfig.Threads);
@@ -164,6 +166,8 @@ public class CuppaDataPrep
 
     public void run(boolean keepDataItems)
     {
+        CUP_LOGGER.info("Starting Cuppa feature extraction");
+
         if(mConfig.SampleIds.isEmpty())
         {
             CUP_LOGGER.error("No sample ID(s) loaded");
@@ -175,7 +179,9 @@ public class CuppaDataPrep
         if(mConfig.isSingleSample())
         {
             extractSingleSample(keepDataItems);
-        } else {
+        }
+        else
+        {
             extractMultiSample(keepDataItems);
         }
 

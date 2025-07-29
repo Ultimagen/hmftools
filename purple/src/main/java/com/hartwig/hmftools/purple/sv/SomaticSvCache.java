@@ -1,15 +1,21 @@
 package com.hartwig.hmftools.purple.sv;
 
-import static com.hartwig.hmftools.common.sv.SvFactoryInterface.buildSvFactory;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.CIPOS;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.INFERRED;
-import static com.hartwig.hmftools.common.sv.SvVcfTags.SVTYPE;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.INFERRED_DESC;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SV_TYPE;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_AF;
+import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_AF_DESC;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_CN;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_CN_CHANGE;
+import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_CN_CHANGE_DESC;
+import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_CN_DESC;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_JUNCTION_COPY_NUMBER;
+import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_JUNCTION_COPY_NUMBER_DESC;
 import static com.hartwig.hmftools.purple.PurpleUtils.PPL_LOGGER;
+
+import static htsjdk.variant.vcf.VCFHeaderLineCount.UNBOUNDED;
 
 import java.io.File;
 import java.util.Collection;
@@ -17,43 +23,40 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.purple.Gender;
-import com.hartwig.hmftools.common.sv.SvFactoryInterface;
-import com.hartwig.hmftools.common.sv.gridss.GridssSvFactory;
+import com.hartwig.hmftools.common.sv.StructuralVariantFactory;
 import com.hartwig.hmftools.common.variant.GenotypeIds;
 import com.hartwig.hmftools.purple.PurpleConfig;
 import com.hartwig.hmftools.purple.fitting.PurityAdjuster;
 import com.hartwig.hmftools.common.purple.PurpleCopyNumber;
 import com.hartwig.hmftools.common.purple.SegmentSupport;
 import com.hartwig.hmftools.common.utils.Doubles;
-import com.hartwig.hmftools.common.utils.collection.Multimaps;
+import com.hartwig.hmftools.common.utils.Multimaps;
 import com.hartwig.hmftools.purple.copynumber.CopyNumberEnrichedStructuralVariantFactory;
 import com.hartwig.hmftools.common.sv.EnrichedStructuralVariant;
 import com.hartwig.hmftools.common.sv.StructuralVariant;
-import com.hartwig.hmftools.common.sv.StructuralVariantFactory;
-import com.hartwig.hmftools.common.sv.StructuralVariantHeader;
 import com.hartwig.hmftools.common.sv.StructuralVariantType;
-import com.hartwig.hmftools.purple.ReferenceData;
 
 import org.apache.logging.log4j.util.Strings;
 
-import htsjdk.samtools.reference.IndexedFastaSequenceFile;
 import htsjdk.tribble.index.tabix.TabixFormat;
 import htsjdk.tribble.index.tabix.TabixIndexCreator;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext;
 import htsjdk.variant.variantcontext.VariantContextBuilder;
-import htsjdk.variant.variantcontext.filter.VariantContextFilter;
 import htsjdk.variant.variantcontext.writer.Options;
 import htsjdk.variant.variantcontext.writer.VariantContextWriter;
 import htsjdk.variant.variantcontext.writer.VariantContextWriterBuilder;
 import htsjdk.variant.vcf.VCFFileReader;
+import htsjdk.variant.vcf.VCFFilterHeaderLine;
 import htsjdk.variant.vcf.VCFHeader;
+import htsjdk.variant.vcf.VCFHeaderLine;
+import htsjdk.variant.vcf.VCFHeaderLineType;
+import htsjdk.variant.vcf.VCFInfoHeaderLine;
+import htsjdk.variant.vcf.VCFStandardHeaderLines;
 
 public class SomaticSvCache
 {
@@ -62,35 +65,28 @@ public class SomaticSvCache
     private static final Allele DECREASING_ALLELE = Allele.create("N.", false);
 
     private final String mOutputVcfFilename;
-    private final Optional<VCFHeader> mVcfHeader;
+    private final VCFHeader mVcfHeader;
     private final GenotypeIds mGenotypeIds;
     private final VariantContextCollection mVariantCollection;
-    private final IndexedFastaSequenceFile mRefGenomeFile;
-    private final boolean mUseGridssSVs;
 
     private int mNextVarId = 0;
 
     public SomaticSvCache()
     {
-        mVcfHeader = Optional.empty();
+        mVcfHeader = null;
         mOutputVcfFilename = Strings.EMPTY;
-        mVariantCollection = new VariantContextCollection(null, false);
-        mUseGridssSVs = false;
-        mRefGenomeFile = null;
+        mVariantCollection = new VariantContextCollection(null);
         mGenotypeIds = null;
     }
 
-    public SomaticSvCache(
-            final String version, final String inputVcf, final String outputVcf, final ReferenceData referenceData, final PurpleConfig config)
+    public SomaticSvCache(final String version, final String inputVcf, final String outputVcf, final PurpleConfig config)
     {
         VCFFileReader vcfReader = new VCFFileReader(new File(inputVcf), false);
-        mUseGridssSVs = config.UseGridssSVs;
         mOutputVcfFilename = outputVcf;
-        mVcfHeader = Optional.of(generateOutputHeader(version, vcfReader.getFileHeader()));
-        mVariantCollection = new VariantContextCollection(mVcfHeader.get(), config.UseGridssSVs);
-        mRefGenomeFile = referenceData.RefGenome;
+        mVcfHeader = generateOutputHeader(version, vcfReader.getFileHeader());
+        mVariantCollection = new VariantContextCollection(mVcfHeader);
 
-        mGenotypeIds = mVcfHeader.isPresent() ? GenotypeIds.fromVcfHeader(mVcfHeader.get(), config.ReferenceId, config.TumorId) : null;
+        mGenotypeIds = GenotypeIds.fromVcfHeader(mVcfHeader, config.ReferenceId, config.TumorId);
 
         for(VariantContext context : vcfReader)
         {
@@ -100,15 +96,6 @@ public class SomaticSvCache
         vcfReader.close();
 
         PPL_LOGGER.info("loaded {} somatic SVs from {}", variants().size(), inputVcf);
-    }
-
-    public void addVariant(final VariantContext variantContext)
-    {
-        // called for recovered SVs only
-        if(enabled())
-        {
-            mVariantCollection.add(variantContext);
-        }
     }
 
     public void inferMissingVariant(final List<PurpleCopyNumber> copyNumbers)
@@ -150,7 +137,7 @@ public class SomaticSvCache
         return new VariantContextBuilder("purple", copyNumber.chromosome(), position, copyNumber.start(), alleles).filter(INFERRED)
                 .id("purple_" + mNextVarId++)
                 .attribute(CIPOS, Lists.newArrayList(lowerRange, upperRange))
-                .attribute(SVTYPE, StructuralVariantType.BND.toString())
+                .attribute(SV_TYPE, StructuralVariantType.BND.toString())
                 .attribute(INFERRED, true)
                 .noGenotypes()
                 .make();
@@ -159,24 +146,20 @@ public class SomaticSvCache
     public void write(
             final PurityAdjuster purityAdjuster, final List<PurpleCopyNumber> copyNumbers, boolean passOnly, final Gender gender)
     {
-        if(!mVcfHeader.isPresent())
+        if(mVcfHeader == null)
             return;
 
         try
         {
             final VariantContextWriter writer = new VariantContextWriterBuilder()
                     .setOutputFile(mOutputVcfFilename)
-                    .setReferenceDictionary(mVcfHeader.get().getSequenceDictionary())
-                    .setIndexCreator(new TabixIndexCreator(mVcfHeader.get().getSequenceDictionary(), new TabixFormat()))
+                    .setReferenceDictionary(mVcfHeader.getSequenceDictionary())
+                    .setIndexCreator(new TabixIndexCreator(mVcfHeader.getSequenceDictionary(), new TabixFormat()))
                     .setOutputFileType(VariantContextWriterBuilder.OutputType.BLOCK_COMPRESSED_VCF)
                     .setOption(Options.ALLOW_MISSING_FIELDS_IN_HEADER)
                     .build();
 
-            StructuralRefContextEnrichment refEnricher = new StructuralRefContextEnrichment(mRefGenomeFile, writer::add);
-
-            VCFHeader header = mVcfHeader.get();
-            refEnricher.enrichHeader(header);
-            writer.writeHeader(header);
+            writer.writeHeader(mVcfHeader);
 
             VariantContextCollection enrichedCollection = getEnrichedCollection(purityAdjuster, copyNumbers, gender);
 
@@ -189,7 +172,7 @@ public class SomaticSvCache
                 if(passOnly && variant.isFiltered())
                     continue;
 
-                refEnricher.accept(variant);
+                writer.add(variant);
             }
 
             writer.close();
@@ -203,7 +186,7 @@ public class SomaticSvCache
     private VariantContextCollection getEnrichedCollection(
             final PurityAdjuster purityAdjuster, final List<PurpleCopyNumber> copyNumbers, final Gender gender)
     {
-        SvFactoryInterface svFactory = buildSvFactory(mUseGridssSVs, x -> true);
+        StructuralVariantFactory svFactory = StructuralVariantFactory.build();
         svFactory.setGenotypeOrdinals(mGenotypeIds.ReferenceOrdinal, mGenotypeIds.TumorOrdinal);
 
         Iterator<VariantContext> variantIter = mVariantCollection.iterator();
@@ -217,7 +200,7 @@ public class SomaticSvCache
         CopyNumberEnrichedStructuralVariantFactory svEnricher = new CopyNumberEnrichedStructuralVariantFactory(
                 purityAdjuster, Multimaps.fromRegions(copyNumbers));
 
-        VariantContextCollection enrichedCollection = new VariantContextCollection(mVcfHeader.get(), mUseGridssSVs);
+        VariantContextCollection enrichedCollection = new VariantContextCollection(mVcfHeader);
 
         List<EnrichedStructuralVariant> enrichedVariants = svEnricher.enrich(svFactory.results());
 
@@ -322,14 +305,26 @@ public class SomaticSvCache
                 .count();
     }
 
-    @VisibleForTesting
-    static VCFHeader generateOutputHeader(final String purpleVersion, final VCFHeader template)
+    public static VCFHeader generateOutputHeader(final String purpleVersion, final VCFHeader template)
     {
-        return StructuralVariantHeader.generateHeader(purpleVersion, template);
+        final VCFHeader outputVCFHeader = new VCFHeader(template.getMetaDataInInputOrder(), template.getGenotypeSamples());
+        outputVCFHeader.addMetaDataLine(new VCFHeaderLine("purpleVersion", purpleVersion));
+
+        outputVCFHeader.addMetaDataLine(VCFStandardHeaderLines.getFormatLine("GT"));
+        outputVCFHeader.addMetaDataLine(new VCFInfoHeaderLine(INFERRED, 0, VCFHeaderLineType.Flag, INFERRED_DESC));
+        outputVCFHeader.addMetaDataLine(new VCFFilterHeaderLine(INFERRED, INFERRED_DESC));
+
+        outputVCFHeader.addMetaDataLine(new VCFInfoHeaderLine(PURPLE_AF, UNBOUNDED, VCFHeaderLineType.Float, PURPLE_AF_DESC));
+        outputVCFHeader.addMetaDataLine(new VCFInfoHeaderLine(PURPLE_CN, UNBOUNDED, VCFHeaderLineType.Float, PURPLE_CN_DESC));
+        outputVCFHeader.addMetaDataLine(new VCFInfoHeaderLine(PURPLE_JUNCTION_COPY_NUMBER, 1, VCFHeaderLineType.Float,
+                PURPLE_JUNCTION_COPY_NUMBER_DESC));
+        outputVCFHeader.addMetaDataLine(new VCFInfoHeaderLine(PURPLE_CN_CHANGE,
+                UNBOUNDED,
+                VCFHeaderLineType.Float,
+                PURPLE_CN_CHANGE_DESC));
+
+        return outputVCFHeader;
     }
 
-    private boolean enabled()
-    {
-        return mVcfHeader.isPresent();
-    }
+    private boolean enabled() { return mVcfHeader != null; }
 }

@@ -1,32 +1,33 @@
 package com.hartwig.hmftools.lilac.fragment;
 
-import com.google.common.collect.Lists;
-import com.hartwig.hmftools.lilac.seq.SequenceCount;
+import static com.hartwig.hmftools.lilac.LilacConstants.LOW_BASE_QUAL_THRESHOLD;
+import static com.hartwig.hmftools.lilac.LilacConstants.MIN_EVIDENCE_FACTOR;
 
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.Lists;
+import com.hartwig.hmftools.lilac.seq.SequenceCount;
+
 public class NucleotideSpliceEnrichment
 {
-    private final int mMinBaseQuality;
-    private final double mMinEvidence;
+    private final byte mMinBaseQuality;
     private final Set<Integer> mAminoAcidBoundary;
 
-    public NucleotideSpliceEnrichment(int minBaseQuality, double minEvidence, final Set<Integer> aminoAcidBoundary)
+        public NucleotideSpliceEnrichment(final Set<Integer> aminoAcidBoundary)
     {
-        mMinBaseQuality = minBaseQuality;
-        mMinEvidence = minEvidence;
+        mMinBaseQuality = LOW_BASE_QUAL_THRESHOLD;
         mAminoAcidBoundary = aminoAcidBoundary;
     }
 
-    public List<Fragment> enrich(final List<Fragment> fragments, final List<Fragment> highQualFrags)
+    public List<Fragment> applySpliceInfo(final List<Fragment> fragments, final List<Fragment> highQualFrags)
     {
         // fragments are all in nucleotide-space
 
-        SequenceCount nucleotideCounts = SequenceCount.nucleotides(mMinEvidence, highQualFrags);
+        SequenceCount nucleotideCounts = SequenceCount.buildFromNucleotides(MIN_EVIDENCE_FACTOR, highQualFrags);
         Set<Integer> nucleotideExonBoundaryStarts = mAminoAcidBoundary.stream().map(x -> x * 3).collect(Collectors.toSet());
-        List<Integer> homLoci = nucleotideCounts.homozygousIndices();
+        List<Integer> homLoci = Lists.newArrayList(nucleotideCounts.homozygousLoci());
 
         Set<Integer> homStarts = nucleotideExonBoundaryStarts.stream().filter(x -> homLoci.contains(x)).collect(Collectors.toSet());
 
@@ -35,19 +36,19 @@ public class NucleotideSpliceEnrichment
 
         final List<Fragment> results = Lists.newArrayList();
 
-        for (Fragment fragment : fragments)
+        for(Fragment fragment : fragments)
         {
-            for (Integer homStart : homStarts)
+            for(Integer homStart : homStarts)
             {
-                if (missingStart(homStart, fragment))
+                if(missingStart(homStart, fragment))
                 {
                     addStart(fragment, homStart, nucleotideCounts);
                 }
             }
 
-            for (Integer homEnd : homEnds)
+            for(Integer homEnd : homEnds)
             {
-                if (missingEnd(homEnd, fragment))
+                if(missingEnd(homEnd, fragment))
                     addEnd(fragment, homEnd, nucleotideCounts);
             }
 
@@ -57,24 +58,28 @@ public class NucleotideSpliceEnrichment
         return results;
     }
 
-    private boolean missingStart(int index, Fragment fragment)
+    private boolean missingStart(int index, final Fragment fragment)
     {
-        return !fragment.containsNucleotide(index) && fragment.containsAllNucleotides(Lists.newArrayList(index + 1, index + 2));
+        return !fragment.containsNucleotideLocus(index)
+                && fragment.containsNucleotideLocus(index + 1)
+                && fragment.containsNucleotideLocus(index + 2);
     }
 
-    private boolean missingEnd(int index, Fragment fragment)
+    private boolean missingEnd(int index, final Fragment fragment)
     {
-        return fragment.containsNucleotide(index) && !fragment.containsNucleotide(index + 1) && !fragment.containsNucleotide(index + 2);
+        return fragment.containsNucleotideLocus(index)
+                && !fragment.containsNucleotideLocus(index + 1)
+                && !fragment.containsNucleotideLocus(index + 2);
     }
 
-    private void addStart(final Fragment fragment, int index, SequenceCount nucleotideCounts)
+    private void addStart(final Fragment fragment, int index, final SequenceCount nucleotideCounts)
     {
-        fragment.enrich(index, nucleotideCounts.getMinCountSequences(index).get(0), mMinBaseQuality);
+        fragment.addNucleotide(index, nucleotideCounts.getMinEvidenceSequences(index).get(0), mMinBaseQuality);
     }
 
-    private void addEnd(final Fragment fragment, int index, SequenceCount nucleotideCounts)
+    private void addEnd(final Fragment fragment, int index, final SequenceCount nucleotideCounts)
     {
-        fragment.enrich(index + 1, nucleotideCounts.getMinCountSequences(index + 1).get(0), mMinBaseQuality);
-        fragment.enrich(index + 2, nucleotideCounts.getMinCountSequences(index + 2).get(0), mMinBaseQuality);
+        fragment.addNucleotide(index + 1, nucleotideCounts.getMinEvidenceSequences(index + 1).get(0), mMinBaseQuality);
+        fragment.addNucleotide(index + 2, nucleotideCounts.getMinEvidenceSequences(index + 2).get(0), mMinBaseQuality);
     }
 }

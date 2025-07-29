@@ -4,17 +4,17 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 
 import static com.hartwig.hmftools.common.codon.AminoAcidRna.STOP_SYMBOL;
-import static com.hartwig.hmftools.common.gene.TranscriptProteinData.BIOTYPE_NONSENSE_MED_DECAY;
 import static com.hartwig.hmftools.common.fusion.FusionCommon.FS_DOWN;
 import static com.hartwig.hmftools.common.fusion.FusionCommon.FS_UP;
 import static com.hartwig.hmftools.common.fusion.FusionCommon.POS_STRAND;
+import static com.hartwig.hmftools.common.gene.TranscriptProteinData.BIOTYPE_NONSENSE_MED_DECAY;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_FWD;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_REV;
 import static com.hartwig.hmftools.common.neo.NeoEpitopeFusion.generateFilename;
+import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
+import static com.hartwig.hmftools.common.utils.config.ConfigUtils.convertWildcardSamplePath;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
-import static com.hartwig.hmftools.common.utils.config.ConfigUtils.convertWildcardSamplePath;
-import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.NEG_ORIENT;
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.POS_ORIENT;
 import static com.hartwig.hmftools.common.variant.CodingEffect.NONE;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.SUBCLONAL_LIKELIHOOD_FLAG;
 import static com.hartwig.hmftools.common.variant.impact.VariantTranscriptImpact.VAR_TRANS_IMPACT_ANNOTATION;
@@ -27,8 +27,6 @@ import static com.hartwig.hmftools.neo.epitope.NeoEpitopeFinder.writeNeoepitopes
 import static com.hartwig.hmftools.neo.epitope.PointMutationData.checkVariantEffects;
 import static com.hartwig.hmftools.neo.epitope.PointMutationData.isRelevantMutation;
 import static com.hartwig.hmftools.neo.epitope.SvNeoEpitope.svIsNonDisruptiveInCodingTranscript;
-
-import static htsjdk.tribble.AbstractFeatureReader.getFeatureReader;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -53,7 +51,7 @@ import com.hartwig.hmftools.common.variant.impact.VariantTranscriptImpact;
 
 import htsjdk.variant.variantcontext.VariantContext;
 
-public class NeoSampleTask implements Callable
+public class NeoSampleTask implements Callable<Void>
 {
     private final String mSampleId;
 
@@ -77,10 +75,10 @@ public class NeoSampleTask implements Callable
     }
 
     @Override
-    public Long call()
+    public Void call()
     {
         processSample();
-        return (long)1;
+        return null;
     }
 
     public void processSample()
@@ -233,7 +231,7 @@ public class NeoSampleTask implements Callable
             // for same gene fusions, check that the SV isn't non-disruptive within the coding region of any other transcript(s)
 
             boolean isNonDisruptiveCoding = sameGene
-                    && fusion.Orientations[FS_UP] == POS_ORIENT && fusion.Orientations[FS_DOWN] == NEG_ORIENT
+                    && fusion.Orientations[FS_UP] == ORIENT_FWD && fusion.Orientations[FS_DOWN] == ORIENT_REV
                     && upTransDataList.stream().anyMatch(x -> svIsNonDisruptiveInCodingTranscript(fusion.Positions, x));
 
             if(isNonDisruptiveCoding)

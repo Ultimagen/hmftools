@@ -32,11 +32,13 @@ public final class TestOrangeConfigFactory
 
     private static final String RUN_DIRECTORY = Resources.getResource("test_run").getPath();
     private static final String PIPELINE_VERSION_FILE = RUN_DIRECTORY + "/pipeline.version";
-    private static final String REF_SAMPLE_WGS_METRICS_FILE = RUN_DIRECTORY + "/ref_sample/bam_metrics/ref_sample.wgsmetrics";
-    private static final String REF_SAMPLE_FLAGSTAT_FILE = RUN_DIRECTORY + "/ref_sample/flagstat/ref_sample.flagstat";
-    private static final String TUMOR_SAMPLE_WGS_METRICS_FILE = RUN_DIRECTORY + "/tumor_sample/bam_metrics/tumor_sample.wgsmetrics";
-    private static final String TUMOR_SAMPLE_FLAGSTAT_FILE = RUN_DIRECTORY + "/tumor_sample/flagstat/tumor_sample.flagstat";
-    private static final String SAGE_GERMLINE_GENE_COVERAGE = RUN_DIRECTORY + "/sage_germline/ref_sample.sage.gene.coverage.tsv";
+    private static final String REF_SAMPLE_WGS_METRICS_FILE = RUN_DIRECTORY + "/ref_sample/bam_metrics/ref_sample.bam_metric.summary.tsv";
+    private static final String REF_SAMPLE_FLAGSTAT_FILE = RUN_DIRECTORY + "/ref_sample/bam_metrics/ref_sample.bam_metric.flag_counts.tsv";
+    private static final String TUMOR_SAMPLE_WGS_METRICS_FILE =
+            RUN_DIRECTORY + "/tumor_sample/bam_metrics/tumor_sample.bam_metric.summary.tsv";
+    private static final String TUMOR_SAMPLE_FLAGSTAT_FILE =
+            RUN_DIRECTORY + "/tumor_sample/bam_metrics/tumor_sample.bam_metric.flag_counts.tsv";
+    private static final String GERMLINE_GENE_COVERAGE = RUN_DIRECTORY + "/ref_sample/bam_metrics/ref_sample.bam_metric.gene_coverage.tsv";
     private static final String SAGE_SOMATIC_REF_SAMPLE_BQR_PLOT = RUN_DIRECTORY + "/sage_somatic/ref_sample.sage.bqr.png";
     private static final String SAGE_SOMATIC_TUMOR_SAMPLE_BQR_PLOT = RUN_DIRECTORY + "/sage_somatic/tumor_sample.sage.bqr.png";
     private static final String PURPLE_DATA_DIRECTORY = RUN_DIRECTORY + "/purple";
@@ -51,10 +53,10 @@ public final class TestOrangeConfigFactory
     private static final String LILAC_RESULT_TSV = RUN_DIRECTORY + "/lilac/tumor_sample.lilac.tsv";
     private static final String LILAC_QC_TSV = RUN_DIRECTORY + "/lilac/tumor_sample.lilac.qc.tsv";
     private static final String ANNOTATED_VIRUS_TSV = RUN_DIRECTORY + "/virusinterprtr/tumor_sample.virus.annotated.tsv";
-    private static final String CHORD_PREDICTION_TXT = RUN_DIRECTORY + "/chord/tumor_sample_chord_prediction.txt";
+    private static final String CHORD_PREDICTION_TSV = RUN_DIRECTORY + "/chord/tumor_sample.chord.prediction.tsv";
     private static final String CUPPA_VIS_DATA_TSV = RUN_DIRECTORY + "/cuppa/tumor_sample.cuppa.vis_data.tsv";
     private static final String CUPPA_SUMMARY_PLOT = RUN_DIRECTORY + "/cuppa/tumor_sample.cuppa.vis.png";
-    private static final String PEACH_GENOTYPE_TSV = RUN_DIRECTORY + "/peach/tumor_sample.peach.genotype.tsv";
+    private static final String PEACH_GENOTYPE_TSV = RUN_DIRECTORY + "/peach/ref_sample.peach.haplotypes.best.tsv";
     private static final String SIGS_ALLOCATION_TSV = RUN_DIRECTORY + "/sigs/tumor_sample.sig.allocation.tsv";
 
     @NotNull
@@ -96,6 +98,7 @@ public final class TestOrangeConfigFactory
                 .addPrimaryTumorDoids(MELANOMA_DOID)
                 .linxPlotDirectory(LINX_PLOT_DIRECTORY)
                 .pipelineVersionFile(PIPELINE_VERSION_FILE)
+                .addDisclaimer(true)
                 .build();
     }
 
@@ -107,7 +110,7 @@ public final class TestOrangeConfigFactory
                 .experimentType(ExperimentType.WHOLE_GENOME)
                 .wgsRefConfig(ImmutableOrangeWGSRefConfig.builder()
                         .annotatedVirusTsv(ANNOTATED_VIRUS_TSV)
-                        .chordPredictionTxt(CHORD_PREDICTION_TXT)
+                        .chordPredictionTxt(CHORD_PREDICTION_TSV)
                         .cuppaVisDataTsv(CUPPA_VIS_DATA_TSV)
                         .cuppaSummaryPlot(CUPPA_SUMMARY_PLOT)
                         .sigsAllocationTsv(SIGS_ALLOCATION_TSV)
@@ -127,7 +130,7 @@ public final class TestOrangeConfigFactory
                         .referenceSampleId(REFERENCE_SAMPLE_ID)
                         .refSampleWGSMetricsFile(REF_SAMPLE_WGS_METRICS_FILE)
                         .refSampleFlagstatFile(REF_SAMPLE_FLAGSTAT_FILE)
-                        .sageGermlineGeneCoverageTsv(SAGE_GERMLINE_GENE_COVERAGE)
+                        .germlineGeneCoverageTsv(GERMLINE_GENE_COVERAGE)
                         .sageSomaticRefSampleBQRPlot(SAGE_SOMATIC_REF_SAMPLE_BQR_PLOT)
                         .linxGermlineDataDirectory(LINX_GERMLINE_DATA_DIRECTORY)
                         .peachGenotypeTsv(PEACH_GENOTYPE_TSV)

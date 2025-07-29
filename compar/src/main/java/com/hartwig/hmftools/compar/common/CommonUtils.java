@@ -7,18 +7,24 @@ import static com.hartwig.hmftools.compar.common.Category.GENE_COPY_NUMBER;
 import static com.hartwig.hmftools.compar.ComparConfig.NEW_SOURCE;
 import static com.hartwig.hmftools.compar.ComparConfig.REF_SOURCE;
 import static com.hartwig.hmftools.compar.common.MatchLevel.REPORTABLE;
+import static com.hartwig.hmftools.compar.common.MismatchType.FULL_MATCH;
 import static com.hartwig.hmftools.compar.common.MismatchType.INVALID_BOTH;
+import static com.hartwig.hmftools.compar.common.MismatchType.INVALID_ERROR;
 import static com.hartwig.hmftools.compar.common.MismatchType.INVALID_NEW;
 import static com.hartwig.hmftools.compar.common.MismatchType.INVALID_REF;
 import static com.hartwig.hmftools.compar.common.MismatchType.NEW_ONLY;
 import static com.hartwig.hmftools.compar.common.MismatchType.REF_ONLY;
+import static com.hartwig.hmftools.compar.common.MismatchType.VALUE;
 
+import java.io.File;
+import java.nio.file.Files;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.genome.refgenome.GenomeLiftoverCache;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.region.BasePosition;
@@ -26,25 +32,34 @@ import com.hartwig.hmftools.compar.ComparConfig;
 import com.hartwig.hmftools.compar.ComparableItem;
 import com.hartwig.hmftools.compar.ItemComparer;
 import com.hartwig.hmftools.compar.chord.ChordComparer;
+import com.hartwig.hmftools.compar.cider.Cdr3LocusSummaryComparer;
+import com.hartwig.hmftools.compar.cider.CiderVdjComparer;
 import com.hartwig.hmftools.compar.cuppa.CuppaComparer;
 import com.hartwig.hmftools.compar.driver.DriverComparer;
 import com.hartwig.hmftools.compar.lilac.LilacComparer;
 import com.hartwig.hmftools.compar.linx.DisruptionComparer;
 import com.hartwig.hmftools.compar.linx.FusionComparer;
 import com.hartwig.hmftools.compar.linx.GermlineSvComparer;
+import com.hartwig.hmftools.compar.metrics.GermlineBamMetricsComparer;
+import com.hartwig.hmftools.compar.metrics.GermlineFlagstatComparer;
+import com.hartwig.hmftools.compar.metrics.TumorBamMetricsComparer;
+import com.hartwig.hmftools.compar.metrics.TumorFlagstatComparer;
+import com.hartwig.hmftools.compar.peach.PeachComparer;
 import com.hartwig.hmftools.compar.purple.CopyNumberComparer;
 import com.hartwig.hmftools.compar.purple.GeneCopyNumberComparer;
 import com.hartwig.hmftools.compar.purple.GermlineDeletionComparer;
 import com.hartwig.hmftools.compar.purple.PurityComparer;
 import com.hartwig.hmftools.compar.mutation.GermlineVariantComparer;
 import com.hartwig.hmftools.compar.mutation.SomaticVariantComparer;
+import com.hartwig.hmftools.compar.snpgenotype.SnpGenotypeComparer;
+import com.hartwig.hmftools.compar.virus.VirusComparer;
+import com.hartwig.hmftools.compar.teal.TealComparer;
 
 public class CommonUtils
 {
-    public static final String SUB_ITEM_DELIM = "=";
-
     public static final String FLD_REPORTED = "Reported";
     public static final String FLD_QUAL = "Qual";
+    public static final String FLD_CHROMOSOME_BAND = "ChromosomeBand";
 
     public static List<ItemComparer> buildComparers(final ComparConfig config)
     {
@@ -121,6 +136,36 @@ public class CommonUtils
             case GERMLINE_SV:
                 return new GermlineSvComparer(config);
 
+            case PEACH:
+                return new PeachComparer(config);
+
+            case VIRUS:
+                return new VirusComparer(config);
+
+            case TUMOR_FLAGSTAT:
+                return new TumorFlagstatComparer(config);
+
+            case GERMLINE_FLAGSTAT:
+                return new GermlineFlagstatComparer(config);
+
+            case TUMOR_BAM_METRICS:
+                return new TumorBamMetricsComparer(config);
+
+            case GERMLINE_BAM_METRICS:
+                return new GermlineBamMetricsComparer(config);
+
+            case SNP_GENOTYPE:
+                return new SnpGenotypeComparer(config);
+
+            case CDR3_SEQUENCE:
+                return new CiderVdjComparer(config);
+
+            case CDR3_LOCUS_SUMMARY:
+                return new Cdr3LocusSummaryComparer(config);
+
+            case TELOMERE_LENGTH:
+                return new TealComparer(config);
+
             default:
                 return null;
         }
@@ -136,6 +181,7 @@ public class CommonUtils
         for(String sourceName : config.SourceNames)
         {
             String sourceSampleId = config.sourceSampleId(sourceName, sampleId);
+            String sourceGermlineSampleId = config.sourceGermlineSampleId(sourceName, sampleId);
             List<ComparableItem> items = null;
 
             if(!config.DbConnections.isEmpty())
@@ -144,8 +190,9 @@ public class CommonUtils
             }
             else
             {
-                FileSources fileSources = FileSources.sampleInstance(config.FileSources.get(sourceName), sourceSampleId);
-                items = comparer.loadFromFile(sourceSampleId, fileSources);
+                FileSources fileSources =
+                        FileSources.sampleInstance(config.FileSources.get(sourceName), sourceSampleId, sourceGermlineSampleId);
+                items = comparer.loadFromFile(sourceSampleId, sourceGermlineSampleId, fileSources);
             }
 
             if(items != null)
@@ -157,7 +204,7 @@ public class CommonUtils
         if(sourceItems.containsKey(REF_SOURCE) && sourceItems.containsKey(NEW_SOURCE))
         {
             // previously support comparisons for N sources but now can only be 2 as controlled by config
-            CommonUtils.compareItems(mismatches, matchLevel, config.Thresholds, sourceItems.get(REF_SOURCE), sourceItems.get(NEW_SOURCE));
+            CommonUtils.compareItems(mismatches, matchLevel, config.Thresholds, config.IncludeMatches, sourceItems.get(REF_SOURCE), sourceItems.get(NEW_SOURCE));
             return true;
         }
 
@@ -174,7 +221,7 @@ public class CommonUtils
     }
 
     public static void compareItems(
-            final List<Mismatch> mismatches, final MatchLevel matchLevel, final DiffThresholds thresholds,
+            final List<Mismatch> mismatches, final MatchLevel matchLevel, final DiffThresholds thresholds, final boolean includeMatches,
             final List<ComparableItem> items1, final List<ComparableItem> items2)
     {
         int index1 = 0;
@@ -196,11 +243,11 @@ public class CommonUtils
                     matched = true;
 
                     // skip checking for diffs if the items are not reportable
-                    boolean eitherReportable = item2.reportable() || item2.reportable();
+                    boolean eitherReportable = item1.reportable() || item2.reportable();
 
                     if(matchLevel != REPORTABLE || eitherReportable)
                     {
-                        Mismatch mismatch = item1.findMismatch(item2, matchLevel, thresholds);
+                        Mismatch mismatch = item1.findMismatch(item2, matchLevel, thresholds, includeMatches);
 
                         if(mismatch != null)
                             mismatches.add(mismatch);
@@ -246,5 +293,69 @@ public class CommonUtils
         }
 
         return new BasePosition(chromosome, position);
+    }
+
+    public static String determineComparisonChromosome(final String chromosome, final boolean requiresLiftover)
+    {
+        if(requiresLiftover)
+        {
+            return HumanChromosome.fromString(chromosome).name().substring(1);
+        }
+        else
+        {
+            return chromosome;
+        }
+    }
+
+    public static boolean fileExists(final String filename)
+    {
+        return Files.exists(new File(filename).toPath());
+    }
+
+    public static Mismatch createMismatchFromDiffs(final ComparableItem refItem, final ComparableItem newItem, final List<String> diffs,
+            final MatchLevel matchLevel, final boolean includeMatches)
+    {
+        if(diffs.isEmpty() && !includeMatches)
+        {
+            return null;
+        }
+
+        boolean refCountsAsCalled = countsAsCalled(refItem, matchLevel);
+        boolean newCountsAsCalled = countsAsCalled(newItem, matchLevel);
+        MismatchType mismatchType;
+        if(refCountsAsCalled && !newCountsAsCalled)
+        {
+            mismatchType = REF_ONLY;
+        }
+        else if(!refCountsAsCalled && newCountsAsCalled)
+        {
+            mismatchType = NEW_ONLY;
+        }
+        else if(refCountsAsCalled && newCountsAsCalled && !diffs.isEmpty())
+        {
+            mismatchType = VALUE;
+        }
+        else if(refCountsAsCalled && newCountsAsCalled && includeMatches)
+        {
+            mismatchType = FULL_MATCH;
+        }
+        else
+        {
+            // should be impossible due to earlier filters
+            mismatchType = INVALID_ERROR;
+        }
+        return new Mismatch(refItem, newItem, mismatchType, diffs);
+    }
+
+    public static boolean countsAsCalled(final ComparableItem item, final MatchLevel matchLevel)
+    {
+        if(matchLevel == REPORTABLE)
+        {
+            return item.reportable();
+        }
+        else
+        {
+            return item.isPass();
+        }
     }
 }

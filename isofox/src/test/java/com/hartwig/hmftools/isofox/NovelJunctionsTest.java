@@ -15,9 +15,9 @@ import static com.hartwig.hmftools.common.rna.AltSpliceJunctionType.NOVEL_5_PRIM
 import static com.hartwig.hmftools.common.rna.AltSpliceJunctionType.NOVEL_EXON;
 import static com.hartwig.hmftools.common.rna.AltSpliceJunctionType.NOVEL_INTRON;
 import static com.hartwig.hmftools.common.rna.AltSpliceJunctionType.SKIPPED_EXONS;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_PAIR;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_PAIR;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
 import static com.hartwig.hmftools.isofox.ReadCountsTest.REF_BASE_STR_1;
 import static com.hartwig.hmftools.isofox.ReadCountsTest.REF_BASE_STR_2;
 
@@ -63,7 +63,7 @@ public class NovelJunctionsTest
         String transName1 = "TRANS01";
 
         TranscriptData transData1 = new TranscriptData(transId1, transName1, geneId, true, (byte) 1,
-                100, 300, null, null, "");
+                100, 300, null, null, "", null);
 
         transData1.exons().add(new ExonData(transId1, 100, 300, 1, -1, -1));
         transData1.exons().add(new ExonData(transId1, 400, 500, 2, -1, -1));
@@ -74,7 +74,7 @@ public class NovelJunctionsTest
         String transName2 = "TRANS02";
 
         TranscriptData transData2 = new TranscriptData(transId2, transName2, geneId, true, (byte) 1,
-                100, 300, null, null, "");
+                100, 300, null, null, "", null);
 
         transData2.exons().add(new ExonData(transId2, 250, 350, 1, -1, -1));
         transData2.exons().add(new ExonData(transId2, 400, 500, 2, -1, -1));
@@ -85,7 +85,7 @@ public class NovelJunctionsTest
         String transName3 = "TRANS03";
 
         TranscriptData transData3 = new TranscriptData(transId3, transName3, geneId, true, (byte) 1,
-                100, 300, null, null, "");
+                100, 300, null, null, "", null);
 
         transData3.exons().add(new ExonData(transId3, 100, 300, 1, -1, -1));
 
@@ -93,7 +93,7 @@ public class NovelJunctionsTest
         String transName4 = "TRANS04";
 
         TranscriptData transData4 = new TranscriptData(transId4, transName4, geneId, true, (byte) 1,
-                360, 500, null, null, "");
+                360, 500, null, null, "", null);
 
         transData4.exons().add(new ExonData(transId4, 360, 500, 1, -1, -1));
 
@@ -274,7 +274,7 @@ public class NovelJunctionsTest
         String transName1 = "TRANS01";
 
         TranscriptData transData1 = new TranscriptData(transId1, transName1, geneId, true, (byte) 1,
-                100, 300, null, null, "");
+                100, 300, null, null, "", null);
 
         transData1.exons().add(new ExonData(transId1, 100, 300, 1, -1, -1));
         transData1.exons().add(new ExonData(transId1, 400, 500, 2, -1, -1));
@@ -285,7 +285,7 @@ public class NovelJunctionsTest
         String transName2 = "TRANS02";
 
         TranscriptData transData2 = new TranscriptData(transId2, transName2, geneId, true, (byte) 1,
-                100, 300, null, null, "");
+                100, 300, null, null, "", null);
 
         transData2.exons().add(new ExonData(transId2, 100, 310, 1, -1, -1));
         transData2.exons().add(new ExonData(transId2, 400, 500, 2, -1, -1));
@@ -296,7 +296,7 @@ public class NovelJunctionsTest
         String transName3 = "TRANS03";
 
         TranscriptData transData3 = new TranscriptData(transId3, transName3, geneId, true, (byte) 1,
-                100, 310, null, null, "");
+                100, 310, null, null, "", null);
 
         transData3.exons().add(new ExonData(transId3, 100, 300, 1, -1, -1));
         transData3.exons().add(new ExonData(transId3, 420, 500, 2, -1, -1));

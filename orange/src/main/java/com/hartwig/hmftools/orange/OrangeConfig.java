@@ -1,13 +1,12 @@
 package com.hartwig.hmftools.orange;
 
-import static com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL_OPTION;
-import static com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanelConfig.addGenePanelOption;
+import static com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL;
+import static com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig.addGenePanelOption;
 import static com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache.ENSEMBL_DATA_DIR;
 import static com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache.addEnsemblDir;
 import static com.hartwig.hmftools.common.fusion.KnownFusionCache.KNOWN_FUSIONS_FILE;
 import static com.hartwig.hmftools.common.fusion.KnownFusionCache.addKnownFusionFileOption;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.addRefGenomeVersion;
-import static com.hartwig.hmftools.common.pipeline.PipelineToolDirectories.FLAGSTAT_DIR;
 import static com.hartwig.hmftools.common.pipeline.PipelineToolDirectories.LILAC_DIR;
 import static com.hartwig.hmftools.common.pipeline.PipelineToolDirectories.LINX_SOMATIC_DIR;
 import static com.hartwig.hmftools.common.pipeline.PipelineToolDirectories.METRICS_DIR;
@@ -29,6 +28,8 @@ import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAGE_DIR_CFG
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAGE_DIR_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE_DATA_DIR_CFG;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE_DATA_DIR_DESC;
+import static com.hartwig.hmftools.common.utils.config.CommonConfig.TUMOR_METRICS_DIR_CFG;
+import static com.hartwig.hmftools.common.utils.config.CommonConfig.TUMOR_METRICS_DIR_DESC;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.addLoggingOptions;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.setLogLevel;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.addOutputDir;
@@ -47,6 +48,8 @@ import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.hla.LilacAllele;
 import com.hartwig.hmftools.common.hla.LilacQcData;
+import com.hartwig.hmftools.common.metrics.BamFlagStats;
+import com.hartwig.hmftools.common.metrics.BamMetricsSummary;
 import com.hartwig.hmftools.common.sage.SageCommon;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.datamodel.orange.ExperimentType;
@@ -77,8 +80,6 @@ public interface OrangeConfig
 
     // Files containing the actual genomic results for this sample.
     String PIPELINE_VERSION_FILE = "pipeline_version_file";
-    String TUMOR_SAMPLE_WGS_METRICS_FILE = "tumor_sample_wgs_metrics_file";
-    String TUMOR_SAMPLE_FLAGSTAT_FILE = "tumor_sample_flagstat_file";
 
     // Some additional optional params and flags
     String CONVERT_GERMLINE_TO_SOMATIC = "convert_germline_to_somatic";
@@ -100,6 +101,7 @@ public interface OrangeConfig
         configBuilder.addPath(DOID_JSON, true, "Path to JSON file containing the full DOID tree.");
         configBuilder.addPath(COHORT_MAPPING_TSV, true, "Path to cohort mapping TSV.");
         configBuilder.addPath(COHORT_PERCENTILES_TSV, true, "Path to cohort percentiles TSV.");
+        configBuilder.addPath(SIGNATURES_ETIOLOGY_TSV, true, "Path to signatures etiology TSV.");
         addGenePanelOption(configBuilder, true);
         addKnownFusionFileOption(configBuilder);
         addEnsemblDir(configBuilder);
@@ -107,8 +109,7 @@ public interface OrangeConfig
         configBuilder.addPath(PIPELINE_VERSION_FILE, false, "Path towards the pipeline version file.");
 
         // tool output
-        configBuilder.addPath(TUMOR_SAMPLE_WGS_METRICS_FILE, false, "Path towards the tumor sample WGS metrics file.");
-        configBuilder.addPath(TUMOR_SAMPLE_FLAGSTAT_FILE, false, "Path towards the tumor sample flagstat file.");
+        configBuilder.addPath(TUMOR_METRICS_DIR_CFG, false, TUMOR_METRICS_DIR_DESC);
 
         // per tool directory config options are supported, but simpler is to specific the root sample directory containing all tool
         // subdirectories or a single directory containing all pipeline output
@@ -165,10 +166,10 @@ public interface OrangeConfig
     String cohortPercentilesTsv();
 
     @NotNull
-    String driverGenePanelTsv();
+    String signaturesEtiologyTsv();
 
     @NotNull
-    String signaturesEtiologyTsv();
+    String driverGenePanelTsv();
 
     @NotNull
     String knownFusionFile();
@@ -200,10 +201,10 @@ public interface OrangeConfig
     @Nullable
     String linxPlotDirectory();
 
-    @NotNull
+    @Nullable
     String lilacResultTsv();
 
-    @NotNull
+    @Nullable
     String lilacQcTsv();
 
     boolean convertGermlineToSomatic();
@@ -272,13 +273,11 @@ public interface OrangeConfig
                 .doidJsonFile(configBuilder.getValue(DOID_JSON))
                 .cohortMappingTsv(configBuilder.getValue(COHORT_MAPPING_TSV))
                 .cohortPercentilesTsv(configBuilder.getValue(COHORT_PERCENTILES_TSV))
-                .driverGenePanelTsv(configBuilder.getValue(DRIVER_GENE_PANEL_OPTION))
+                .driverGenePanelTsv(configBuilder.getValue(DRIVER_GENE_PANEL))
                 .signaturesEtiologyTsv(configBuilder.getValue(SIGNATURES_ETIOLOGY_TSV))
                 .knownFusionFile(configBuilder.getValue(KNOWN_FUSIONS_FILE))
                 .ensemblDataDirectory(configBuilder.getValue(ENSEMBL_DATA_DIR))
                 .pipelineVersionFile(configBuilder.getValue(PIPELINE_VERSION_FILE))
-                .tumorSampleWGSMetricsFile(pathResolver.resolveMandatoryMetricsFile(TUMOR_SAMPLE_WGS_METRICS_FILE, METRICS_DIR, tumorSampleId))
-                .tumorSampleFlagstatFile(pathResolver.resolveMandatoryMetricsFile(TUMOR_SAMPLE_FLAGSTAT_FILE, FLAGSTAT_DIR, tumorSampleId))
                 .purpleDataDirectory(pathResolver.resolveMandatoryToolDirectory(PURPLE_DIR_CFG, PURPLE_DIR))
                 .purplePlotDirectory(pathResolver.resolveMandatoryToolPlotsDirectory(PURPLE_PLOT_DIR_CFG, PURPLE_DIR))
                 .linxSomaticDataDirectory(pathResolver.resolveMandatoryToolDirectory(LINX_DIR_CFG, LINX_SOMATIC_DIR))
@@ -290,9 +289,16 @@ public interface OrangeConfig
         String sageSomaticDir = pathResolver.resolveMandatoryToolDirectory(SAGE_DIR_CFG, SAGE_SOMATIC_DIR);
         builder.sageSomaticTumorSampleBQRPlot(mandatoryPath(SageCommon.generateBqrPlotFilename(sageSomaticDir, tumorSampleId)));
 
-        String lilacDir = pathResolver.resolveMandatoryToolDirectory(LILAC_DIR_CFG, LILAC_DIR);
-        builder.lilacResultTsv(mandatoryPath(LilacAllele.generateFilename(lilacDir, tumorSampleId)));
-        builder.lilacQcTsv(mandatoryPath(LilacQcData.generateFilename(lilacDir, tumorSampleId)));
+        String lilacDir = pathResolver.resolveOptionalToolDirectory(LILAC_DIR_CFG, LILAC_DIR);
+        if(lilacDir != null)
+        {
+            builder.lilacResultTsv(mandatoryPath(LilacAllele.generateFilename(lilacDir, tumorSampleId)));
+            builder.lilacQcTsv(mandatoryPath(LilacQcData.generateFilename(lilacDir, tumorSampleId)));
+        }
+
+        String metricsDir = pathResolver.resolveMandatoryToolDirectory(TUMOR_METRICS_DIR_CFG, METRICS_DIR);
+        builder.tumorSampleWGSMetricsFile(mandatoryPath(BamMetricsSummary.generateFilename(metricsDir, tumorSampleId)));
+        builder.tumorSampleFlagstatFile(mandatoryPath(BamFlagStats.generateFilename(metricsDir, tumorSampleId)));
 
         if(experimentType == ExperimentType.WHOLE_GENOME)
         {

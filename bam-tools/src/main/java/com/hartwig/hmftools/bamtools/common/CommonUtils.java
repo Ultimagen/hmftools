@@ -7,7 +7,7 @@ import java.nio.file.Paths;
 import java.util.List;
 
 import com.hartwig.hmftools.bamtools.metrics.MetricsConfig;
-import com.hartwig.hmftools.common.genome.bed.BedFileReader;
+import com.hartwig.hmftools.common.region.BedFileReader;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 
@@ -19,8 +19,7 @@ public final class CommonUtils
     public static final String APP_NAME = "BamTools";
 
     // constants
-    public static final int DEFAULT_CHR_PARTITION_SIZE = 1000000;
-    public static final int DEFAULT_READ_LENGTH = 151;
+    public static final int DEFAULT_CHR_PARTITION_SIZE = 1_000_000;
 
     // config strings
     public static final String BAM_FILE = "bam_file";

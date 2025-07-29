@@ -3,9 +3,9 @@ package com.hartwig.hmftools.compar.mutation;
 import static com.hartwig.hmftools.compar.common.Category.GERMLINE_VARIANT;
 import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_QUAL;
 import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_REPORTED;
+import static com.hartwig.hmftools.compar.common.CommonUtils.createMismatchFromDiffs;
 import static com.hartwig.hmftools.compar.common.DiffFunctions.checkDiff;
 import static com.hartwig.hmftools.compar.common.DiffFunctions.checkFilterDiffs;
-import static com.hartwig.hmftools.compar.common.MismatchType.VALUE;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_BIALLELIC;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_CANON_EFFECT;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_CODING_EFFECT;
@@ -14,7 +14,11 @@ import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_HGVS_CODING
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_HGVS_PROTEIN;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_HOTSPOT;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_OTHER_REPORTED;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_PURITY_ADJUSTED_VAF;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_TIER;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_TUMOR_SUPPORTING_READ_COUNT;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_TUMOR_TOTAL_READ_COUNT;
+import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_VARIANT_COPY_NUMBER;
 
 import java.util.Arrays;
 import java.util.List;
@@ -75,6 +79,11 @@ public class GermlineVariantData implements ComparableItem
     }
 
     @Override
+    public boolean isPass() {
+        return true;
+    }
+
+    @Override
     public boolean matches(final ComparableItem other)
     {
         final GermlineVariantData otherVar = (GermlineVariantData) other;
@@ -92,7 +101,8 @@ public class GermlineVariantData implements ComparableItem
     }
 
     @Override
-    public Mismatch findMismatch(final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds)
+    public Mismatch findMismatch(final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds,
+            final boolean includeMatches)
     {
         final GermlineVariantData otherVar = (GermlineVariantData) other;
 
@@ -100,7 +110,7 @@ public class GermlineVariantData implements ComparableItem
 
         checkFilterDiffs(Filters, otherVar.Filters, diffs);
 
-        return !diffs.isEmpty() ? new Mismatch(this, other, VALUE, diffs) : null;
+        return createMismatchFromDiffs(this, other, diffs, matchLevel, includeMatches);
     }
 
     private static List<String> findVariantDiffs(
@@ -121,7 +131,10 @@ public class GermlineVariantData implements ComparableItem
         checkDiff(diffs, FLD_OTHER_REPORTED, refVar.otherReportedEffects(), otherVar.otherReportedEffects());
 
         checkDiff(diffs, FLD_QUAL, (int) refVar.qual(), (int) otherVar.qual(), thresholds);
-
+        checkDiff(diffs, FLD_VARIANT_COPY_NUMBER, refVar.variantCopyNumber(), otherVar.variantCopyNumber(), thresholds);
+        checkDiff(diffs, FLD_PURITY_ADJUSTED_VAF, refVar.adjustedVAF(), otherVar.adjustedVAF(), thresholds);
+        checkDiff(diffs, FLD_TUMOR_SUPPORTING_READ_COUNT, refVar.allelicDepth().AlleleReadCount, otherVar.allelicDepth().AlleleReadCount, thresholds);
+        checkDiff(diffs, FLD_TUMOR_TOTAL_READ_COUNT, refVar.allelicDepth().TotalReadCount, otherVar.allelicDepth().TotalReadCount, thresholds);
         return diffs;
     }
 
@@ -138,5 +151,9 @@ public class GermlineVariantData implements ComparableItem
         values.add(String.format("%s", variant.canonicalHgvsProteinImpact()));
         values.add(String.format("%s", variant.otherReportedEffects()));
         values.add(String.format("%.0f", variant.qual()));
+        values.add(String.format("%.2f", variant.variantCopyNumber()));
+        values.add(String.format("%.2f", variant.adjustedVAF()));
+        values.add(String.format("%d", variant.allelicDepth().AlleleReadCount));
+        values.add(String.format("%d", variant.allelicDepth().TotalReadCount));
     }
 }

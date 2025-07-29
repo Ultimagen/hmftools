@@ -3,6 +3,8 @@ package com.hartwig.hmftools.pave;
 import static java.lang.Math.max;
 
 import static com.hartwig.hmftools.common.variant.SomaticVariantFactory.PASS_FILTER;
+import static com.hartwig.hmftools.common.variant.pon.GnomadCache.PON_GNOMAD_FILTER;
+import static com.hartwig.hmftools.common.variant.pon.PonCache.PON_FILTER;
 import static com.hartwig.hmftools.pave.PaveConfig.PV_LOGGER;
 import static com.hartwig.hmftools.pave.PaveConstants.GNMOAD_FILTER_HOTSPOT_PATHOGENIC_THRESHOLD;
 import static com.hartwig.hmftools.pave.PaveConstants.GNMOAD_FILTER_THRESHOLD;
@@ -10,13 +12,10 @@ import static com.hartwig.hmftools.pave.PaveConstants.PON_MEAN_READ_THRESHOLD;
 import static com.hartwig.hmftools.pave.PaveConstants.PON_REPEAT_COUNT_THRESHOLD;
 import static com.hartwig.hmftools.pave.PaveConstants.PON_SAMPLE_COUNT_THRESHOLD;
 import static com.hartwig.hmftools.pave.PaveConstants.PON_VAF_THRESHOLD;
-import static com.hartwig.hmftools.pave.annotation.GnomadAnnotation.PON_GNOMAD_FILTER;
-import static com.hartwig.hmftools.pave.annotation.PonAnnotation.PON_FILTER;
+import static com.hartwig.hmftools.pave.VariantData.NO_LOCAL_PHASE_SET;
+import static com.hartwig.hmftools.pave.annotation.PonAnnotation.PON_ARTEFACT_FILTER;
 import static com.hartwig.hmftools.pave.impact.PaveUtils.createRightAlignedVariant;
 import static com.hartwig.hmftools.pave.impact.PaveUtils.findVariantImpacts;
-import static com.hartwig.hmftools.pave.VariantData.NO_LOCAL_PHASE_SET;
-import static com.hartwig.hmftools.pave.VcfWriter.buildVariant;
-import static com.hartwig.hmftools.pave.annotation.PonAnnotation.PON_ARTEFACT_FILTER;
 
 import java.util.List;
 import java.util.Map;
@@ -30,12 +29,13 @@ import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.common.variant.VcfFileReader;
 import com.hartwig.hmftools.common.variant.impact.VariantImpact;
+import com.hartwig.hmftools.common.variant.pon.GnomadChrCache;
+import com.hartwig.hmftools.common.variant.pon.PonChrCache;
+import com.hartwig.hmftools.common.variant.pon.PonVariantData;
 import com.hartwig.hmftools.pave.annotation.ClinvarChrCache;
-import com.hartwig.hmftools.pave.annotation.GnomadChrCache;
+import com.hartwig.hmftools.pave.annotation.GnomadAnnotation;
 import com.hartwig.hmftools.pave.annotation.MappabilityChrCache;
 import com.hartwig.hmftools.pave.annotation.PonAnnotation;
-import com.hartwig.hmftools.pave.annotation.PonChrCache;
-import com.hartwig.hmftools.pave.annotation.PonVariantData;
 import com.hartwig.hmftools.pave.annotation.ReferenceData;
 import com.hartwig.hmftools.pave.impact.ImpactClassifier;
 import com.hartwig.hmftools.pave.impact.VariantImpactBuilder;
@@ -43,7 +43,7 @@ import com.hartwig.hmftools.pave.impact.VariantTransImpact;
 
 import htsjdk.variant.variantcontext.VariantContext;
 
-public class ChromosomeTask implements Callable
+public class ChromosomeTask implements Callable<Void>
 {
     private final HumanChromosome mChromosome;
     private final String mChromosomeStr;
@@ -86,7 +86,7 @@ public class ChromosomeTask implements Callable
     }
 
     @Override
-    public Long call()
+    public Void call()
     {
         int variantCount = 0;
 
@@ -134,7 +134,7 @@ public class ChromosomeTask implements Callable
 
         mVcfWriter.onChromosomeComplete(mChromosome);
 
-        return (long)0;
+        return null;
     }
 
     private void processVariant(final VariantContext variantContext)
@@ -144,7 +144,7 @@ public class ChromosomeTask implements Callable
 
         VariantData variant = VariantData.fromContext(variantContext);
 
-        if(mConfig.ReadPassOnly)
+        if(!mConfig.ProcessNonPass)
         {
             if(!variantContext.getFilters().isEmpty() && !variantContext.getFilters().contains(PASS_FILTER))
                 return;
@@ -190,7 +190,7 @@ public class ChromosomeTask implements Callable
         if(mConfig.WritePassOnly && !variant.filters().isEmpty())
             return;
 
-        VariantContext newVariant = buildVariant(variant.context(), variant, variantImpact);
+        VariantContext newVariant = mVcfWriter.buildVariant(variant.context(), variant, variantImpact);
         mVcfWriter.writeVariant(mChromosome, newVariant);
 
         if(mConfig.WriteTranscriptFile)
@@ -215,21 +215,26 @@ public class ChromosomeTask implements Callable
 
         if(mGnomadCache != null)
             mReferenceData.Gnomad.annotateVariant(variant, mGnomadCache);
+        else
+            GnomadAnnotation.annotateFromContext(variant);
 
         if(mStandardPon != null)
             mReferenceData.StandardPon.annotateVariant(variant, mStandardPon);
+        else
+            PonAnnotation.annotateFromContext(variant);
 
         applyFilters(variant);
     }
 
     private void applyFilters(final VariantData variant)
     {
-        applyFilters(variant, mConfig.SampleId, mReferenceData.StandardPon, mArtefactsPon);
+        applyFilters(variant, mConfig.SampleId, mReferenceData.StandardPon, mArtefactsPon, mReferenceData.Gnomad.applyFilter());
     }
 
     @VisibleForTesting
     public static void applyFilters(
-            final VariantData variant, final String sampleId, final PonAnnotation standardPon, final PonChrCache artefactsPon)
+            final VariantData variant, final String sampleId, final PonAnnotation standardPon, final PonChrCache artefactsPon,
+            boolean applyGnomadFilter)
     {
         variant.filters().clear();
 
@@ -243,7 +248,7 @@ public class ChromosomeTask implements Callable
 
         if(hotspotOrPathogenic)
         {
-            if(belowPonThreshold(variant.ponSampleCount(), repeatCount))
+            if(variant.ponSampleCount() == 0 || belowPonThreshold(variant.ponSampleCount(), repeatCount))
             {
                 ponFilter = false;
             }
@@ -269,7 +274,7 @@ public class ChromosomeTask implements Callable
 
         if(artefactsPon != null)
         {
-            PonVariantData artefactPonData = artefactsPon.getPonData(variant);
+            PonVariantData artefactPonData = artefactsPon.getPonData(variant.Position, variant.Ref, variant.Alt);
 
             if(artefactPonData != null)
             {
@@ -280,12 +285,15 @@ public class ChromosomeTask implements Callable
             }
         }
 
-        Double gnmoadFrequency = variant.gnomadFrequency();
-        double gnomadThreshold = hotspotOrPathogenic ? GNMOAD_FILTER_HOTSPOT_PATHOGENIC_THRESHOLD : GNMOAD_FILTER_THRESHOLD;
-
-        if(gnmoadFrequency != null && gnmoadFrequency > gnomadThreshold)
+        if(applyGnomadFilter)
         {
-            variant.addFilter(PON_GNOMAD_FILTER);
+            Double gnmoadFrequency = variant.gnomadFrequency();
+            double gnomadThreshold = hotspotOrPathogenic ? GNMOAD_FILTER_HOTSPOT_PATHOGENIC_THRESHOLD : GNMOAD_FILTER_THRESHOLD;
+
+            if(gnmoadFrequency != null && gnmoadFrequency >= gnomadThreshold)
+            {
+                variant.addFilter(PON_GNOMAD_FILTER);
+            }
         }
     }
 

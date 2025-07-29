@@ -4,8 +4,9 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.String.format;
 
-import static com.hartwig.hmftools.esvee.AssemblyConfig.READ_ID_TRIMMER;
-import static com.hartwig.hmftools.esvee.AssemblyConstants.REMOTE_REGION_WEAK_SUPP_PERCENT;
+import static com.hartwig.hmftools.common.region.BaseRegion.positionsOverlap;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.REMOTE_REGION_MERGE_MARGIN;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.REMOTE_REGION_WEAK_SUPP_PERCENT;
 import static com.hartwig.hmftools.esvee.assembly.types.RemoteReadType.DISCORDANT;
 import static com.hartwig.hmftools.esvee.assembly.types.RemoteReadType.JUNCTION_MATE;
 import static com.hartwig.hmftools.esvee.assembly.types.RemoteReadType.SUPPLEMENTARY;
@@ -16,28 +17,27 @@ import java.util.List;
 import java.util.Set;
 
 import com.google.common.collect.Sets;
-import com.hartwig.hmftools.common.genome.region.Orientation;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 
 public class RemoteRegion extends ChrBaseRegion
 {
-    private final Orientation mOrientation;
     private final Set<String> mReadIds; // used to link with remote assemblies, and note is trimmed to match ID in SupportRead
 
     private final int[] mReadTypeCount;
     private int mSoftClipMapQualTotal; // from reads with supplementaries
+    private boolean mHasHighQualDiscordantRead;
 
-    public RemoteRegion(final ChrBaseRegion region, final Orientation orientation, final String readId, final RemoteReadType readType)
+    public RemoteRegion(final ChrBaseRegion region, final String readId, final RemoteReadType readType)
     {
         super(region.Chromosome, region.start(), region.end());
-        mOrientation = orientation;
 
-        mReadIds = Sets.newHashSet(READ_ID_TRIMMER.trim(readId));
+        mReadIds = Sets.newHashSet(readId);
 
         mReadTypeCount = new int[RemoteReadType.values().length];
         ++mReadTypeCount[readType.ordinal()];
 
         mSoftClipMapQualTotal = 0;
+        mHasHighQualDiscordantRead = false;
     }
 
     public void addReadDetails(final String readId, final int posStart, final int posEnd, final RemoteReadType readType)
@@ -45,12 +45,9 @@ public class RemoteRegion extends ChrBaseRegion
         setStart(min(start(), posStart));
         setEnd(max(end(), posEnd));
 
-        mReadIds.add(READ_ID_TRIMMER.trim(readId));
+        mReadIds.add(readId);
         ++mReadTypeCount[readType.ordinal()];
     }
-
-    public Orientation orientation() { return mOrientation; }
-    public boolean isForward() { return mOrientation.isForward(); }
 
     public Set<String> readIds() { return mReadIds; }
     public int readCount() { return mReadIds.size(); }
@@ -61,27 +58,46 @@ public class RemoteRegion extends ChrBaseRegion
     {
         return mReadTypeCount[JUNCTION_MATE.ordinal()] + mReadTypeCount[DISCORDANT.ordinal()];
     }
+    public boolean hasDiscordantReads() { return mReadTypeCount[DISCORDANT.ordinal()] > 0; }
+
+    public void setHasHighQualDiscordantRead()
+    {
+        mHasHighQualDiscordantRead = true;
+    }
+    public boolean hasHighQualDiscordantRead() { return mHasHighQualDiscordantRead; }
 
     public boolean isSuppOnlyRegion() { return nonSuppReadCount() == 0; }
 
     public int softClipMapQualTotal() { return mSoftClipMapQualTotal; }
     public void addSoftClipMapQual(int softClipLength, int mapQual) { mSoftClipMapQualTotal += softClipLength * mapQual; }
 
-    public boolean matches(final RemoteRegion other) { return mOrientation == other.mOrientation && overlaps(other); }
+    public boolean matches(final RemoteRegion other) { return overlaps(other); }
 
-    public boolean overlaps(final String otherChr, final int otherPosStart, final int otherPosEnd, final Orientation otherOrientation)
+    public boolean overlaps(final String otherChr, final int otherPosStart, final int otherPosEnd)
     {
-        return mOrientation == otherOrientation && overlaps(otherChr, otherPosStart, otherPosEnd);
+        return super.overlaps(otherChr, otherPosStart, otherPosEnd);
+    }
+
+    public boolean overlapsAssembly(final JunctionAssembly assembly)
+    {
+        return super.overlaps(assembly.junction().Chromosome, assembly.minAlignedPosition(), assembly.maxAlignedPosition());
+    }
+
+    public boolean hasReadId(final String fullReadId)
+    {
+        return mReadIds.stream().anyMatch(x -> fullReadId.equals(x));
     }
 
     public String toString()
     {
-        return format("%s orient(%s) reads(%d) counts(mate=%d supp=%d disc=%d) softClipMapQual(%d)",
-                super.toString(), mOrientation.toString(), mReadIds.size(), mReadTypeCount[RemoteReadType.DISCORDANT.ordinal()],
+        return format("%s reads(%d) counts(mate=%d supp=%d disc=%d) softClipMapQual(%d)",
+                super.toString(), mReadIds.size(), mReadTypeCount[JUNCTION_MATE.ordinal()],
                 mReadTypeCount[SUPPLEMENTARY.ordinal()], mReadTypeCount[DISCORDANT.ordinal()], mSoftClipMapQualTotal);
     }
 
-    public static void mergeRegions(final List<RemoteRegion> regions)
+    public static void mergeRegions(final List<RemoteRegion> regions) { mergeRegions(regions, REMOTE_REGION_MERGE_MARGIN); }
+
+    public static void mergeRegions(final List<RemoteRegion> regions, int distanceBuffer)
     {
         Collections.sort(regions, Comparator.comparing(x -> x));
 
@@ -95,7 +111,12 @@ public class RemoteRegion extends ChrBaseRegion
             {
                 RemoteRegion nextRegion = regions.get(nextIndex);
 
-                if(region.overlaps(nextRegion) && region.mOrientation == nextRegion.mOrientation)
+                boolean mergeRegions = region.Chromosome.equals(nextRegion.Chromosome)
+                        && (positionsOverlap(region.start(), region.end(), nextRegion.start(), nextRegion.end())
+                        || region.end() >= nextRegion.start() - distanceBuffer); // within close proximity
+
+
+                if(mergeRegions)
                 {
                     regions.remove(nextIndex);
                     region.setEnd(max(region.end(), nextRegion.end()));
@@ -148,6 +169,26 @@ public class RemoteRegion extends ChrBaseRegion
                     regions.remove(index);
                     continue;
                 }
+            }
+
+            ++index;
+        }
+    }
+
+    public static void purgeLowQualDiscordantOnlyRegions(final List<RemoteRegion> regions)
+    {
+        int index = 0;
+        while(index < regions.size())
+        {
+            RemoteRegion region = regions.get(index);
+
+            boolean isDiscordantOnly = region.readTypeCounts()[JUNCTION_MATE.ordinal()] == 0
+                    && region.readTypeCounts()[SUPPLEMENTARY.ordinal()] == 0;
+
+            if(isDiscordantOnly && !region.hasHighQualDiscordantRead())
+            {
+                regions.remove(index);
+                continue;
             }
 
             ++index;

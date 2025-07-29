@@ -5,8 +5,8 @@ import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileReaderUtils.createFieldsIndexMap;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
 import static com.hartwig.hmftools.isofox.IsofoxConfig.ISF_LOGGER;
 import static com.hartwig.hmftools.isofox.common.RegionMatchType.NONE;
 import static com.hartwig.hmftools.isofox.results.ResultsWriter.DELIMITER;
@@ -26,7 +26,7 @@ import com.hartwig.hmftools.isofox.common.ReadRecord;
 import com.hartwig.hmftools.isofox.common.RegionMatchType;
 import com.hartwig.hmftools.isofox.common.TransExonRef;
 
-import org.apache.commons.compress.utils.Lists;
+import com.google.common.collect.Lists;
 
 public class ChimericReadCache
 {
@@ -86,7 +86,7 @@ public class ChimericReadCache
                 */
 
                 mReadWriter.write(String.format(",%d,%s,%s,%s,%s,%s,%d",
-                        read.Flags, read.HasSuppAlignment, read.SuppData != null ? read.SuppData.asCsv() : "NONE",
+                        read.Flags, read.HasSuppAlignment, read.SuppData != null ? read.SuppData.asDelimStr() : "NONE",
                         read.BoundaryBases[SE_START], read.BoundaryBases[SE_END], read.MateChromosome, read.MatePosStart));
 
                 mReadWriter.write(String.format(",%d,%d,%s,%s,%s",

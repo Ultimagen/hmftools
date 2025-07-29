@@ -48,7 +48,6 @@ public class IndelCoords
         return format("%s(%d - %d) len(%d)", isDelete() ? "delete" : "insert", PosStart, PosEnd, Length);
     }
 
-
     public static IndelCoords findIndelCoords(final int readStart, final List<CigarElement> cigarElements, int minIndelLength)
     {
         int maxIndelLength = 0;
@@ -87,10 +86,11 @@ public class IndelCoords
         return new IndelCoords(indelStartPos, indelEndPos, maxIndelLength);
     }
 
-    public static IndelCoords findIndelCoords(final int readStart, final List<CigarElement> cigarElements, final CigarElement specificIndel)
+    public static IndelCoords findMatchingIndelCoords(
+            final int readStart, final List<CigarElement> cigarElements, final CigarElement specificIndel)
     {
         // find the location of the internal delete or insert matching the max indel length
-        int indelStartPos = readStart - 1;
+        int indelStartPos = -1;
         int indelEndPos = 0;
         int matchedIndelLength = 0;
 
@@ -116,6 +116,6 @@ public class IndelCoords
                 refPosition += element.getLength();
         }
 
-        return new IndelCoords(indelStartPos, indelEndPos, matchedIndelLength);
+        return matchedIndelLength > 0 ? new IndelCoords(indelStartPos, indelEndPos, matchedIndelLength) : null;
     }
 }

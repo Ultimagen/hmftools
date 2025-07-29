@@ -19,11 +19,11 @@ CUPPA is intended to provide:
     * [Classifier (Python component)](#classifier-python-component)
 * [Classifier output](#classifier-output)
 * [Features](#features)
-    * [GEN_POS](#gen_pos)
-    * [SNV96](#snv_96)
+    * [GEN_POS](#genpos)
+    * [SNV96](#snv96)
     * [EVENT](#event)
-    * [GENE_EXP](#gene_exp)
-    * [ALT_SJ](#alt_sj)
+    * [GENE_EXP](#geneexp)
+    * [ALT_SJ](#altsj)
 * [Classifier structure](#classifier-structure)
     * [CuppaClassifier](#cuppaclassifier)
     * [LogisticRegression](#logisticregression)
@@ -41,6 +41,11 @@ CUPPA is intended to provide:
       * [FusionProbOverrider](#fusionproboverrider)
       * [SexProbFilter](#sexprobfilter)
 * [Training set](#training-set)
+    * [Sample selection](#sample-selection)
+    * [Cancer subtype definitions](#cancer-subtype-definitions)
+    * [Cancer subtype groups](#cancer-subtype-groups)
+    * [Training procedure](#training-procedure)
+    * [Performance](#performance)
 <!-- TOC -->
 
 # Usage
@@ -95,6 +100,22 @@ java -cp cuppa.jar com.hartwig.hmftools.cup.prep.CuppaDataPrep \
   -threads 8
 ```
 
+assuming the input directory structure looks like this:
+```shell
+/data/datasets/SAMPLE_1/purple/SAMPLE_1.purple.somatic.vcf.gz
+/data/datasets/SAMPLE_1/purple/SAMPLE_1.purple.sv.vcf.gz
+/data/datasets/SAMPLE_1/purple/SAMPLE_1.purple.purity.tsv
+/data/datasets/SAMPLE_1/purple/SAMPLE_1.purple.qc
+/data/datasets/SAMPLE_1/linx/SAMPLE_1.linx.clusters.tsv
+/data/datasets/SAMPLE_1/linx/SAMPLE_1.linx.driver.catalog.tsv
+/data/datasets/SAMPLE_1/linx/SAMPLE_1.linx.fusion.tsv
+/data/datasets/SAMPLE_1/virus_interpreter/SAMPLE_1.virus.annotated.tsv
+/data/rna/SAMPLE_1/SAMPLE_1.isf.alt_splice_junc.csv
+/data/rna/SAMPLE_1/SAMPLE_1.isf.gene_data.csv
+/data/datasets/SAMPLE_2/purple/SAMPLE_2.purple.somatic.vcf.gz
+...
+```
+
 Because `-write_by_category` was specified, this will produce multi TSV files:
 * `cuppa_data.cohort.snv.tsv.gz`
 * `cuppa_data.cohort.sv.tsv.gz`
@@ -117,18 +138,20 @@ Source  Category       Key  SAMPLE_1  SAMPLE_2
 
 ### Inputs and arguments
 
-Below is a description of the required input files:
+Below is a description of the input files for `CuppaDataPrep`:
 
-| Tool              | Filename suffix          | File details                                     |
-|-------------------|--------------------------|--------------------------------------------------|
-| PURPLE            | .purple.somatic.vcf.gz   | SNVs; used for the GEN_POS and SNV96 features    |
-| PURPLE            | .purple.sv.vcf.gz        | Structural variants                              |
-| PURPLE            | .purple.purity.tsv       | Sample sex and WGD presence (amongst other data) |
-| PURPLE            | .purple.qc               | WGS quality control stats                        |
-| LINX              | .linx.clusters.tsv       | Structural variant clusters                      |
-| LINX              | .linx.driver.catalog.tsv | Driver mutations                                 |
-| LINX              | .linx.fusion.tsv         | Gene fusions                                     |
-| Virus Interpreter | .virus.annotated.tsv     | Viral sequence insertions                        |
+| Category | Tool              | Filename suffix          | File details                                     |
+|----------|-------------------|--------------------------|--------------------------------------------------|
+| DNA      | PURPLE            | .purple.somatic.vcf.gz   | SNVs; used for the GEN_POS and SNV96 features    |
+| DNA      | PURPLE            | .purple.sv.vcf.gz        | Structural variants                              |
+| DNA      | PURPLE            | .purple.purity.tsv       | Sample sex and WGD presence (amongst other data) |
+| DNA      | PURPLE            | .purple.qc               | WGS quality control stats                        |
+| DNA      | LINX              | .linx.clusters.tsv       | Structural variant clusters                      |
+| DNA      | LINX              | .linx.driver.catalog.tsv | Driver mutations                                 |
+| DNA      | LINX              | .linx.fusion.tsv         | Gene fusions                                     |
+| DNA      | Virus Interpreter | .virus.annotated.tsv     | Viral sequence insertions                        |
+| RNA      | ISOFOX            | .gene_data.csv           | Gene expression data                             |
+| RNA      | ISOFOX            | .alt_splice_junc.csv     | Alternative splice junction counts               |
 
 
 Below are all arguments that can be passed to `CuppaDataPrep`. Superscript numbers mark conditionally required arguments.
@@ -148,14 +171,15 @@ Below are all arguments that can be passed to `CuppaDataPrep`. Superscript numbe
 | `-ref_genome_version` | V37                                   | Valid values: V37 (default), V38                                                                                                              |
 | `-threads`            | 8                                     | Number of threads to use. Each thread processes one sample at a time                                                                          |
 | `-write_by_category`  |                                       | Flag. Split output of `CuppaDataPrep` over multiple files                                                                                     |
-| `-progress_interval`  | 100                                   | Print progress per this number of samples in multi-sample mode                                                                                |
 | `-log_level`          | DEBUG                                 | Set log level to one of: ERROR, WARN, INFO, DEBUG or TRACE                                                                                    |
 | `-log_debug`          |                                       | Flag. Set log level to DEBUG                                                                                                                  |
 
 Conditional requirements:
 1. Either `sample` or `sample_id_file` is required
 2. One or many of `-sample_data_dir`, `-purple_dir`, `-linx_dir`, `-virus_dir`, or `-isofox_dir` are provided such that the combination of directories covers all input files. Wildcards (`*`) are replaced with sample names 
-3. `-ref_alt_sj_sites` is required when running in RNA mode (i.e. `-categories` is RNA or ALL). `alt_sj.selected_loci.tsv.gz` files for hg37 and hg38 can be downloaded from the [common-resources-public](https://source.cloud.google.com/hmf-pipeline-development/common-resources-public/+/master:cuppa/) repo
+3. `-ref_alt_sj_sites` is required when running in RNA mode (i.e. `-categories` is RNA or ALL).
+
+All resource files for this tool and the WiGiTs pipeline are available for download via the [HMF Resource page](../pipeline/README_RESOURCES.md).
 
 ## Classifier (Python component)
 
@@ -218,8 +242,7 @@ pip install cuppa_jar/pycuppa/
 ```
 
 ### Predicting
-Pre-trained classifiers (`cuppa_classifier.pickle.gz` files) for hg37 and hg38 can be downloaded from the 
-[common-resources-public](https://source.cloud.google.com/hmf-pipeline-development/common-resources-public/+/master:cuppa/) repo.
+Pre-trained classifiers (`cuppa_classifier.pickle.gz` files) for hg37 and hg38 can be downloaded from the [HMF Resource page](../pipeline/README_RESOURCES.md).
 
 To predict on a single sample, the below example commands can be used. This produces the outputs as specified in section: [Classifier output](#classifier-output).
 
@@ -262,6 +285,7 @@ The below table lists all possible arguments for training and/or predicting.
 | `--metadata_path`         | Train   | [Required] Path to the metadata file with cancer type labels per sample                                                                                                                       |
 | `--cv_predictions_path`   | Predict | Path to a CuppaPrediction tsv file containing the cross-validation predictions. Samples found in <br/>this file will have their predictions returned from this file instead of being computed |
 | `--compress_tsv_files`    | Predict | Compress tsv files with gzip? (will add .gz to the file extension)                                                                                                                            |
+| `--force_plot`            | Predict | Force plotting when there are >10 samples in multi-sample mode                                                                                                                                |
 | `--excl_classes`          | Train   | Comma separated list of cancer subtypes to exclude from training. E.g. 'Breast' or 'Breast,Lung'. Default: '_Other,_Unknown'                                                                  |
 | `--min_samples_with_rna`  | Train   | Minimum number of samples with RNA in each cancer subtype. If the cancer subtype has fewer samples with RNA than this value, the cancer subtype will be excluded from training. Default: 5    |
 | `--fusion_overrides_path` | Train   | Path to the fusion overrides tsv file. See section [FusionProbOverrider](#fusionproboverrider) for how this file should be formatted                                                          |
@@ -449,10 +473,10 @@ homozygous disruptions in the driver catalog. Homozygous deletions, disruptions 
 together, but amplifications are treated as a separate feature as some oncogenes tend to be amplified in specific cancer
 types and mutated in others (notable examples are KRAS, EGFR, SPOP & FOXA1).
 
-Indels in repeat contexts of 6 or fewer bases in 3 lineage defining genes: ALB (highly specific to Liver cancer) and 
-SFTPB & SLC34A2 (highly specific to Lung cancer) are also treated as additional features (note though that they are 
-ignored for MSI samples). A set of Lung cancer specific EGFR hotspots (including T790M, L858R and exon 19 and 20 inframe
-deletions) are also treated as a single feature.
+Indels in 3 lineage defining genes ALB (Liver cancer specific), and SFTPB and SLC34A2 (Lung cancer specific), are also treated as additional 
+features. However, passenger (likely non-driver) indels are ignored by removing those in repeat contexts of >6 bases or in MSI samples.
+
+A set of Lung cancer specific EGFR hotspots (including T790M, L858R and exon 19 and 20 inframe deletions) are also treated as a single feature.
 
 #### Fusions
 Known pathogenic fusion pairs, immunoglobulin (IG) rearrangement pairs and exon deletions/duplications configured in the
@@ -824,3 +848,8 @@ every sample in the training set. These probabilities were then used to calculat
 number of samples correctly predicted per cancer type).
 
 <img src="src/main/python/pycuppa/doc/diagrams/training_and_cross_validation.jpg" width="600"/>
+
+### Performance
+Performance stats and confusion matrices as determined by cross-validation can be found at the below links:
+- [GRCh37 CUPPA model](https://console.cloud.google.com/storage/browser/hmf-public/HMFtools-Resources/cuppa/37/performance)
+- [GRCh38 CUPPA model](https://console.cloud.google.com/storage/browser/hmf-public/HMFtools-Resources/cuppa/38/performance)

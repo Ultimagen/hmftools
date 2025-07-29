@@ -5,8 +5,8 @@ import static java.lang.Math.min;
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.APP_NAME;
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.BT_LOGGER;
 import static com.hartwig.hmftools.common.region.PartitionUtils.partitionChromosome;
-import static com.hartwig.hmftools.common.utils.PerformanceCounter.runTimeMinsStr;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.runThreadTasks;
+import static com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.runThreadTasks;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -129,6 +129,8 @@ public class BamMetrics
         MetricsWriter.writeResults(combinedStats, mConfig);
 
         BT_LOGGER.info("totalReads({}) stats: {}", combinedStats.readCounts().Total, combinedStats.coverageMetrics());
+
+        mConfig.GeneRegionCoverage.writeResults(mConfig.OutputDir, mConfig.SampleId);
 
         if(mConfig.PerfDebug)
         {

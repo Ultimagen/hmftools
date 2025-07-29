@@ -1,20 +1,18 @@
 package com.hartwig.hmftools.lilac.fragment;
 
-import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
-import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.lilac.LilacConfig.LL_LOGGER;
 import static com.hartwig.hmftools.lilac.LilacUtils.formRange;
 import static com.hartwig.hmftools.lilac.seq.HlaSequence.DEL_STR;
 
-import java.io.BufferedWriter;
-import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-import java.util.StringJoiner;
+import java.util.SortedMap;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.codon.Codons;
+import com.hartwig.hmftools.lilac.evidence.AminoAcid;
+import com.hartwig.hmftools.lilac.evidence.Nucleotide;
 
 public class FragmentUtils
 {
@@ -76,39 +74,17 @@ public class FragmentUtils
     public static Fragment mergeFragments(final Fragment frag1, final Fragment frag2)
     {
         // merge frag 2 into 1 and ensure no repetition of loci
-        frag2.getGenes().forEach(x -> frag1.getGenes().add(x));
+        frag2.genes().forEach(x -> frag1.genes().add(x));
 
-        for(int index2 = 0; index2 < frag2.getNucleotideLoci().size(); ++index2)
+        for(Map.Entry<Integer, Nucleotide> entry2 : frag2.nucleotidesByLoci().entrySet())
         {
-            int locus2 = frag2.getNucleotideLoci().get(index2);
+            int locus2 = entry2.getKey();
+            Nucleotide nuc2 = entry2.getValue();
+            if(frag1.containsNucleotideLocus(locus2))
+                continue;
 
-            int index1 = 0;
-            boolean add = true;
-            for(; index1 < frag1.getNucleotideLoci().size(); ++index1)
-            {
-                int locus1 = frag1.getNucleotideLoci().get(index1);
-
-                if(locus1 < locus2)
-                    continue;
-
-                if(locus1 == locus2)
-                    add = false;
-
-                break;
-            }
-
-            if(add)
-            {
-                try
-                {
-                    frag1.addNucleotide(index1, locus2, frag2.getNucleotides().get(index2), frag2.getNucleotideQuality().get(index2));
-                    frag1.addReads(frag2);
-                }
-                catch(Exception e)
-                {
-                    LL_LOGGER.error("merging frag({}: {}) with frag({}: {})", frag1.id(), frag1.readInfo(), frag2.id(), frag2.readInfo());
-                }
-            }
+            frag1.addNucleotide(nuc2);
+            frag1.addReads(frag2);
         }
 
         return frag1;
@@ -117,8 +93,7 @@ public class FragmentUtils
     public static Fragment copyNucleotideFragment(final Fragment fragment)
     {
         // ignores all state, just starts with original information
-        Fragment newFragment = new Fragment(fragment.reads().get(0), fragment.readGene(), fragment.getGenes(),
-                fragment.getRawNucleotideLoci(), fragment.getRawNucleotideQuality(), fragment.getRawNucleotides());
+        Fragment newFragment = new Fragment(fragment.reads().get(0), fragment.readGene(), fragment.genes(), fragment.rawNucleotidesByLoci().values());
 
         for(int i = 1; i < fragment.reads().size(); ++i)
         {
@@ -128,12 +103,13 @@ public class FragmentUtils
         return newFragment;
     }
 
-    public static String formCodonAminoAcid(int locus, final List<Integer> nucleotideLoci, final List<String> nucleotides)
+    public static String formCodonAminoAcid(int locus, final SortedMap<Integer, Nucleotide> nucleotides)
     {
-        int nucIndex = nucleotideLoci.indexOf(locus * 3);
-        String first = nucleotides.get(nucIndex);
-        String second = nucleotides.get(nucIndex + 1);
-        String third = nucleotides.get(nucIndex + 2);
+        SortedMap<Integer, Nucleotide> head = nucleotides.tailMap(locus * 3);
+        List<String> bases = head.values().stream().limit(3).map(Nucleotide::bases).toList();
+        String first = bases.get(0);
+        String second = bases.get(1);
+        String third = bases.get(2);
 
         if(first == DEL_STR && second == DEL_STR && third == DEL_STR)
             return DEL_STR;
@@ -157,20 +133,39 @@ public class FragmentUtils
         return formRange(start, end);
     }
 
-    public static boolean validateLociBases(final String id, final List<Integer> loci, final List<String> sequences)
+    public static boolean validateFragment(final Fragment fragment)
     {
-        if(sequences.size() != sequences.size())
+        if(fragment.genes().isEmpty())
         {
-            LL_LOGGER.warn("frag({}) inconsistent loci({}) bases({})",
-                    id, loci.size(), sequences.size());
+            LL_LOGGER.warn("{} {} has no genes", fragment.id(), fragment.readInfo());
             return false;
         }
 
-        for(int i = 0; i < loci.size() - 1; ++i)
+        // check loci are ordered and consistent with qualities and bases
+        if(fragment.nucleotidesByLoci().isEmpty() || fragment.rawNucleotidesByLoci().isEmpty())
         {
-            if(loci.get(i) >= loci.get(i + 1))
+            LL_LOGGER.warn("{} {} has no bases", fragment.id(), fragment.readInfo());
+            return false;
+        }
+
+        if(fragment.aminoAcidConversionCount() > 0)
+        {
+            int i = 0;
+            for(AminoAcid aminoAcid : fragment.aminoAcidsByLoci().values())
             {
-                LL_LOGGER.warn("frag({}) loci out of order at index({})", id, i);
+                if(aminoAcid.acid().isEmpty())
+                {
+                    LL_LOGGER.warn("{} {} empty amino-acid, index({})", fragment.id(), fragment.readInfo(), i);
+                    return false;
+                }
+
+                i++;
+            }
+
+            if(fragment.aminoAcidConversionCount() > 1)
+            {
+                LL_LOGGER.warn("{} {} amino-acid conversion repeated({})",
+                        fragment.id(), fragment.readInfo(), fragment.aminoAcidConversionCount());
                 return false;
             }
         }

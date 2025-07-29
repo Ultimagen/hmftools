@@ -2,6 +2,7 @@ package com.hartwig.hmftools.esvee;
 
 import static java.lang.String.format;
 
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.MATE_CIGAR_ATTRIBUTE;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_CIGAR;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.SUPPLEMENTARY_ATTRIBUTE;
 import static com.hartwig.hmftools.common.bam.SupplementaryReadData.SUPP_NEG_STRAND;
@@ -9,30 +10,21 @@ import static com.hartwig.hmftools.common.bam.SupplementaryReadData.SUPP_POS_STR
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_1;
 import static com.hartwig.hmftools.common.test.MockRefGenome.generateRandomBases;
 import static com.hartwig.hmftools.common.test.SamRecordTestUtils.DEFAULT_BASE_QUAL;
-import static com.hartwig.hmftools.common.test.SamRecordTestUtils.DEFAULT_MAP_QUAL;
 import static com.hartwig.hmftools.common.test.SamRecordTestUtils.cloneSamRecord;
 import static com.hartwig.hmftools.common.test.SamRecordTestUtils.setReadFlag;
-import static com.hartwig.hmftools.common.utils.file.FileDelimiters.CSV_DELIM;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.codon.Nucleotides;
 import com.hartwig.hmftools.common.bam.SupplementaryReadData;
-import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
 import com.hartwig.hmftools.common.genome.region.Orientation;
 import com.hartwig.hmftools.common.test.MockRefGenome;
 import com.hartwig.hmftools.common.test.ReadIdGenerator;
 import com.hartwig.hmftools.common.test.SamRecordTestUtils;
-import com.hartwig.hmftools.esvee.alignment.AssemblyAlignment;
-import com.hartwig.hmftools.esvee.assembly.types.AssemblyLink;
-import com.hartwig.hmftools.esvee.assembly.types.Junction;
+import com.hartwig.hmftools.esvee.assembly.AssemblyConfig;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 import com.hartwig.hmftools.esvee.assembly.read.Read;
-import com.hartwig.hmftools.esvee.assembly.types.LinkType;
 import com.hartwig.hmftools.esvee.assembly.types.SupportType;
 
 import htsjdk.samtools.SAMFlag;
@@ -69,6 +61,21 @@ public class TestUtils
           + "TGTAGCTGATCGCAGGTCGAACCTGGTGATCGATGTCGATCGACTGATGTAGTAGCTGATCGGATGCATGCGTAGCGATGCTAGCTGATCGATTGGCTAA"
           + "GTCGCTTCCGGTATTTGCGTTCCGGGTTTTTTCCGAGCCTACCCCAGTTGGTTAAAAGGATATTATATATATGGCGGCTATATATGCGGTGTGTGTAACC";
 
+    public static String REF_BASES_600 =
+            "ATCATCGAATGGAATGGAATGGAACAGTCAATGAACTCGAATGGAATCATCATTGAATGGAATCGAATGGAATCATCGAGTGGAATCGAATGGAATTATG"
+    //       0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
+    // index 0         10        20        30        40        50        60        70        80        90
+          + "ATCAAATGGAATCGAATGTAATCATCATCAAATGGAATCAAAAATAACCATAATATGGTCTTTAAAGAAGCAATCTAGCTAAAATGAAATCATTAATCCA"
+    // index 100       110       120       130       140       150       160       170       180       190
+          + "ATAGGACTAACATCCTTATGAGAAGACAAGATTAGGACACAGGCATGAACTGGGGGAAGACCATGTAAAGACACTCAAAGAACTGACCGTACCACCCCCT"
+    // index 200       210       120       130       140       150       160       170       180       190
+          + "TCGAATGAATTGAATGCAATCATCGAATGGTCTCGAATGGAATCATCTTCTAATGTAAAGAAGCATTGAGCTATTTACATAGAAATCTCATTTAACTGTG"
+    // index 300       310       120       130       140       150       160       170       180       190
+          + "ATATAAATTAACCTTTCTTATCCTGCTTCTAAACAAAGGTAAGGGCCACCCAGTCAATGCTTTGTATTCTTCCAATATTCTTTCCTAGAACTTCTTCAAA"
+    // index 400       410       120       130       140       150       160       170       180       190
+          + "GGCTCTCATGAAGCACTGGTGAAACTGGAAATCACTGAATTTTACTACCATTTTCTTATCCTGCTTCTAAACAAAGGTAAGTTTCTTATCCTGCTTCTAA";
+    // index 500       510       120       130       140       150       160       170       180       190
+
     public static final MockRefGenome REF_GENOME = new MockRefGenome();
 
     public static Read createRead(final String readId, int readStart, final String readBases, final String cigar)
@@ -90,7 +97,14 @@ public class TestUtils
         if(mateReversed)
             record.setMateNegativeStrandFlag(true);
 
+        record.setAttribute(MATE_CIGAR_ATTRIBUTE, format("%dM", readBases.length()));
+
         return new Read(record);
+    }
+
+    public static void setMateCigar(final Read read, final String mateCigar)
+    {
+        read.bamRecord().setAttribute(MATE_CIGAR_ATTRIBUTE, mateCigar);
     }
 
     public static Read createConcordantRead(
@@ -100,7 +114,12 @@ public class TestUtils
                 readId, CHR_1, readStart, readBases, cigar, CHR_1, mateStart,
                 false, false, null);
 
-        record.setMateNegativeStrandFlag(true);
+        if(readStart > mateStart)
+            record.setReadNegativeStrandFlag(true);
+        else
+            record.setMateNegativeStrandFlag(true);
+
+        record.setAttribute(MATE_CIGAR_ATTRIBUTE, cigar); // assume the same
 
         return new Read(record);
     }
@@ -126,146 +145,10 @@ public class TestUtils
         return sb.toString();
     }
 
-    public static List<SAMRecord> createJunctionReads(
-            final MockRefGenome refGenome, final String readId, int anchorLength,
-            final String chrStart, int junctionPosStart, Orientation junctionOrientStart,
-            final String chrEnd, int junctionPosEnd, Orientation junctionOrientEnd, int mateStart)
+    public static void setSecondInPair(final SAMRecord record)
     {
-        // creates a junction read, its supplementary and a local mate if the coords are supplied
-        int readBaseLength = anchorLength * 2;
-        int readStart, readEnd, suppStart, suppEnd;
-        String readCigar, suppCigar;
-        String basesStart, basesEnd;
-
-        if(junctionOrientStart.isForward())
-        {
-            readStart = junctionPosStart - anchorLength + 1;
-            readEnd = junctionPosStart;
-            readCigar = format("%dM%dS", anchorLength, anchorLength);
-        }
-        else
-        {
-            readStart = junctionPosStart;
-            readEnd = junctionPosStart + anchorLength - 1;
-            readCigar = format("%dS%dM", anchorLength, anchorLength);
-        }
-
-        basesStart = refGenome.getBaseString(chrStart, readStart, readEnd);
-
-        if(junctionOrientEnd.isForward())
-        {
-            suppStart = junctionPosEnd - anchorLength + 1;
-            suppEnd = junctionPosEnd;
-            suppCigar = format("%dM%dS", anchorLength, anchorLength);
-        }
-        else
-        {
-            suppStart = junctionPosEnd;
-            suppEnd = junctionPosEnd + anchorLength - 1;
-            suppCigar = format("%dS%dM", anchorLength, anchorLength);
-        }
-
-        basesEnd = refGenome.getBaseString(chrEnd, suppStart, suppEnd);
-
-        String readBases, suppBases;
-        boolean isSuppNegStrand = true;
-
-        if(junctionOrientStart != junctionOrientEnd)
-        {
-            if(junctionOrientStart.isForward())
-                readBases = basesStart + basesEnd;
-            else
-                readBases = basesEnd + basesStart;
-
-            suppBases = readBases;
-        }
-        else
-        {
-            isSuppNegStrand = false;
-
-            // keep the first read's bases in the 5' to 3' direction
-            if(junctionOrientStart.isForward())
-            {
-                readBases = basesStart + Nucleotides.reverseComplementBases(basesEnd);
-                suppBases = basesEnd + Nucleotides.reverseComplementBases(basesStart);
-            }
-            else
-            {
-                readBases = Nucleotides.reverseComplementBases(basesEnd) + basesStart;
-                suppBases = Nucleotides.reverseComplementBases(basesStart) + basesEnd;
-            }
-        }
-
-        List<SAMRecord> reads = Lists.newArrayList();
-
-        String mateCigar = NO_CIGAR;
-        int mateEnd = 0;
-        String mateBases = null;
-
-        if(mateStart > 0)
-        {
-            mateCigar = format("%dM", readBaseLength);
-            mateEnd = mateStart + readBaseLength - 1;
-            mateBases = refGenome.getBaseString(chrStart, mateStart, mateEnd);
-        }
-
-        SupplementaryReadData readSuppData = new SupplementaryReadData(
-                chrEnd, suppStart, isSuppNegStrand ? SUPP_NEG_STRAND : SUPP_POS_STRAND, suppCigar, 60, 0);
-
-        SAMRecord read = SamRecordTestUtils.createSamRecord(
-                readId, chrStart, readStart, readBases, readCigar, chrStart, mateStart, false,
-                false, readSuppData, true, mateCigar);
-
-        reads.add(read);
-
-        SupplementaryReadData suppReadData = new SupplementaryReadData(
-                chrStart, readStart, SUPP_POS_STRAND, readCigar, 60, 0);
-
-        SAMRecord supp = SamRecordTestUtils.createSamRecord(
-                readId, chrEnd, suppStart, suppBases, suppCigar, chrStart, mateStart, false,
-                true, suppReadData, true, mateCigar);
-
-        reads.add(supp);
-
-        if(mateStart > 0)
-        {
-            SAMRecord mate = SamRecordTestUtils.createSamRecord(
-                readId, chrStart, mateStart, mateBases, mateCigar, chrStart, readStart, true,
-                false, null, false, readCigar);
-
-            reads.add(mate);
-        }
-
-        return reads;
-    }
-
-    public static String formTestRefSequence(final int length)
-    {
-        // tries to avoid long repeats
-        int currentIndex = 0;
-        int maxSegmentLength = 40;
-
-        StringBuilder sb = new StringBuilder();
-        int currentLength = 0;
-
-        while(currentLength < length)
-        {
-            String nextSegment = REF_BASES_400.substring(currentIndex, currentIndex + maxSegmentLength)
-                    + MockRefGenome.generateRandomBases(10);
-
-            if(nextSegment.length() + currentLength > length)
-                nextSegment = nextSegment.substring(0, length - currentLength);
-
-            sb.append(nextSegment);
-            currentLength += nextSegment.length();
-
-            ++currentIndex;
-
-            if(currentIndex + maxSegmentLength > REF_BASES_400.length())
-                currentIndex = 0;
-        }
-
-        return sb.toString();
+        record.setSecondOfPairFlag(true);
+        record.setFirstOfPairFlag(false);
     }
 
 
@@ -312,8 +195,9 @@ public class TestUtils
             final String readId, final String chromosome, int readStart, final String mateChr, int mateStart,
             boolean firstInPair, boolean isSupp, final String suppData)
     {
+        String readBases = REF_BASES_200.substring(0, 100);
         SAMRecord record = createSamRecord(
-                readId, chromosome, readStart, "", "100M",
+                readId, chromosome, readStart, readBases, "100M",
                 buildFlags(firstInPair, false, isSupp),
                 DEFAULT_MAP_QUAL, DEFAULT_BASE_QUAL);
 
@@ -360,29 +244,5 @@ public class TestUtils
     public static int getSupportTypeCount(final JunctionAssembly assembly, final SupportType type)
     {
         return (int)assembly.support().stream().filter(x -> x.type() == type).count();
-    }
-
-    public static void loadRefGenomeBases(final MockRefGenome refGenome, final String testFilename)
-    {
-        List<String> lines = new BufferedReader(new InputStreamReader(
-                TestUtils.class.getResourceAsStream(testFilename))).lines().collect(Collectors.toList());
-
-        for(String line : lines)
-        {
-            String[] values = line.split(CSV_DELIM, 2);
-            String chr = values[0];
-
-            if(chr.startsWith("#")) // comment lines
-                continue;
-
-            String bases = values[1];
-
-            String existingBases = refGenome.RefGenomeMap.get(chr);
-
-            if(existingBases != null)
-                bases = existingBases + bases;
-
-            refGenome.RefGenomeMap.put(chr, bases);
-        }
     }
 }

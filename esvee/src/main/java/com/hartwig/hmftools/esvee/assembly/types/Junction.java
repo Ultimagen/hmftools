@@ -8,8 +8,10 @@ import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_ORIENTATIO
 import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_POSITION;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileReaderUtils.createFieldsIndexMap;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.common.CommonUtils.compareJunctions;
+import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_EXACT_SUPPORT_FRAGS;
+import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_EXTRA_INFO;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_HOTSPOT_JUNCTION;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_INDEL_JUNCTION;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_JUNCTION_FRAGS;
@@ -27,6 +29,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.genome.region.Orientation;
 import com.hartwig.hmftools.common.region.SpecificRegions;
+import com.hartwig.hmftools.esvee.common.IndelCoords;
 
 public class Junction implements Comparable<Junction>
 {
@@ -35,14 +38,17 @@ public class Junction implements Comparable<Junction>
     public final Orientation Orient;
 
     public final boolean DiscordantOnly;
-    public final boolean IndelBased;
     public final boolean Hotspot;
 
+    private boolean mIndelBased;
     public final String mDetails;
+    private int mRawDiscordantPosition;
+    private IndelCoords mIndelCoords; // the consensus indel if applicable
 
     public Junction(final String chromosome, final int position, final Orientation orientation)
     {
         this(chromosome, position, orientation, false, false, false);
+        mRawDiscordantPosition = -1;
     }
 
     public Junction(
@@ -53,15 +59,15 @@ public class Junction implements Comparable<Junction>
         Position = position;
         Orient = orientation;
         DiscordantOnly = discordantOnly;
-        IndelBased = indelBased;
+        mIndelBased = indelBased;
         Hotspot = hotspot;
 
-        if(DiscordantOnly || IndelBased || Hotspot)
+        if(DiscordantOnly || mIndelBased || Hotspot)
         {
             StringJoiner sj = new StringJoiner("/");
             if(DiscordantOnly)
                 sj.add("disc-only");
-            if(IndelBased)
+            if(mIndelBased)
                 sj.add("indel");
             if(Hotspot)
                 sj.add("hotspot");
@@ -72,14 +78,25 @@ public class Junction implements Comparable<Junction>
         {
             mDetails = "";
         }
+
+        mIndelCoords = null;
     }
 
     public boolean isForward() { return Orient.isForward(); }
     public boolean isReverse() { return Orient.isReverse(); }
 
+    public void markAsIndel() { mIndelBased = true; }
+    public boolean indelBased() { return mIndelBased; }
+
+    public void setIndelCoords(final IndelCoords indelCoords) { mIndelCoords = indelCoords; }
+    public IndelCoords indelCoords() { return mIndelCoords; }
+
+    public int rawDiscordantPosition() { return mRawDiscordantPosition; }
+    public void setRawDiscordantPosition(int position) { mRawDiscordantPosition = position; }
+
     public String toString()
     {
-        if(DiscordantOnly || IndelBased || Hotspot)
+        if(DiscordantOnly || mIndelBased || Hotspot)
         {
             return format("%s:%d:%d %s",Chromosome, Position, Orient.asByte(), mDetails);
         }
@@ -89,6 +106,17 @@ public class Junction implements Comparable<Junction>
 
     // for display and logging
     public String coords() { return format("%s:%d:%d", Chromosome, Position, Orient.asByte()); }
+    public String coordsTyped() { return coordsTyped(false); }
+
+    public String coordsTyped(boolean useRawDiscordant)
+    {
+        if(DiscordantOnly)
+            return format("%s:%d:%d:D", Chromosome, useRawDiscordant ? mRawDiscordantPosition : Position, Orient.asByte());
+        else if(indelBased())
+            return format("%s:I", coords());
+        else
+            return coords();
+    }
 
     public boolean isLocalMatch(final Junction other)
     {
@@ -109,7 +137,7 @@ public class Junction implements Comparable<Junction>
     }
 
     public static Map<String,List<Junction>> loadJunctions(
-            final String filename, final SpecificRegions specificRegions, final boolean processDiscordantGroups)
+            final String filename, final SpecificRegions specificRegions, int minJunctionFrags, int minHotspotFrags, int minDiscordantFrags)
     {
         if(filename == null || filename.isEmpty())
             return null;
@@ -128,17 +156,22 @@ public class Junction implements Comparable<Junction>
             int orientIndex = fieldsIndexMap.get(FLD_ORIENTATION);
 
             Integer juncFragsIndex = fieldsIndexMap.get(FLD_JUNCTION_FRAGS);
+            Integer otherJuncFragsIndex = fieldsIndexMap.get(FLD_EXACT_SUPPORT_FRAGS);
 
             Integer otherSupportFragsIndex = fieldsIndexMap.containsKey(FLD_OTHER_SUPPORT_FRAGS) ?
                     fieldsIndexMap.get(FLD_OTHER_SUPPORT_FRAGS) : fieldsIndexMap.get("DiscordantFrags"); // old name
 
             Integer indelIndex = fieldsIndexMap.get(FLD_INDEL_JUNCTION);
             Integer hotspotIndex = fieldsIndexMap.get(FLD_HOTSPOT_JUNCTION);
+            Integer extraInfoIndex = fieldsIndexMap.get(FLD_EXTRA_INFO);
 
             List<Junction> junctionDataList = null;
             String currentChromosome = "";
 
             int junctionCount = 0;
+            int discordantCount = 0;
+            int indelCount = 0;
+            int hotspotCount = 0;
 
             while((line = fileReader.readLine()) != null)
             {
@@ -154,6 +187,39 @@ public class Junction implements Comparable<Junction>
                 if(!specificRegions.includePosition(chromosome, position))
                     continue;
 
+                int junctionFrags = juncFragsIndex != null ? Integer.parseInt(values[juncFragsIndex]) : 0;
+                int otherJunctionFrags = otherSupportFragsIndex != null ? Integer.parseInt(values[otherJuncFragsIndex]) : 0;
+                int otherSupportFrags = otherSupportFragsIndex != null ? Integer.parseInt(values[otherSupportFragsIndex]) : 0;
+
+                boolean discordantOnly = junctionFrags == 0 && otherSupportFrags > 0;
+                boolean indel = indelIndex != null && Boolean.parseBoolean(values[indelIndex]);
+                boolean hotspot = hotspotIndex != null && Boolean.parseBoolean(values[hotspotIndex]);
+
+                if(hotspot)
+                {
+                    if(junctionFrags < minHotspotFrags)
+                        continue;
+
+                    ++hotspotCount;
+                }
+                else if(discordantOnly)
+                {
+                    int maxRemoteFrags = extraInfoIndex != null ? Integer.parseInt(values[extraInfoIndex]) : otherSupportFrags;
+
+                    if(maxRemoteFrags < minDiscordantFrags)
+                        continue;
+
+                    ++discordantCount;
+                }
+                else
+                {
+                    if(junctionFrags + otherJunctionFrags < minJunctionFrags)
+                        continue;
+
+                    if(indel)
+                        ++indelCount;
+                }
+
                 if(!currentChromosome.equals(chromosome))
                 {
                     currentChromosome = chromosome;
@@ -161,21 +227,13 @@ public class Junction implements Comparable<Junction>
                     chrJunctionsMap.put(chromosome, junctionDataList);
                 }
 
-                int junctionFrags = juncFragsIndex != null ? Integer.parseInt(values[juncFragsIndex]) : 0;
-                int otherSupportFrags = otherSupportFragsIndex != null ? Integer.parseInt(values[otherSupportFragsIndex]) : 0;
-                boolean discordantOnly = junctionFrags == 0 && otherSupportFrags > 0;
-
-                if(discordantOnly && !processDiscordantGroups)
-                    continue;
-
-                boolean indel = indelIndex != null && Boolean.parseBoolean(values[indelIndex]);
-                boolean hotspot = hotspotIndex != null && Boolean.parseBoolean(values[hotspotIndex]);
-
                 junctionDataList.add(new Junction(chromosome, position, orientation, discordantOnly, indel, hotspot));
                 ++junctionCount;
             }
 
-            SV_LOGGER.info("loaded {} junctions from file: {}", junctionCount, filename);
+            int splitCount = junctionCount - discordantCount;
+            SV_LOGGER.info("loaded {} junctions, types(split={} discordant={} indel={} hotspot={}) from file: {}",
+                    junctionCount, splitCount, discordantCount, indelCount, hotspotCount, filename);
 
             chrJunctionsMap.values().forEach(x -> Collections.sort(x));
 

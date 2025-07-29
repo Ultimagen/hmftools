@@ -13,7 +13,6 @@ import java.util.Map;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.cobalt.CobaltRatio;
 import com.hartwig.hmftools.common.cobalt.CobaltRatioFile;
-import com.hartwig.hmftools.common.genome.bed.NamedBed;
 import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.purple.Gender;
@@ -66,7 +65,7 @@ public class DataLoader
         {
             CB_LOGGER.info("reading Cobalt ratios from {}", cobaltPanelFilename);
 
-            Map<Chromosome,List<CobaltRatio>> chrPanelRatios = CobaltRatioFile.readWithGender(
+            Map<Chromosome,List<CobaltRatio>> sampleChrPanelRatios = CobaltRatioFile.readWithGender(
                     cobaltPanelFilename, amberGender, true);
 
             Map<Chromosome,List<CobaltRatio>> chrWgsRatios = null;
@@ -84,9 +83,9 @@ public class DataLoader
                 List<RegionData> regions = entry.getValue();
 
                 HumanChromosome chromosome = HumanChromosome.fromString(chrStr);
-                List<CobaltRatio> cobaltRatios = chrPanelRatios.get(chromosome);
+                List<CobaltRatio> sampleCobaltRatios = sampleChrPanelRatios.get(chromosome);
 
-                if(cobaltRatios == null)
+                if(sampleCobaltRatios == null)
                     continue;
 
                 double defaultWgsGcRatio = wgsGcRatio(amberGender, chromosome);
@@ -101,10 +100,10 @@ public class DataLoader
 
                     while(true)
                     {
-                        if(cobaltIndex >= cobaltRatios.size())
+                        if(cobaltIndex >= sampleCobaltRatios.size())
                             break;
 
-                        cobaltRatio = cobaltRatios.get(cobaltIndex);
+                        cobaltRatio = sampleCobaltRatios.get(cobaltIndex);
 
                         if(cobaltRatio.position() == region.Position)
                             break;
@@ -133,15 +132,18 @@ public class DataLoader
                     }
 
                     double wgsGcRatio = cobaltWgsRatio != null && cobaltWgsRatio.position() == region.Position ?
-                            cobaltWgsRatio.tumorGCRatio() : defaultWgsGcRatio;
+                            cobaltWgsRatio.tumorGcContent() : defaultWgsGcRatio;
 
                     if(cobaltRatio != null && cobaltRatio.position() == region.Position)
                     {
-                        region.addSampleRegionData(new SampleRegionData(cobaltRatio.tumorReadDepth(), cobaltRatio.tumorGCRatio(), wgsGcRatio));
+                        SampleRegionData sampleRegionData = new SampleRegionData(
+                                cobaltRatio.tumorReadDepth(), cobaltRatio.tumorGcContent(), cobaltRatio.tumorGCRatio(), wgsGcRatio);
+                        region.addSampleRegionData(sampleRegionData);
                     }
                     else
                     {
-                        region.addSampleRegionData(new SampleRegionData(0, 0, wgsGcRatio));
+                        // should not occur if samples were run with the same panel definition file
+                        region.addSampleRegionData(new SampleRegionData(0, 0, 0, wgsGcRatio));
                     }
                 }
             }

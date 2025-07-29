@@ -11,7 +11,7 @@ import static com.hartwig.hmftools.common.utils.config.ConfigItemType.FLAG;
 import static com.hartwig.hmftools.common.utils.config.ConfigItemType.INTEGER;
 import static com.hartwig.hmftools.common.utils.config.ConfigItemType.PATH;
 import static com.hartwig.hmftools.common.utils.config.ConfigItemType.STRING;
-import static com.hartwig.hmftools.common.utils.version.VersionInfo.fromAppName;
+import static com.hartwig.hmftools.common.utils.config.VersionInfo.fromAppName;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -24,7 +24,6 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.hartwig.hmftools.common.utils.version.VersionInfo;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -35,7 +34,6 @@ public class ConfigBuilder
     private final String mAppName;
     private final List<ConfigItem> mItems;
     private final Set<ErrorType> mErrors;
-    private boolean mWarnOnRepeatedRegos;
 
     private static final String DEFAULT_CONFIG_PREFIX = "-";
     private static final String PRINT_HELP = "-help";
@@ -67,10 +65,7 @@ public class ConfigBuilder
         mItems = Lists.newArrayList();
         mErrors = Sets.newHashSet();
         mConfigPrefix = prefix;
-        mWarnOnRepeatedRegos = true;
     }
-
-    public void disableWarnOnRepeatedRegos() { mWarnOnRepeatedRegos = false; }
 
     public void addConfigItem(final ConfigItem item)
     {
@@ -78,9 +73,9 @@ public class ConfigBuilder
 
         if(matched != null)
         {
-            if(mWarnOnRepeatedRegos)
+            if(matched.Type != item.Type || matched.Required != item.Required)
             {
-                LOGGER.warn("registering config item({}) again", matched);
+                LOGGER.warn("repeat config registration differs: existing({}) vs new({})", matched, item);
             }
 
             return;
@@ -106,9 +101,9 @@ public class ConfigBuilder
         addConfigItem(DECIMAL, name, true, description, null);
     }
 
-    public void addDecimal(final String name, final String desc, double defaultValue)
+    public void addDecimal(final String name, final String description, double defaultValue)
     {
-        addConfigItem(DECIMAL, name, false, format("%s, default=%.3g", desc, defaultValue), String.valueOf(defaultValue));
+        addConfigItem(DECIMAL, name, false, description, String.valueOf(defaultValue));
     }
 
     public void addRequiredInteger(final String name, final String description)
@@ -118,7 +113,7 @@ public class ConfigBuilder
 
     public void addInteger(final String name, final String description, int defaultValue)
     {
-        addConfigItem(INTEGER, name, false, format("%s, default=%d", description, defaultValue), String.valueOf(defaultValue));
+        addConfigItem(INTEGER, name, false, description, String.valueOf(defaultValue));
     }
 
     public void addFlag(final String name, final String description)
@@ -245,7 +240,7 @@ public class ConfigBuilder
 
     private boolean isValidPath(final ConfigItem item)
     {
-        if(!item.hasValue() || item.value().contains("*"))
+        if(!item.hasValue())
             return true;
 
         List<String> paths = item.Type == PATHS ?
@@ -261,11 +256,16 @@ public class ConfigBuilder
                 path = pathPrefix + path;
             }
 
-            if(!Files.exists(Paths.get(path)))
+            if(!containsWildcard(path) && !Files.exists(Paths.get(path)))
                 return false;
         }
 
         return true;
+    }
+
+    private boolean containsWildcard(final String path)
+    {
+        return path.contains("*") || path.contains("$");
     }
 
     public void checkAndParseCommandLine(final String[] args)

@@ -6,8 +6,8 @@ import static com.hartwig.hmftools.common.test.GeneTestUtils.addTransExonData;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.createEnsemblGeneData;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.createGeneDataCache;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.createTransExons;
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.NEG_ORIENT;
-import static com.hartwig.hmftools.common.utils.sv.SvCommonUtils.POS_ORIENT;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_REV;
+import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_FWD;
 import static com.hartwig.hmftools.linx.utils.GeneTestUtils.CHR_1;
 import static com.hartwig.hmftools.linx.utils.GeneTestUtils.GENE_ID_1;
 import static com.hartwig.hmftools.linx.utils.GeneTestUtils.GENE_NAME_1;
@@ -23,12 +23,12 @@ import static org.junit.Assert.assertTrue;
 import java.util.List;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.drivercatalog.DriverCatalog;
+import com.hartwig.hmftools.common.driver.DriverCatalog;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
 import com.hartwig.hmftools.common.gene.GeneData;
 import com.hartwig.hmftools.common.gene.TranscriptData;
 import com.hartwig.hmftools.common.linx.LinxBreakend;
-import com.hartwig.hmftools.common.linx.LinxGermlineSv;
+import com.hartwig.hmftools.common.linx.LinxGermlineDisruption;
 import com.hartwig.hmftools.linx.fusion.DisruptionFinder;
 import com.hartwig.hmftools.linx.fusion.SvDisruptionData;
 import com.hartwig.hmftools.linx.types.SglMapping;
@@ -74,7 +74,7 @@ public class GermlineDisruptionTest
 
         mDisruptionFinder.findReportableDisruptions(mLinx.AllVariants, mLinx.Analyser.getClusters());
 
-        List<LinxGermlineSv> germlineSVs = Lists.newArrayList();
+        List<LinxGermlineDisruption> germlineSVs = Lists.newArrayList();
         List<DriverCatalog> drivers = Lists.newArrayList();
         List<LinxBreakend> breakends = Lists.newArrayList();
 
@@ -87,8 +87,8 @@ public class GermlineDisruptionTest
     public void testSglMappedDel()
     {
         // SGL with mapping to make a DEL around a gene
-        SvVarData var = createSgl(mLinx.nextVarId(), CHR_1, 5000,POS_ORIENT);
-        var.getSglMappings().add(new SglMapping(CHR_1, 150000, NEG_ORIENT, "", 1));
+        SvVarData var = createSgl(mLinx.nextVarId(), CHR_1, 5000,ORIENT_FWD);
+        var.getSglMappings().add(new SglMapping(CHR_1, 150000, ORIENT_REV, "", 1));
 
         mLinx.AllVariants.add(var);
 
@@ -97,7 +97,7 @@ public class GermlineDisruptionTest
 
         mDisruptionFinder.findReportableDisruptions(mLinx.AllVariants, mLinx.Analyser.getClusters());
 
-        List<LinxGermlineSv> germlineSVs = Lists.newArrayList();
+        List<LinxGermlineDisruption> germlineSVs = Lists.newArrayList();
         List<DriverCatalog> drivers = Lists.newArrayList();
         List<LinxBreakend> breakends = Lists.newArrayList();
 
@@ -108,8 +108,8 @@ public class GermlineDisruptionTest
         mLinx.clearClustersAndSVs();
 
         // partial DEL - exonic to intronic
-        var = createSgl(mLinx.nextVarId(), CHR_1, 5000,POS_ORIENT);
-        var.getSglMappings().add(new SglMapping(CHR_1, 12100, NEG_ORIENT, "", 1));
+        var = createSgl(mLinx.nextVarId(), CHR_1, 5000,ORIENT_FWD);
+        var.getSglMappings().add(new SglMapping(CHR_1, 12100, ORIENT_REV, "", 1));
 
         mLinx.AllVariants.add(var);
 
@@ -125,8 +125,8 @@ public class GermlineDisruptionTest
         mLinx.clearClustersAndSVs();
 
         // intronic
-        var = createSgl(mLinx.nextVarId(), CHR_1, 11500,POS_ORIENT);
-        var.getSglMappings().add(new SglMapping(CHR_1, 13500, NEG_ORIENT, "", 1));
+        var = createSgl(mLinx.nextVarId(), CHR_1, 11500,ORIENT_FWD);
+        var.getSglMappings().add(new SglMapping(CHR_1, 13500, ORIENT_REV, "", 1));
 
         mLinx.AllVariants.add(var);
 
@@ -142,8 +142,8 @@ public class GermlineDisruptionTest
         mLinx.clearClustersAndSVs();
 
         // same intronic is not disruptive
-        var = createSgl(mLinx.nextVarId(), CHR_1, 11500,POS_ORIENT);
-        var.getSglMappings().add(new SglMapping(CHR_1, 11800, NEG_ORIENT, "", 1));
+        var = createSgl(mLinx.nextVarId(), CHR_1, 11500,ORIENT_FWD);
+        var.getSglMappings().add(new SglMapping(CHR_1, 11800, ORIENT_REV, "", 1));
 
         mLinx.AllVariants.add(var);
 
@@ -158,10 +158,10 @@ public class GermlineDisruptionTest
         // evaluate on its own even if clustered with something else
         mLinx.clearClustersAndSVs();
 
-        var = createSgl(mLinx.nextVarId(), CHR_1, 11500,POS_ORIENT);
-        var.getSglMappings().add(new SglMapping(CHR_1, 13500, NEG_ORIENT, "", 1));
+        var = createSgl(mLinx.nextVarId(), CHR_1, 11500,ORIENT_FWD);
+        var.getSglMappings().add(new SglMapping(CHR_1, 13500, ORIENT_REV, "", 1));
 
-        SvVarData var2 = createSgl(mLinx.nextVarId(), CHR_1, 15000,POS_ORIENT);
+        SvVarData var2 = createSgl(mLinx.nextVarId(), CHR_1, 15000,ORIENT_FWD);
 
         mLinx.AllVariants.add(var);
         mLinx.AllVariants.add(var2);
@@ -182,8 +182,8 @@ public class GermlineDisruptionTest
     public void testSglMappedDup()
     {
         // SGL with mapping to make a DUP around part of a gene
-        SvVarData var = createSgl(mLinx.nextVarId(), CHR_1, 13500, POS_ORIENT);
-        var.getSglMappings().add(new SglMapping(CHR_1, 11500, NEG_ORIENT, "", 1));
+        SvVarData var = createSgl(mLinx.nextVarId(), CHR_1, 13500, ORIENT_FWD);
+        var.getSglMappings().add(new SglMapping(CHR_1, 11500, ORIENT_REV, "", 1));
 
         mLinx.AllVariants.add(var);
 
@@ -192,7 +192,7 @@ public class GermlineDisruptionTest
 
         mDisruptionFinder.findReportableDisruptions(mLinx.AllVariants, mLinx.Analyser.getClusters());
 
-        List<LinxGermlineSv> germlineSVs = Lists.newArrayList();
+        List<LinxGermlineDisruption> germlineSVs = Lists.newArrayList();
         List<DriverCatalog> drivers = Lists.newArrayList();
         List<LinxBreakend> breakends = Lists.newArrayList();
 
@@ -203,8 +203,8 @@ public class GermlineDisruptionTest
         mLinx.clearClustersAndSVs();
 
         // cannot just be around the starting exon(s) of the gene
-        var = createSgl(mLinx.nextVarId(), CHR_1, 13500, POS_ORIENT);
-        var.getSglMappings().add(new SglMapping(CHR_1, 9000, NEG_ORIENT, "", 1));
+        var = createSgl(mLinx.nextVarId(), CHR_1, 13500, ORIENT_FWD);
+        var.getSglMappings().add(new SglMapping(CHR_1, 9000, ORIENT_REV, "", 1));
 
         mLinx.AllVariants.add(var);
 
@@ -233,7 +233,7 @@ public class GermlineDisruptionTest
 
         mDisruptionFinder.findReportableDisruptions(mLinx.AllVariants, mLinx.Analyser.getClusters());
 
-        List<LinxGermlineSv> germlineSVs = Lists.newArrayList();
+        List<LinxGermlineDisruption> germlineSVs = Lists.newArrayList();
         List<DriverCatalog> drivers = Lists.newArrayList();
         List<LinxBreakend> breakends = Lists.newArrayList();
 
@@ -243,7 +243,7 @@ public class GermlineDisruptionTest
     }
 
     private void populateGermlineResults(
-            final List<LinxGermlineSv> germlineSVs, final List<DriverCatalog> drivers, final List<LinxBreakend> breakends)
+            final List<LinxGermlineDisruption> germlineSVs, final List<DriverCatalog> drivers, final List<LinxBreakend> breakends)
     {
         germlineSVs.clear();
         drivers.clear();

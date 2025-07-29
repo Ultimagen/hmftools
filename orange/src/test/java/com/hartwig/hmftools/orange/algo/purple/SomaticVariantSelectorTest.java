@@ -6,8 +6,8 @@ import static org.junit.Assert.assertTrue;
 import java.util.List;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGene;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGeneTestFactory;
+import com.hartwig.hmftools.common.driver.panel.DriverGene;
+import com.hartwig.hmftools.common.driver.panel.DriverGeneTestFactory;
 import com.hartwig.hmftools.datamodel.purple.HotspotType;
 import com.hartwig.hmftools.datamodel.purple.PurpleCodingEffect;
 import com.hartwig.hmftools.datamodel.purple.PurpleVariant;
@@ -35,22 +35,35 @@ public class SomaticVariantSelectorTest
     }
 
     @Test
-    public void canSelectVariantsWithReportedPhaseSet()
+    public void canSelectExonicVariantsWithReportedPhaseSet()
     {
-        PurpleVariant withMatch = TestPurpleVariantFactory.builder().gene("gene").addLocalPhaseSets(1).build();
-        PurpleVariant withoutMatch = TestPurpleVariantFactory.builder().gene("gene").addLocalPhaseSets(2).build();
+        PurpleVariant exonicWithPhaseMatch = TestPurpleVariantFactory.builder()
+                .gene("gene")
+                .canonicalImpact(TestPurpleVariantFactory.impactBuilder().affectedExon(1).build())
+                .addLocalPhaseSets(1)
+                .build();
+        PurpleVariant exonicWithoutPhaseMatch = TestPurpleVariantFactory.builder()
+                .gene("gene")
+                .canonicalImpact(TestPurpleVariantFactory.impactBuilder().affectedExon(1).build())
+                .addLocalPhaseSets(2)
+                .build();
+        PurpleVariant intronicWithPhaseMatch = TestPurpleVariantFactory.builder()
+                .gene("gene")
+                .canonicalImpact(TestPurpleVariantFactory.impactBuilder().affectedExon(null).build())
+                .addLocalPhaseSets(1)
+                .build();
         PurpleVariant withoutPhase = TestPurpleVariantFactory.builder().gene("gene").build();
 
         PurpleVariant withPhase = TestPurpleVariantFactory.builder().addLocalPhaseSets(1).build();
         PurpleVariant noPhase = TestPurpleVariantFactory.builder().localPhaseSets(null).build();
 
         List<PurpleVariant> variants =
-                SomaticVariantSelector.selectInterestingUnreportedVariants(Lists.newArrayList(withMatch, withoutMatch, withoutPhase),
+                SomaticVariantSelector.selectInterestingUnreportedVariants(Lists.newArrayList(exonicWithPhaseMatch, exonicWithoutPhaseMatch, intronicWithPhaseMatch, withoutPhase),
                         Lists.newArrayList(withPhase, noPhase),
                         Lists.newArrayList());
 
         assertEquals(1, variants.size());
-        assertTrue(variants.contains(withMatch));
+        assertTrue(variants.contains(exonicWithPhaseMatch));
     }
 
     @Test

@@ -3,10 +3,19 @@ package com.hartwig.hmftools.common.bam;
 import static com.hartwig.hmftools.common.bam.CigarUtils.calcCigarAlignedLength;
 import static com.hartwig.hmftools.common.bam.CigarUtils.getPositionFromReadIndex;
 import static com.hartwig.hmftools.common.bam.CigarUtils.getReadIndexFromPosition;
+import static com.hartwig.hmftools.common.bam.CigarUtils.replaceXwithM;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.INVALID_READ_INDEX;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_POSITION;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.getFivePrimeUnclippedPosition;
+import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_1;
+import static com.hartwig.hmftools.common.test.SamRecordTestUtils.createSamRecord;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+
+import static htsjdk.samtools.CigarOperator.M;
+import static htsjdk.samtools.CigarOperator.S;
+import static htsjdk.samtools.CigarOperator.X;
 
 import java.util.List;
 
@@ -177,5 +186,66 @@ public class CigarUtilsTest
 
         readIndex = getPositionFromReadIndex(100, cigarElements, 35, false, true)[0];
         assertEquals(125, readIndex);
+    }
+    
+    @Test
+    public void testClippedPositions()
+    {
+        String readId = "READ_01";
+        String readBases = "";
+
+        SAMRecord read = createSamRecord(readId, CHR_1, 100, readBases, "100M", CHR_1, 200,
+                false, false, null);
+
+        int ucPos = getFivePrimeUnclippedPosition(read);
+        assertEquals(100, ucPos);
+
+        read = createSamRecord(readId, CHR_1, 100, readBases, "5S95M", CHR_1, 200,
+                false, false, null);
+
+        ucPos = getFivePrimeUnclippedPosition(read);
+        assertEquals(95, ucPos);
+
+        read = createSamRecord(readId, CHR_1, 100, readBases, "5S80M15S", CHR_1, 200,
+                true, false, null);
+
+        ucPos = getFivePrimeUnclippedPosition(read);
+        assertEquals(194, ucPos);
+    }
+
+    @Test
+    public void testReplaceXwithMNoOp()
+    {
+        List<CigarElement> cigarElements = Lists.newArrayList(new CigarElement(10, M));
+        List<CigarElement> newCigarElements = replaceXwithM(cigarElements);
+
+        assertNull(newCigarElements);
+    }
+
+    @Test
+    public void testReplaceXwithMNoMerge()
+    {
+        List<CigarElement> cigarElements = Lists.newArrayList(new CigarElement(10, X));
+        List<CigarElement> newCigarElements = replaceXwithM(cigarElements);
+        List<CigarElement> expectedNewCigarElements = Lists.newArrayList(new CigarElement(10, M));
+
+        assertEquals(expectedNewCigarElements, newCigarElements);
+    }
+
+    @Test
+    public void testReplaceXwithMWithMerge()
+    {
+        List<CigarElement> cigarElements = Lists.newArrayList(
+                new CigarElement(5, M),
+                new CigarElement(10, X),
+                new CigarElement(6, M),
+                new CigarElement(2, S));
+
+        List<CigarElement> newCigarElements = replaceXwithM(cigarElements);
+        List<CigarElement> expectedNewCigarElements = Lists.newArrayList(
+                new CigarElement(21, M),
+                new CigarElement(2, S));
+
+        assertEquals(expectedNewCigarElements, newCigarElements);
     }
 }

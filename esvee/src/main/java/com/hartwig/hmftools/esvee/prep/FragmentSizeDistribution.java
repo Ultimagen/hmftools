@@ -3,14 +3,16 @@ package com.hartwig.hmftools.esvee.prep;
 import static java.lang.Math.abs;
 import static java.lang.Math.floor;
 import static java.lang.Math.max;
-import static java.lang.Math.pow;
 import static java.lang.Math.round;
-import static java.lang.Math.sqrt;
+import static java.lang.String.format;
 
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.MATE_CIGAR_ATTRIBUTE;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.NUM_MUTATONS_ATTRIBUTE;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.inferredInsertSize;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.mateNegativeStrand;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.common.FragmentLengthBounds.INVALID;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FRAG_LENGTH_1_STD_DEV_PERCENTILE;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FRAG_LENGTH_DIST_MAX_LENGTH;
@@ -18,8 +20,6 @@ import static com.hartwig.hmftools.esvee.prep.PrepConstants.FRAG_LENGTH_DIST_MIN
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FRAG_LENGTH_DIST_PERCENTILE;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FRAG_LENGTH_DIST_SAMPLE_SIZE;
 import static com.hartwig.hmftools.esvee.prep.types.WriteType.FRAGMENT_LENGTH_DIST;
-
-import static htsjdk.samtools.CigarOperator.M;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -32,12 +32,11 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.bam.BamSlicer;
-import com.hartwig.hmftools.common.utils.TaskExecutor;
+import com.hartwig.hmftools.common.perf.TaskExecutor;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.esvee.common.FragmentLengthBounds;
 import com.hartwig.hmftools.esvee.prep.types.LengthFrequency;
 
-import htsjdk.samtools.CigarOperator;
 import htsjdk.samtools.SAMRecord;
 import htsjdk.samtools.SamReader;
 import htsjdk.samtools.SamReaderFactory;
@@ -47,12 +46,14 @@ public class FragmentSizeDistribution
     private final PrepConfig mConfig;
     private final List<LengthFrequency> mLengthFrequencies;
     private int mMaxReadLength;
-    
+    private boolean mHasPairedReads;
+
     public FragmentSizeDistribution(final PrepConfig config)
     {
         mConfig = config;
         mLengthFrequencies = Lists.newArrayList();
         mMaxReadLength = 0;
+        mHasPairedReads = false;
     }
     
     public void run()
@@ -76,7 +77,7 @@ public class FragmentSizeDistribution
 
         List<ChromosomeTask> chrTasks = sampledChromosomes.stream().map(x -> new ChromosomeTask(x)).collect(Collectors.toList());
 
-        final List<Callable> callableList = chrTasks.stream().collect(Collectors.toList());
+        final List<Callable<Long>> callableList = chrTasks.stream().collect(Collectors.toList());
         boolean validExecution = TaskExecutor.executeTasks(callableList, mConfig.Threads);
 
         if(!validExecution)
@@ -87,26 +88,30 @@ public class FragmentSizeDistribution
         {
             mergeDistributions(mLengthFrequencies, chrTask.lengthFrequencies());
             mMaxReadLength = max(mMaxReadLength, chrTask.maxReadLength());
+            mHasPairedReads |= chrTask.hasPairedRead();
         }
 
-        SV_LOGGER.info("maxReadLength({})", mMaxReadLength);
+        SV_LOGGER.info("maxReadLength({}) {}", mMaxReadLength, !mHasPairedReads ? "unpaired reads" : "");
 
-        if(mLengthFrequencies.isEmpty())
+        if(!mLengthFrequencies.isEmpty())
+        {
+            int minLength = mLengthFrequencies.get(0).Length;
+            int maxLength = mLengthFrequencies.get(mLengthFrequencies.size() - 1).Length;
+
+            SV_LOGGER.debug("fragment size distribution complete: min({}) max({})", minLength, maxLength);
+        }
+        else
         {
             SV_LOGGER.debug("no fragment lengths recorded");
-            return;
+
         }
-
-        int minLength = mLengthFrequencies.get(0).Length;
-        int maxLength = mLengthFrequencies.get(mLengthFrequencies.size() - 1).Length;
-
-        SV_LOGGER.debug("fragment size distribution complete: min({}) max({})", minLength, maxLength);
 
         if(mConfig.WriteTypes.contains(FRAGMENT_LENGTH_DIST))
             writeDistribution();
     }
 
     public int maxReadLength() { return mMaxReadLength; }
+    public boolean hasPairedReads() { return mHasPairedReads; }
 
     public FragmentLengthBounds calculateFragmentLengthBounds() { return calculateFragmentLengthBounds(mLengthFrequencies); }
 
@@ -116,7 +121,6 @@ public class FragmentSizeDistribution
             return INVALID;
 
         int totalFragments = lengthFrequencies.stream().mapToInt(x -> x.Frequency).sum();
-        long lengthCountTotal = lengthFrequencies.stream().mapToInt(x -> x.Frequency * x.Length).sum();
         int cumulativeTotal = 0;
         int requiredMinTotal = (int)floor(totalFragments * (1 - FRAG_LENGTH_DIST_PERCENTILE));
         int requiredStdDevTotal = (int)floor(totalFragments * FRAG_LENGTH_1_STD_DEV_PERCENTILE);
@@ -195,7 +199,7 @@ public class FragmentSizeDistribution
         }
     }
 
-    private class ChromosomeTask implements Callable
+    private class ChromosomeTask implements Callable<Long>
     {
         private final String mChromosome;
         private int mProcessedReads;
@@ -204,12 +208,14 @@ public class FragmentSizeDistribution
         private final SamReader mSamReader;
         private final List<LengthFrequency> mLengthFrequencies;
         private int mMaxReadLength;
+        private boolean mHasPairedReads;
 
         public ChromosomeTask(final String chromosome)
         {
             mChromosome = chromosome;
             mProcessedReads = 0;
             mMaxReadLength = 0;
+            mHasPairedReads = false;
 
             // only run on the first sample if more than 1 are loaded
             mSamReader = SamReaderFactory.makeDefault().referenceSequence(new File(mConfig.RefGenomeFile)).open(new File(mConfig.bamFile()));
@@ -220,13 +226,26 @@ public class FragmentSizeDistribution
 
         public List<LengthFrequency> lengthFrequencies() { return mLengthFrequencies; }
         public int maxReadLength() { return mMaxReadLength; }
+        public boolean hasPairedRead() { return mHasPairedReads; }
 
         @Override
         public Long call()
         {
             // slice a fixed region from each chromosome
-            ChrBaseRegion region = !mConfig.SpecificChrRegions.Regions.isEmpty() ?
-                mConfig.SpecificChrRegions.Regions.get(0) : new ChrBaseRegion(mChromosome, 1_000_000, 10_000_000);
+
+            ChrBaseRegion region;
+
+            if(!mConfig.SpecificChrRegions.Regions.isEmpty())
+            {
+                region = mConfig.SpecificChrRegions.Regions.stream().filter(x -> x.Chromosome.equals(mChromosome)).findFirst().orElse(null);
+
+                if(region == null)
+                    return (long)1;
+            }
+            else
+            {
+                region = new ChrBaseRegion(mChromosome, 1_000_000, 10_000_000);
+            }
 
             mBamSlicer.slice(mSamReader, region, this::processBamRead);
 
@@ -240,6 +259,7 @@ public class FragmentSizeDistribution
                 return;
 
             mMaxReadLength = max(mMaxReadLength, record.getReadBases().length);
+            mHasPairedReads |= record.getReadPairedFlag();
 
             ++mProcessedReads;
 
@@ -255,15 +275,35 @@ public class FragmentSizeDistribution
 
         private boolean isCandidateRecord(final SAMRecord record)
         {
-            boolean isPaired = record.getReadPairedFlag();
+            if(record.getDuplicateReadFlag())
+                return false;
 
-            if(isPaired)
+            int fragmentLength = abs(inferredInsertSize(record));
+            if(fragmentLength > FRAG_LENGTH_DIST_MAX_LENGTH)
+                return false;
+
+            int readLength = record.getReadBases().length;
+
+            if(!record.getReadPairedFlag() && fragmentLength == 0)
+                fragmentLength = readLength;
+
+            if(fragmentLength < readLength)
+                return false;
+
+            String alignedCigar = format("%dM", readLength);
+
+            // only fully aligned reads
+            if(!record.getCigarString().equals(alignedCigar))
+                return false;
+
+            // without too many mismatches
+            Integer nmCount = record.getIntegerAttribute(NUM_MUTATONS_ATTRIBUTE);
+            if(nmCount != null && nmCount.intValue() > 2)
+                return false;
+
+            if(record.getReadPairedFlag())
             {
                 if(record.getSecondOfPairFlag())
-                    return false;
-
-                int fragmentLength = abs(record.getInferredInsertSize());
-                if(fragmentLength > FRAG_LENGTH_DIST_MAX_LENGTH)
                     return false;
 
                 // ignore translocations and inversions
@@ -275,18 +315,19 @@ public class FragmentSizeDistribution
 
                 if(record.isSecondaryOrSupplementary())
                     return false;
-            }
 
-            // only fully aligned reads
-            if(record.getCigar().getCigarElements().size() != 1 || record.getCigar().getCigarElements().get(0).getOperator() != M)
-                return false;
+                String mateCigar = record.getStringAttribute(MATE_CIGAR_ATTRIBUTE);
+
+                if(mateCigar != null && !mateCigar.equals(alignedCigar))
+                    return false;
+            }
 
             return true;
         }
 
         private void addFragmentLength(final SAMRecord record)
         {
-            int fragmentLength = getLengthBucket(abs(record.getInferredInsertSize()));
+            int fragmentLength = getLengthBucket(abs(inferredInsertSize(record)));
 
             if(fragmentLength <= 0)
                 return;
@@ -345,7 +386,11 @@ public class FragmentSizeDistribution
 
             for(LengthFrequency lengthFrequency : mLengthFrequencies)
             {
-                writer.write(String.format("%d\t%d", lengthFrequency.Length, lengthFrequency.Frequency));
+                // cap any fragmemt distribution entry at the observed read length to avoid the use of trimmed fragments impacting it
+                if(mHasPairedReads &&  mMaxReadLength > 0 && lengthFrequency.Length < mMaxReadLength)
+                    continue;
+
+                writer.write(format("%d\t%d", lengthFrequency.Length, lengthFrequency.Frequency));
                 writer.newLine();
             }
 
@@ -380,6 +425,5 @@ public class FragmentSizeDistribution
             SV_LOGGER.error("failed to read fragment length file: {}", e.toString());
             return INVALID;
         }
-
     }
 }

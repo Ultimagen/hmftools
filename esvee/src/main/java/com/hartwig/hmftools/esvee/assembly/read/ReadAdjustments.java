@@ -1,70 +1,23 @@
 package com.hartwig.hmftools.esvee.assembly.read;
 
-import static com.hartwig.hmftools.esvee.AssemblyConstants.INDEL_TO_SC_MAX_SIZE_SOFTCLIP;
-import static com.hartwig.hmftools.esvee.AssemblyConstants.INDEL_TO_SC_MIN_SIZE_SOFTCLIP;
-import static com.hartwig.hmftools.esvee.AssemblyConstants.LOW_BASE_TRIM_PERC;
-import static com.hartwig.hmftools.esvee.AssemblyConstants.POLY_G_TRIM_LENGTH;
-import static com.hartwig.hmftools.esvee.common.SvConstants.LOW_BASE_QUAL_THRESHOLD;
+import static java.lang.Math.min;
+
+import static com.hartwig.hmftools.common.sv.LineElements.LINE_BASE_A;
+import static com.hartwig.hmftools.common.sv.LineElements.LINE_BASE_T;
+import static com.hartwig.hmftools.common.sv.LineElements.LINE_POLY_AT_REQ;
+import static com.hartwig.hmftools.common.sv.LineElements.LINE_POLY_AT_TEST_LEN;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.LOW_BASE_TRIM_PERC;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.POLY_G_TRIM_LENGTH;
+import static com.hartwig.hmftools.esvee.assembly.LineUtils.hasLineTail;
+import static com.hartwig.hmftools.esvee.common.CommonUtils.belowMinQual;
 import static com.hartwig.hmftools.esvee.assembly.types.BaseType.G;
 import static com.hartwig.hmftools.esvee.assembly.types.BaseType.C;
 
-import static htsjdk.samtools.CigarOperator.M;
-
-import htsjdk.samtools.CigarElement;
-import htsjdk.samtools.CigarOperator;
-
 public final class ReadAdjustments
 {
-    public static boolean convertEdgeIndelsToSoftClip(final Read read)
-    {
-        return convertEdgeIndelsToSoftClip(read, INDEL_TO_SC_MIN_SIZE_SOFTCLIP, INDEL_TO_SC_MAX_SIZE_SOFTCLIP);
-    }
-
-    public static boolean convertEdgeIndelsToSoftClip(final Read read, final int minIndelLength, final int maxIndelLength)
-    {
-        if(read.cigarElements().size() < 3)
-            return false;
-
-        int leftSoftClipLength = calcIndelToSoftClipLength(
-                read.cigarElements().get(0), read.cigarElements().get(1), read.cigarElements().get(2),
-                minIndelLength, maxIndelLength);
-
-        int lastIndex = read.cigarElements().size() - 1;
-
-        int rightSoftClipLength = calcIndelToSoftClipLength(
-                read.cigarElements().get(lastIndex), read.cigarElements().get(lastIndex - 1), read.cigarElements().get(lastIndex - 2),
-                minIndelLength, maxIndelLength);
-
-        if(leftSoftClipLength > 0 || rightSoftClipLength > 0)
-        {
-            read.setIndelUnclippedBounds(leftSoftClipLength, rightSoftClipLength);
-            return true;
-        }
-
-        return false;
-    }
-
-    private static int calcIndelToSoftClipLength(
-            final CigarElement edge, final CigarElement inside, final CigarElement next,
-            final int minIndelLength, final int maxIndelLength)
-    {
-        if(edge.getOperator() != M)
-            return 0;
-
-        if(!inside.getOperator().isIndel())
-            return 0;
-
-        if(next.getOperator() != M)
-            return 0;
-
-        if(inside.getLength() < minIndelLength || inside.getLength() > maxIndelLength)
-            return 0;
-
-        return inside.getOperator() != CigarOperator.D ? edge.getLength() + inside.getLength() : edge.getLength();
-    }
-
     public static boolean trimPolyGSequences(final Read read)
     {
+        // poly-G may be trimmed from the 3' read end
         int trailingGCount = 0;
 
         if(read.positiveStrand())
@@ -96,7 +49,29 @@ public final class ReadAdjustments
         return true;
     }
 
-    public static boolean trimLowQualBases(final Read read)
+    public static void markLineSoftClips(final Read read)
+    {
+        for(int i = 0; i <= 1; ++i)
+        {
+            boolean fromStart = (i == 0);
+            int scBaseCount = fromStart ? read.leftClipLength() : read.rightClipLength();
+
+            if(scBaseCount == 0)
+                continue;
+
+            byte lineBase = fromStart ? LINE_BASE_A : LINE_BASE_T;
+
+            int softClipIndex = fromStart ? scBaseCount - 1 : read.basesLength() - scBaseCount;
+
+            if(hasLineTail(read.getBases(), softClipIndex, fromStart, lineBase))
+            {
+                read.markLineTail();
+                return;
+            }
+        }
+    }
+
+    public static boolean trimLowQualSoftClipBases(final Read read)
     {
         boolean fromStart = read.negativeStrand();
         int scBaseCount = fromStart ? read.leftClipLength() : read.rightClipLength();
@@ -104,19 +79,100 @@ public final class ReadAdjustments
         if(scBaseCount == 0)
             return false;
 
-        int baseIndex = fromStart ? 0 : read.basesLength() - 1;
+        // first establish the 5' end of the soft-clip satisfies LINE criteria
+        int lineExclusionLength = 0;
 
-        int lowQualCount = 0;
-        int lastLowQualPercIndex = 0;
-
-        for(int i = 1; i <= scBaseCount; ++i)
+        if(scBaseCount >= LINE_POLY_AT_REQ)
         {
-            if(read.getBaseQuality()[baseIndex] < LOW_BASE_QUAL_THRESHOLD)
-            {
-                lowQualCount++;
+            int scIndexStart, scIndexEnd;
+            int lineTestLength = min(scBaseCount, LINE_POLY_AT_TEST_LEN);
 
-                if(lowQualCount / (double)i >= LOW_BASE_TRIM_PERC)
-                    lastLowQualPercIndex = i;
+            if(fromStart)
+            {
+                scIndexEnd = scBaseCount - 1;
+                scIndexStart = scIndexEnd - lineTestLength + 1;
+            }
+            else
+            {
+                scIndexStart = read.basesLength() - scBaseCount;
+                scIndexEnd = scIndexStart + lineTestLength - 1;
+            }
+
+            byte lineBase = fromStart ? LINE_BASE_A : LINE_BASE_T;
+
+            if(read.hasLineTail())
+            {
+                lineExclusionLength = lineTestLength;
+
+                // find the outermost index for the observed line base
+                int baseIndex = fromStart ? scIndexStart : scIndexEnd;
+                int baseCheck = lineTestLength - LINE_POLY_AT_REQ;
+
+                while(baseCheck > 0)
+                {
+                    if(read.getBases()[baseIndex] != lineBase)
+                        --lineExclusionLength;
+
+                    if(fromStart)
+                        ++baseIndex;
+                    else
+                        --baseIndex;
+
+                    --baseCheck;
+                }
+            }
+        }
+
+        int readIndexStart, readIndexEnd;
+
+        int scCheckLength = scBaseCount - lineExclusionLength;
+
+        if(fromStart)
+        {
+            readIndexStart = 0;
+            readIndexEnd = readIndexStart + scCheckLength - 1;
+        }
+        else
+        {
+            readIndexEnd = read.basesLength() - 1;
+            readIndexStart = readIndexEnd - scCheckLength + 1;
+
+        }
+
+        int trimCount = findLowBaseQualTrimCount(read, readIndexStart, readIndexEnd);
+
+        if(trimCount <= 0)
+            return false;
+
+        read.trimBases(trimCount, fromStart);
+        return true;
+    }
+
+    public static int findLowBaseQualTrimCount(final Read read, int readIndexStart, int readIndexEnd)
+    {
+        boolean fromStart = read.negativeStrand();
+
+        double lowestScore = 0;
+        double currentScore = 0;
+        int lastLowestScoreIndex = -1;
+
+        int baseIndex = fromStart ? readIndexStart : readIndexEnd;
+
+        while(baseIndex >= readIndexStart && baseIndex <= readIndexEnd)
+        {
+            if(belowMinQual(read.getBaseQuality()[baseIndex]))
+            {
+                currentScore -= LOW_QUAL_SCORE;
+
+                if(currentScore <= lowestScore)
+                {
+                    lastLowestScoreIndex = baseIndex;
+                    lowestScore = currentScore;
+                }
+            }
+            else
+            {
+                ++currentScore;
             }
 
             if(fromStart)
@@ -125,11 +181,11 @@ public final class ReadAdjustments
                 --baseIndex;
         }
 
-        if(lastLowQualPercIndex == 0)
-            return false;
+        if(lastLowestScoreIndex < 0)
+            return 0;
 
-        read.trimBases(lastLowQualPercIndex, read.negativeStrand());
-
-        return true;
+        return fromStart ? lastLowestScoreIndex - readIndexStart + 1 : readIndexEnd - lastLowestScoreIndex + 1;
     }
+
+    protected static final double LOW_QUAL_SCORE = 1 / LOW_BASE_TRIM_PERC - 1;
 }

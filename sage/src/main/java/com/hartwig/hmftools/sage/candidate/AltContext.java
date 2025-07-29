@@ -7,17 +7,20 @@ import static com.hartwig.hmftools.sage.SageConstants.MIN_SECOND_CANDIDATE_FULL_
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 import com.hartwig.hmftools.sage.common.ReadContextMatcher;
+import com.hartwig.hmftools.sage.common.ReadMatchInfo;
 import com.hartwig.hmftools.sage.common.RefSequence;
-import com.hartwig.hmftools.sage.common.SimpleVariant;
+import com.hartwig.hmftools.common.variant.SimpleVariant;
 import com.hartwig.hmftools.sage.common.VariantReadContext;
-import com.hartwig.hmftools.sage.common.ReadContextMatch;
 import com.hartwig.hmftools.sage.common.VariantReadContextBuilder;
+import com.hartwig.hmftools.sage.filter.FilterConfig;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -29,7 +32,8 @@ public class AltContext extends SimpleVariant
     
     private final List<ReadContextCandidate> mReadContextCandidates;
 
-    private int mRawSupportAlt;
+    private boolean mAboveMinAltSupport;
+    private final Set<String> mUniqueReadIds;
     private ReadContextCandidate mCandidate;
     private AltContext mSecondCandidate; // relevant if has a different read context and sufficient support
 
@@ -39,22 +43,44 @@ public class AltContext extends SimpleVariant
         RefContext = refContext;
 
         mReadContextCandidates = Lists.newArrayList();
+        mUniqueReadIds = Sets.newHashSet();
+        mAboveMinAltSupport = false;
         mCandidate = null;
         mSecondCandidate = null;
     }
 
-    public AltContext(
-            final RefContext refContext, final String ref, final String alt, final ReadContextCandidate candidate, int rawSupportAlt)
+    private AltContext(final RefContext refContext, final String ref, final String alt, final ReadContextCandidate candidate)
     {
         super(refContext.Chromosome, refContext.Position, ref, alt);
         RefContext = refContext;
 
         mCandidate = candidate;
-        mRawSupportAlt = rawSupportAlt;
+        mAboveMinAltSupport = true;
+        mUniqueReadIds = null;
         mReadContextCandidates = null;
     }
 
-    public void incrementAltRead() { mRawSupportAlt++; }
+    public VariantReadContext readContext() { return mCandidate.readContext(); }
+
+    @Override
+    public String ref() { return Ref; }
+
+    @Override
+    public String alt() { return Alt; }
+
+    @Override
+    public String chromosome() { return RefContext.chromosome(); }
+
+    @Override
+    public int position() { return RefContext.position(); }
+
+    public int readContextSupport() { return mCandidate.FullMatch; }
+
+    public int minNumberOfEvents() { return mCandidate.minNumberOfEvents(); }
+
+    public boolean hasValidCandidate() { return mCandidate != null; }
+    public boolean hasSecondCandidate() { return mSecondCandidate != null; }
+    public AltContext secondCandidate() { return mSecondCandidate; }
 
     public void addReadContext(
             int numberOfEvents, final SAMRecord read, final int variantReadIndex,
@@ -66,10 +92,10 @@ public class AltContext extends SimpleVariant
         for(ReadContextCandidate candidate : mReadContextCandidates)
         {
             // compare the core and flanks for the 2 contexts, not allowing for mismatches
-            ReadContextMatch match = candidate.matcher().determineReadMatch(
+            ReadMatchInfo matchInfo = candidate.matcher().determineReadMatchInfo(
                     read.getReadBases(), null, variantReadIndex, true);
 
-            switch(match)
+            switch(matchInfo.MatchType)
             {
                 case FULL:
                     candidate.incrementFull(1, numberOfEvents);
@@ -94,17 +120,19 @@ public class AltContext extends SimpleVariant
                 mReadContextCandidates.add(candidate);
             }
         }
-    }
 
-    public int readContextSupport() { return mCandidate.FullMatch; }
-    public int minNumberOfEvents()
-    {
-        return mCandidate.minNumberOfEvents();
-    }
+        // keep enough reads to test the (unique) raw alt support limit
+        if(!mAboveMinAltSupport && mUniqueReadIds.size() < FilterConfig.HardMinTumorRawAltSupport)
+        {
+            mUniqueReadIds.add(read.getReadName());
 
-    public boolean hasValidCandidate() { return mCandidate != null; }
-    public boolean hasSecondCandidate() { return mSecondCandidate != null; }
-    public AltContext secondCandidate() { return mSecondCandidate; }
+            if(mUniqueReadIds.size() >= FilterConfig.HardMinTumorRawAltSupport)
+            {
+                mAboveMinAltSupport = true;
+                mUniqueReadIds.clear();
+            }
+        }
+    }
 
     public void selectCandidates()
     {
@@ -136,7 +164,7 @@ public class AltContext extends SimpleVariant
                 if(coreStr.contains(topCore) || topCore.contains(coreStr))
                     continue;
 
-                mSecondCandidate = new AltContext(RefContext, Ref, Alt, candidate, mRawSupportAlt);
+                mSecondCandidate = new AltContext(RefContext, Ref, Alt, candidate);
                 break;
             }
         }
@@ -144,21 +172,7 @@ public class AltContext extends SimpleVariant
         mReadContextCandidates.clear();
     }
 
-    public VariantReadContext readContext() { return mCandidate.readContext(); }
-
-    @Override
-    public String ref() { return Ref; }
-
-    @Override
-    public String alt() { return Alt; }
-
-    @Override
-    public String chromosome() { return RefContext.chromosome(); }
-
-    @Override
-    public int position() { return RefContext.position(); }
-
-    public int rawAltSupport() { return mRawSupportAlt; }
+    public boolean aboveMinAltSupport() { return mAboveMinAltSupport; }
 
     @Override
     public boolean equals(@Nullable Object another)

@@ -1,17 +1,20 @@
 package com.hartwig.hmftools.purple.somatic;
 
+import static com.hartwig.hmftools.common.variant.SageVcfTags.parseTincLevel;
 import static com.hartwig.hmftools.purple.PurpleUtils.PPL_LOGGER;
 
 import java.util.List;
+import java.util.Map;
 
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.hla.HlaCommon;
 import com.hartwig.hmftools.common.variant.GenotypeIds;
+import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.common.variant.VariantType;
 import com.hartwig.hmftools.common.variant.VcfFileReader;
-import com.hartwig.hmftools.common.variant.hotspot.VariantHotspot;
+import com.hartwig.hmftools.common.variant.VariantHotspot;
 import com.hartwig.hmftools.purple.PurpleConfig;
 
 import htsjdk.variant.variantcontext.VariantContext;
@@ -25,6 +28,7 @@ public class SomaticVariantCache
 
     private VCFHeader mVcfHeader;
     private GenotypeIds mGenotypeIds;
+    private double mTincLevel;
 
     // counts for plot & chart down-sampling
     private int mIndelCount;
@@ -39,24 +43,37 @@ public class SomaticVariantCache
         mSnpCount = 0;
         mVcfHeader = null;
         mGenotypeIds = null;
+        mTincLevel = 0;
     }
 
-    public boolean hasData() { return !mVariants.isEmpty(); }
+    public boolean hasData() { return mVcfHeader != null; }
     public List<SomaticVariant> variants() { return mVariants; }
     public GenotypeIds genotypeIds() { return mGenotypeIds; }
 
     public int snpCount() { return mSnpCount; }
     public int indelCount() { return mIndelCount; }
+    public double tincLevel() { return mTincLevel; }
 
     public void loadSomatics(final String somaticVcf, final ListMultimap<Chromosome,VariantHotspot> somaticHotspots)
     {
         if(somaticVcf.isEmpty())
             return;
 
+        if(!mConfig.TierQualFilters.isEmpty())
+        {
+            for(Map.Entry<VariantTier,Integer> entry : mConfig.TierQualFilters.entrySet())
+            {
+                PPL_LOGGER.info("applying tier({}) qual({}) filter", entry.getKey(), entry.getValue());
+            }
+        }
+
         final HotspotEnrichment hotspotEnrichment = new HotspotEnrichment(somaticHotspots, true);
 
         VcfFileReader vcfReader = new VcfFileReader(somaticVcf);
         mVcfHeader = vcfReader.vcfHeader();
+
+        // example tag: ##tincLevel=0.950
+        mTincLevel = parseTincLevel(mVcfHeader);
 
         mGenotypeIds = GenotypeIds.fromVcfHeader(mVcfHeader, mConfig.ReferenceId, mConfig.TumorId);
 

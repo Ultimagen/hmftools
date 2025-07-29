@@ -3,9 +3,12 @@ package com.hartwig.hmftools.esvee.assembly.types;
 import static java.lang.Math.abs;
 import static java.lang.String.format;
 
-import static com.hartwig.hmftools.esvee.common.CommonUtils.formSvType;
+import static com.hartwig.hmftools.common.sv.SvUtils.formSvType;
+
+import java.util.List;
 
 import com.hartwig.hmftools.common.sv.StructuralVariantType;
+import com.hartwig.hmftools.esvee.assembly.AssemblyUtils;
 
 public class AssemblyLink
 {
@@ -15,6 +18,7 @@ public class AssemblyLink
 
     private final String mInsertedBases;
     private final String mOverlapBases;
+    private boolean mInsertSite;
 
     public AssemblyLink(
             final JunctionAssembly first, final JunctionAssembly second, final LinkType type,
@@ -25,11 +29,15 @@ public class AssemblyLink
         mType = type;
         mInsertedBases = insertedBases;
         mOverlapBases = overlapBases;
+        mInsertSite = false;
     }
 
     public LinkType type() { return mType; }
     public JunctionAssembly first() { return mFirst; }
     public JunctionAssembly second() { return mSecond; }
+
+    public void markInsertSite() { mInsertSite = true; }
+    public boolean isInsertSite() { return mInsertSite; }
 
     public JunctionAssembly otherAssembly(final JunctionAssembly assembly) { return mFirst == assembly ? mSecond : mFirst; }
 
@@ -52,6 +60,11 @@ public class AssemblyLink
 
     public boolean hasAssembly(final JunctionAssembly assembly) { return mFirst.equals(assembly) || mSecond.equals(assembly); }
 
+    public JunctionAssembly findMatchedAssembly(final JunctionAssembly assembly)
+    {
+        return AssemblyUtils.findMatchingAssembly(List.of(mFirst, mSecond), assembly, true);
+    }
+
     public int length()
     {
         if(mType == LinkType.FACING)
@@ -59,6 +72,25 @@ public class AssemblyLink
 
         return mFirst.junction().Chromosome.equals(mSecond.junction().Chromosome) ?
                 abs(mFirst.junction().Position - mSecond.junction().Position) : 0;
+    }
+
+    public static AssemblyLink swapAssemblies(
+            final AssemblyLink existingLink, final JunctionAssembly originalAssembly, final JunctionAssembly newAssembly)
+    {
+        JunctionAssembly first, second;
+
+        if(existingLink.first() == originalAssembly)
+        {
+            first = newAssembly;
+            second = existingLink.second();
+        }
+        else
+        {
+            first = existingLink.first();
+            second = newAssembly;
+        }
+
+        return new AssemblyLink(first, second, existingLink.type(), existingLink.insertedBases(), existingLink.overlapBases());
     }
 
     public String toString()

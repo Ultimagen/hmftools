@@ -12,11 +12,11 @@ import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
 import static com.hartwig.hmftools.linx.analysis.SvUtilities.getChromosomalArm;
 import static com.hartwig.hmftools.common.purple.ChromosomeArm.P_ARM;
 
-import com.hartwig.hmftools.common.drivercatalog.DriverCatalog;
-import com.hartwig.hmftools.common.drivercatalog.DriverCategory;
-import com.hartwig.hmftools.common.drivercatalog.DriverType;
-import com.hartwig.hmftools.common.drivercatalog.ImmutableDriverCatalog;
-import com.hartwig.hmftools.common.drivercatalog.LikelihoodMethod;
+import com.hartwig.hmftools.common.driver.DriverCatalog;
+import com.hartwig.hmftools.common.driver.DriverCategory;
+import com.hartwig.hmftools.common.driver.DriverType;
+import com.hartwig.hmftools.common.driver.ImmutableDriverCatalog;
+import com.hartwig.hmftools.common.driver.LikelihoodMethod;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
 import com.hartwig.hmftools.common.purple.ImmutableGeneCopyNumber;
 import com.hartwig.hmftools.common.purple.SegmentSupport;
@@ -28,6 +28,12 @@ import com.hartwig.hmftools.linx.types.SvVarData;
 
 public class SvTestUtils
 {
+    public static void setAssembledLinkInfo(final SvVarData var1, boolean useStart1, final SvVarData var2, boolean useStart2)
+    {
+        var1.addAssemblyInfo(useStart1, useStart2 ? var2.getSvData().vcfIdStart() : var2.getSvData().vcfIdEnd());
+        var2.addAssemblyInfo(useStart2, useStart1 ? var1.getSvData().vcfIdStart() : var1.getSvData().vcfIdEnd());
+    }
+
     public static SvVarData createSv(final int varId, final String chrStart, final String chrEnd,
             int posStart, int posEnd, int orientStart, int orientEnd, StructuralVariantType type, final String insertSeq)
     {
@@ -101,14 +107,19 @@ public class SvTestUtils
                 cnStart, cnEnd, cnChgStart, cnChgEnd, ploidy, insertSeq, PASS, "", "");
     }
 
-    public static SvVarData createTestSv(final int varId, final String chrStart, final String chrEnd,
-            int posStart, int posEnd, int orientStart, int orientEnd, StructuralVariantType type,
-            double cnStart, double cnEnd, double cnChgStart, double cnChgEnd, double ploidy, final String insertSeq,
-            final String filter, final String repeatClass, final String repeatType)
+    public static SvVarData createTestSv(
+            final int varId, final String chrStart, final String chrEnd, int posStart, int posEnd, int orientStart, int orientEnd,
+            final StructuralVariantType type, double cnStart, double cnEnd, double cnChgStart, double cnChgEnd, double ploidy,
+            final String insertSeq, final String filter, final String repeatClass, final String repeatType)
     {
+        String vcfIdStart = varId + "_start";
+        String vcfIdEnd = varId + "_end";
+
         StructuralVariantData svData =
                 ImmutableStructuralVariantData.builder()
                         .id(varId)
+                        .vcfIdStart(vcfIdStart)
+                        .vcfIdEnd(vcfIdEnd)
                         .startChromosome(chrStart)
                         .endChromosome(chrEnd)
                         .startPosition(posStart)
@@ -129,7 +140,6 @@ public class SvTestUtils
                         .insertSequence(insertSeq)
                         .type(type)
                         .filter(filter)
-                        .imprecise(false)
                         .qualityScore(0.0)
                         .event("")
                         .startTumorVariantFragmentCount(10)
@@ -148,12 +158,6 @@ public class SvTestUtils
                         .inexactHomologyOffsetEnd(0)
                         .startLinkedBy("")
                         .endLinkedBy("")
-                        .vcfId("")
-                        .startRefContext("")
-                        .endRefContext("")
-                        .recovered(false)
-                        .recoveryMethod("")
-                        .recoveryFilter("")
                         .insertSequenceAlignments("")
                         .insertSequenceRepeatClass(repeatClass)
                         .insertSequenceRepeatType(repeatType)
@@ -209,6 +213,7 @@ public class SvTestUtils
                 .transName("")
                 .isCanonical(true)
                 .depthWindowCount(0)
+                .gcContent(1.0)
                 .build();
     }
 

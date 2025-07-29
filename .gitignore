@@ -5,6 +5,10 @@
 .classpath
 .settings/
 .attach_pid*
+.run/
+
+# Ignore vscode project files
+.vscode/
 
 # ignore dependency reduced poms
 dependency-reduced-pom.xml
@@ -26,3 +30,5 @@ patient-db/patient-db-logs/*.log
 .DS_Store
 /patient-db/nb-configuration.xml
 
+# Ignore lsp generated files
+.factorypath

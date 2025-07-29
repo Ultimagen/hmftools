@@ -22,8 +22,8 @@ import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.OUTPUT_ID;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.addOutputOptions;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDirSeparator;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.parseOutputDir;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.addThreadOptions;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.parseThreads;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.addThreadOptions;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.parseThreads;
 import static com.hartwig.hmftools.neo.score.SampleData.loadFromConfig;
 
 import java.util.Arrays;
@@ -42,8 +42,6 @@ public class NeoScorerConfig
     public final String RnaSomaticVcf;
     public final String IsofoxDir;
     public final String PurpleDir;
-    public final String CohortSampleTpmFile;
-    public final String CohortTpmMediansFile;
 
     public final List<SampleData> Samples;
 
@@ -84,9 +82,6 @@ public class NeoScorerConfig
         RnaSomaticVcf = configBuilder.getValue(RNA_SOMATIC_VCF, sampleDataDir);
         OutputDir = configBuilder.hasValue(OUTPUT_DIR) ? parseOutputDir(configBuilder) : sampleDataDir;
         RnaSampleId = configBuilder.getValue(RNA_SAMPLE_ID);
-
-        CohortSampleTpmFile = configBuilder.getValue(COHORT_SAMPLE_TPM_FILE);
-        CohortTpmMediansFile = configBuilder.getValue(COHORT_TPM_MEDIANS_FILE);
 
         LikelihoodThreshold = configBuilder.getDecimal(LIKELIHOOD_THRESHOLD);
         SimilarityThreshold = configBuilder.getDecimal(SIMILARITY_THRESHOLD);
@@ -138,8 +133,11 @@ public class NeoScorerConfig
         configBuilder.addPath(RNA_SOMATIC_VCF, false, "Directory for Purple somatic variant RNA-appended files");
         configBuilder.addConfigItem(RNA_SAMPLE_ID, RNA_SAMPLE_DESC + " in Sage-appended VCF");
         configBuilder.addPath(ISOFOX_DIR_CFG, false, "Directory for Isofox files (Transcript expresion, Neoepitope coverage)");
-        configBuilder.addPath(COHORT_SAMPLE_TPM_FILE, false, "Cohort gene expression matrix");
         configBuilder.addPath(COHORT_TPM_MEDIANS_FILE, false, COHORT_TPM_MEDIANS_FILE_DESC);
+
+        configBuilder.addPath(
+                COHORT_SAMPLE_TPM_FILE, false,
+                "Cohort transcript expression matrix, instead of loading per-sample Isofox transcript data");
 
         configBuilder.addConfigItem(PEPTIDE_LENGTHS, false, "Peptide length min-max, separated by '-', eg 8-12");
 

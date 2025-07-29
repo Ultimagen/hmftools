@@ -2,9 +2,11 @@ package com.hartwig.hmftools.sage.evidence;
 
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_1;
 import static com.hartwig.hmftools.common.test.MockRefGenome.generateRandomBases;
+import static com.hartwig.hmftools.common.test.MockRefGenome.getNextBase;
 import static com.hartwig.hmftools.common.test.SamRecordTestUtils.buildDefaultBaseQuals;
 import static com.hartwig.hmftools.sage.SageConstants.DEFAULT_FLANK_LENGTH;
 import static com.hartwig.hmftools.sage.SageConstants.DEFAULT_MAX_READ_DEPTH;
+import static com.hartwig.hmftools.sage.common.ReadContextMatcher.isSimpleAltMatch;
 import static com.hartwig.hmftools.sage.common.TestUtils.QUALITY_CALCULATOR;
 import static com.hartwig.hmftools.sage.common.TestUtils.READ_ID_GENERATOR;
 import static com.hartwig.hmftools.sage.common.TestUtils.REF_BASES_200;
@@ -14,21 +16,30 @@ import static com.hartwig.hmftools.sage.common.TestUtils.TEST_SAMPLE;
 import static com.hartwig.hmftools.sage.common.TestUtils.buildCigarString;
 import static com.hartwig.hmftools.sage.common.TestUtils.buildSamRecord;
 import static com.hartwig.hmftools.sage.common.TestUtils.createSamRecord;
-import static com.hartwig.hmftools.sage.common.VariantTier.LOW_CONFIDENCE;
+import static com.hartwig.hmftools.common.variant.VariantTier.LOW_CONFIDENCE;
 import static com.hartwig.hmftools.sage.common.VariantUtils.createReadContext;
 import static com.hartwig.hmftools.sage.common.VariantUtils.createReadCounter;
+import static com.hartwig.hmftools.sage.common.VariantUtils.createSageVariant;
 import static com.hartwig.hmftools.sage.common.VariantUtils.createSimpleVariant;
-import static com.hartwig.hmftools.sage.evidence.SplitReadSegment.formSegment;
+import static com.hartwig.hmftools.sage.filter.SoftFilter.MAX_GERMLINE_VAF;
+import static com.hartwig.hmftools.sage.filter.SoftFilter.MIN_TUMOR_VAF;
+import static com.hartwig.hmftools.sage.pipeline.RegionTask.setNearByIndelStatus;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.util.List;
+
+import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
+import com.hartwig.hmftools.sage.common.ReadContextMatch;
+import com.hartwig.hmftools.sage.common.ReadContextMatcher;
+import com.hartwig.hmftools.sage.common.ReadMatchInfo;
 import com.hartwig.hmftools.sage.common.RegionTaskTester;
 import com.hartwig.hmftools.sage.common.SageVariant;
-import com.hartwig.hmftools.sage.common.SimpleVariant;
+import com.hartwig.hmftools.common.variant.SimpleVariant;
 import com.hartwig.hmftools.sage.common.VariantReadContext;
 import com.hartwig.hmftools.sage.common.VariantReadContextBuilder;
 import com.hartwig.hmftools.sage.pipeline.RegionTask;
@@ -61,7 +72,7 @@ public class MiscEvidenceTest
 
         assertEquals(11, readContext.VarIndex);
         assertTrue(readContext.isValid());
-        assertEquals(readBases.substring(33, 48), readContext.coreStr());
+        assertEquals(readBases.substring(33, 49), readContext.coreStr());
 
         ReadContextCounter readCounter = new ReadContextCounter(
                 0, readContext, LOW_CONFIDENCE,
@@ -189,14 +200,86 @@ public class MiscEvidenceTest
 
         readContextCounter.processRead(altRead, 1, null);
 
-        assertEquals(37, readContextCounter.qualCounters().altBaseQualityTotal());
+        assertEquals(37, readContextCounter.qualCounters().altRecalibratedBaseQualityTotal());
 
         // min rather than average is used
         altRead.getBaseQualities()[readVarIndex] = 11;
 
         readContextCounter.processRead(altRead, 1, null);
 
-        assertEquals(48, readContextCounter.qualCounters().altBaseQualityTotal());
+        assertEquals(48, readContextCounter.qualCounters().altRecalibratedBaseQualityTotal());
+    }
+
+    @Test
+    public void testLowQualMatchTypes()
+    {
+        int position = 100;
+
+        VariantReadContext readContext = createReadContext(position, "A", "G");
+
+        // test reads with low-qual mismatches
+        String refBases = readContext.refBases();
+        refBases = refBases.substring(0, 1) + getNextBase(refBases.charAt(1)) + refBases.substring(2);
+
+        String extraReadBases = REF_BASES_200.substring(0, 10);
+        String readRefBases = extraReadBases + readContext.leftFlankStr() + refBases + readContext.rightFlankStr() + extraReadBases;
+        String readCigar = buildCigarString(readRefBases.length());
+        int readVarIndex = extraReadBases.length() + readContext.VarIndex;
+        int readPosStart = position - readVarIndex;
+
+        SAMRecord refRead = createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, readPosStart, readRefBases, readCigar);
+        int lowQualIndex = extraReadBases.length() + readContext.leftFlankLength() + 1;
+
+        ReadContextMatcher readContextMatcher = new ReadContextMatcher(readContext, true, false);
+
+        refRead.getBaseQualities()[lowQualIndex] = 10;
+        ReadMatchInfo matchInfo = readContextMatcher.determineReadMatchInfo(refRead, readVarIndex);
+
+        assertEquals(ReadContextMatch.REF, matchInfo.MatchType);
+        assertFalse(matchInfo.ExactMatch);
+
+        String altBases = readContext.readBases();
+        altBases = altBases.substring(0, 11) + getNextBase(altBases.charAt(11)) + altBases.substring(12);
+        String altReadBases = extraReadBases + altBases + extraReadBases;
+
+        SAMRecord altRead = createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, readPosStart, altReadBases, readCigar);
+
+        altRead.getBaseQualities()[lowQualIndex] = 10;
+        matchInfo = readContextMatcher.determineReadMatchInfo(altRead, readVarIndex);
+
+        assertEquals(ReadContextMatch.FULL, matchInfo.MatchType);
+        assertFalse(matchInfo.ExactMatch);
+
+        Boolean simpleMatch = isSimpleAltMatch(readContext.variant(), altRead, readVarIndex);
+        assertNotNull(simpleMatch);
+        assertTrue(simpleMatch);
+
+        // mismatch in each flank
+        altBases = readContext.readBases();
+        altBases = altBases.substring(0, 5) + getNextBase(altBases.charAt(5)) + altBases.substring(6);
+        altReadBases = extraReadBases + altBases + extraReadBases;
+
+        altRead = createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, readPosStart, altReadBases, readCigar);
+
+        lowQualIndex = extraReadBases.length() + 5;
+        altRead.getBaseQualities()[lowQualIndex] = 10;
+        matchInfo = readContextMatcher.determineReadMatchInfo(altRead, readVarIndex);
+
+        assertEquals(ReadContextMatch.FULL, matchInfo.MatchType);
+        assertFalse(matchInfo.ExactMatch);
+
+        altBases = readContext.readBases();
+        altBases = altBases.substring(0, 16) + getNextBase(altBases.charAt(16)) + altBases.substring(17);
+        altReadBases = extraReadBases + altBases + extraReadBases;
+
+        altRead = createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, readPosStart, altReadBases, readCigar);
+
+        lowQualIndex = extraReadBases.length() + 16;
+        altRead.getBaseQualities()[lowQualIndex] = 10;
+        matchInfo = readContextMatcher.determineReadMatchInfo(altRead, readVarIndex);
+
+        assertEquals(ReadContextMatch.FULL, matchInfo.MatchType);
+        assertFalse(matchInfo.ExactMatch);
     }
 
     @Test
@@ -216,23 +299,26 @@ public class MiscEvidenceTest
         String readBases1 = REF_BASES_200.substring(30, 50) + "A" + REF_BASES_200.substring(51, 70);
         String readCigar = "40M";
         SAMRecord read1 = buildSamRecord(30, readCigar, readBases1, buildDefaultBaseQuals(readBases1.length()));
+        SAMRecord read1Clone = buildSamRecord(30, readCigar, readBases1, buildDefaultBaseQuals(readBases1.length()));
 
         String readBases2 = REF_BASES_200.substring(30, 48) + REF_BASES_200.substring(52, 70); // 4-base delete
         readCigar = "18M4D17M";
         SAMRecord read2 = buildSamRecord(30, readCigar, readBases2, buildDefaultBaseQuals(readBases2.length()));
+        SAMRecord read2Clone = buildSamRecord(30, readCigar, readBases2, buildDefaultBaseQuals(readBases2.length()));
 
         String readBases3 = REF_BASES_200.substring(40, 55) + "G" + REF_BASES_200.substring(56, 80);
         readCigar = "40M";
         SAMRecord read3 = buildSamRecord(40, readCigar, readBases3, buildDefaultBaseQuals(readBases3.length()));
+        SAMRecord read3Clone = buildSamRecord(40, readCigar, readBases3, buildDefaultBaseQuals(readBases3.length()));
 
         tester.TumorSamSlicer.ReadRecords.add(read1);
-        tester.TumorSamSlicer.ReadRecords.add(read1);
+        tester.TumorSamSlicer.ReadRecords.add(read1Clone);
 
         tester.TumorSamSlicer.ReadRecords.add(read2);
-        tester.TumorSamSlicer.ReadRecords.add(read2);
+        tester.TumorSamSlicer.ReadRecords.add(read2Clone);
 
         tester.TumorSamSlicer.ReadRecords.add(read3);
-        tester.TumorSamSlicer.ReadRecords.add(read3);
+        tester.TumorSamSlicer.ReadRecords.add(read3Clone);
 
         // a read beyond the delete but still considered
         String readBases4 = REF_BASES_200.substring(47, 48) + REF_BASES_200.substring(52, 80);
@@ -258,5 +344,48 @@ public class MiscEvidenceTest
         TestCase.assertEquals(2, delRcCounter.readSupportCounts().Full);
         TestCase.assertEquals(7, delRcCounter.readSupportCounts().Total);
         TestCase.assertEquals(7, delRcCounter.depth());
+    }
+
+    @Test
+    public void testNearByIndels()
+    {
+        SageVariant var1 = createSageVariant(90, "A", "C");
+        SageVariant var2 = createSageVariant(100, "A", "C");
+        SageVariant indel1 = createSageVariant(110, "A", "AC");
+        SageVariant var3 = createSageVariant(120, "A", "C");
+        SageVariant var4 = createSageVariant(130, "A", "C");
+
+        List<SageVariant> sageVariants = Lists.newArrayList(var1, var2, indel1, var3, var4);
+
+        setNearByIndelStatus(sageVariants);
+
+        assertFalse(var1.nearIndel());
+        assertTrue(var2.nearIndel());
+        assertTrue(var3.nearIndel());
+        assertFalse(var4.nearIndel());
+
+        var1 = createSageVariant(100, "A", "C");
+        indel1 = createSageVariant(110, "A", "AC");
+        indel1.filters().add(MIN_TUMOR_VAF);
+        var2 = createSageVariant(120, "A", "C");
+
+        sageVariants = Lists.newArrayList(var1, indel1, var2);
+
+        setNearByIndelStatus(sageVariants);
+
+        assertFalse(var1.nearIndel());
+        assertFalse(var2.nearIndel());
+
+        var1 = createSageVariant(100, "A", "C");
+        indel1 = createSageVariant(110, "A", "AC");
+        indel1.filters().add(MAX_GERMLINE_VAF);
+        var2 = createSageVariant(120, "A", "C");
+
+        sageVariants = Lists.newArrayList(var1, indel1, var2);
+
+        setNearByIndelStatus(sageVariants);
+
+        assertTrue(var1.nearIndel());
+        assertTrue(var2.nearIndel());
     }
 }

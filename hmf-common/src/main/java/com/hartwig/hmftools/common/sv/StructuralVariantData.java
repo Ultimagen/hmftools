@@ -9,6 +9,8 @@ import org.jetbrains.annotations.Nullable;
 public abstract class StructuralVariantData
 {
     public abstract int id();
+    public abstract String vcfIdStart();
+    public abstract String vcfIdEnd();
     public abstract String startChromosome();
     public abstract String endChromosome();
     public abstract int startPosition();
@@ -29,7 +31,6 @@ public abstract class StructuralVariantData
     public abstract String insertSequence();
     public abstract StructuralVariantType type();
     public abstract String filter();
-    public abstract boolean imprecise();
     public abstract double qualityScore();
     public abstract String event();
     public abstract int startTumorVariantFragmentCount();
@@ -48,12 +49,6 @@ public abstract class StructuralVariantData
     public abstract int inexactHomologyOffsetEnd();
     public abstract String startLinkedBy();
     public abstract String endLinkedBy();
-    public abstract String vcfId();
-    public abstract boolean recovered();
-    public abstract String recoveryMethod();
-    public abstract String recoveryFilter();
-    public abstract String startRefContext();
-    public abstract String endRefContext();
     public abstract String insertSequenceAlignments();
     public abstract String insertSequenceRepeatClass();
     public abstract String insertSequenceRepeatType();
@@ -67,6 +62,8 @@ public abstract class StructuralVariantData
     {
         return ImmutableStructuralVariantData.builder()
                 .id(svId)
+                .vcfIdStart(getValueNotNull(var.id()))
+                .vcfIdEnd(getValueNotNull(var.mateId()))
                 .startChromosome(var.chromosome(true))
                 .endChromosome(var.end() == null ? "0" : var.chromosome(false))
                 .startPosition(var.position(true).intValue())
@@ -87,7 +84,6 @@ public abstract class StructuralVariantData
                 .insertSequence(var.insertSequence())
                 .type(var.type())
                 .filter(var.filter())
-                .imprecise(var.imprecise())
                 .qualityScore(getValueNotNull(var.qualityScore()))
                 .event(getValueNotNull(var.event()))
                 .startTumorVariantFragmentCount(getValueNotNull(var.start().tumorVariantFragmentCount()))
@@ -106,12 +102,6 @@ public abstract class StructuralVariantData
                 .inexactHomologyOffsetEnd(getValueNotNull(var.start().inexactHomologyOffsetEnd()))
                 .startLinkedBy(getValueNotNull(var.startLinkedBy()))
                 .endLinkedBy(getValueNotNull(var.endLinkedBy()))
-                .vcfId(getValueNotNull(var.id()))
-                .startRefContext(getValueNotNull(var.start().refGenomeContext()))
-                .endRefContext(var.end() == null ? "" : getValueNotNull(var.end().refGenomeContext()))
-                .recovered(var.recovered())
-                .recoveryMethod((getValueNotNull(var.recoveryMethod())))
-                .recoveryFilter(getValueNotNull(var.recoveryFilter()))
                 .insertSequenceAlignments(getValueNotNull(var.insertSequenceAlignments()))
                 .insertSequenceRepeatClass(getValueNotNull(var.insertSequenceRepeatClass()))
                 .insertSequenceRepeatType(getValueNotNull(var.insertSequenceRepeatType()))

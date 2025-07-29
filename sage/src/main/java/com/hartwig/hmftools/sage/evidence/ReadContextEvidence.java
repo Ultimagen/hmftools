@@ -7,12 +7,10 @@ import static java.lang.Math.min;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.readToString;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionsOverlap;
-import static com.hartwig.hmftools.common.region.BaseRegion.positionsWithin;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
+import static com.hartwig.hmftools.sage.evidence.ReadMatchType.NO_ALT_REF_MATCH;
 import static com.hartwig.hmftools.sage.evidence.ReadMatchType.REF_SUPPORT;
-import static com.hartwig.hmftools.sage.evidence.ReadMatchType.ALT_SUPPORT;
-
-import static htsjdk.samtools.CigarOperator.N;
+import static com.hartwig.hmftools.sage.evidence.ReadMatchType.ALT_SUPPORT_EXACT;
 
 import java.util.Collections;
 import java.util.List;
@@ -106,14 +104,17 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
         mVariantPhaser = variantPhaser;
 
         if(mVariantPhaser != null)
-            mVariantPhaser.initialise(regionBounds, mConfig.LogLpsData);
+            mVariantPhaser.initialise(regionBounds, sample);
 
         mRefSequence = new RefSequence(regionBounds, mRefGenome);
 
         BqrRecordMap qrMap = mQualityRecalibrationMap.get(sample);
         QualityCalculator qualityCalculator = new QualityCalculator(mConfig, qrMap, mRefSequence, mRefGenome, mMsiJitterCalcs);
 
-        mReadCounters = mFactory.create(candidates, mConfig, qualityCalculator, sample);
+        List<ReadContextCounter> allReadCounters = mFactory.create(candidates, mConfig, qualityCalculator, sample);
+
+        // read contexts will always be valid for calling, but may be invalid for appending evidence
+        mReadCounters = allReadCounters.stream().filter(x -> x.readContext().isValid()).collect(Collectors.toList());
         mLastCandidateIndex = 0;
 
         mSelectedReadCounters = Lists.newArrayListWithCapacity(mReadCounters.size());
@@ -130,7 +131,7 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
                 readContextCounter.setMaxCandidateDeleteLength(maxCloseDel);
         }
 
-        final SamSlicerInterface samSlicer = samSlicerFactory.getSamSlicer(sample, sliceRegions, false);
+        SamSlicerInterface samSlicer = samSlicerFactory.getSamSlicer(sample, sliceRegions, false);
         samSlicer.slice(this::processReadRecord);
 
         mFragmentSync.emptyCachedReads();
@@ -147,7 +148,7 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
 
         mReadCounters.forEach(x -> x.jitter().setJitterQualFilterState(mMsiJitterCalcs, x));
 
-        return mReadCounters;
+        return allReadCounters;
     }
 
     private List<ChrBaseRegion> buildCandidateRegions(final List<Candidate> candidates)
@@ -246,7 +247,7 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
         int nextIndex = mLastCandidateIndex + 1;
         int prevIndex = mLastCandidateIndex;
 
-        while(prevIndex >= 0 && !mReadCounters.isEmpty())
+        while(prevIndex >= 0 && prevIndex < mReadCounters.size())
         {
             ReadContextCounter readCounter = mReadCounters.get(prevIndex);
 
@@ -316,10 +317,14 @@ public class ReadContextEvidence implements FragmentSyncReadHandler
 
             if(mVariantPhaser != null)
             {
-                if(matchType == ALT_SUPPORT)
+                if(matchType == ALT_SUPPORT_EXACT)
+                {
                     posPhasedCounters.add(readCounter);
-                else if(matchType == REF_SUPPORT)
+                }
+                else if(matchType == REF_SUPPORT || matchType == NO_ALT_REF_MATCH)
+                {
                     negPhasedCounters.add(readCounter);
+                }
             }
         }
 

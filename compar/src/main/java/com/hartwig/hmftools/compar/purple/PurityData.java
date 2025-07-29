@@ -1,8 +1,8 @@
 package com.hartwig.hmftools.compar.purple;
 
 import static com.hartwig.hmftools.compar.common.Category.PURITY;
+import static com.hartwig.hmftools.compar.common.CommonUtils.createMismatchFromDiffs;
 import static com.hartwig.hmftools.compar.common.DiffFunctions.checkDiff;
-import static com.hartwig.hmftools.compar.common.MismatchType.VALUE;
 
 import java.util.List;
 import java.util.Set;
@@ -38,6 +38,7 @@ public class PurityData implements ComparableItem
     protected static final String FLD_MS_STATUS = "MsStatus";
     protected static final String FLD_TMB_STATUS = "TmbStatus";
     protected static final String FLD_TML_STATUS = "TmlStatus";
+    protected static final String FLD_TINC_LEVEL = "TincLevel";
 
     public PurityData(final PurityContext purityContext)
     {
@@ -74,12 +75,18 @@ public class PurityData implements ComparableItem
         values.add(String.format("%s", Purity.microsatelliteStatus()));
         values.add(String.format("%s", Purity.tumorMutationalBurdenStatus()));
         values.add(String.format("%s", Purity.tumorMutationalLoadStatus()));
+        values.add(String.format("%s", Purity.qc().tincLevel()));
 
         return values;
     }
 
     @Override
     public boolean reportable() {
+        return true;
+    }
+
+    @Override
+    public boolean isPass() {
         return true;
     }
 
@@ -91,7 +98,8 @@ public class PurityData implements ComparableItem
     }
 
     @Override
-    public Mismatch findMismatch(final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds)
+    public Mismatch findMismatch(final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds,
+            final boolean includeMatches)
     {
         final PurityData otherPurity = (PurityData) other;
 
@@ -112,7 +120,7 @@ public class PurityData implements ComparableItem
                 diffs, FLD_UNS_CN_SEGS,
                 Purity.qc().unsupportedCopyNumberSegments(), otherPurity.Purity.qc().unsupportedCopyNumberSegments(),thresholds);
 
-        checkDiff(diffs, FLD_SV_TMB, Purity.bestFit().purity(), otherPurity.Purity.bestFit().purity(), thresholds);
+        checkDiff(diffs, FLD_SV_TMB, Purity.svTumorMutationalBurden(), otherPurity.Purity.svTumorMutationalBurden(), thresholds);
 
         checkDiff(diffs, FLD_QC_STATUS, qcStatus(Purity.qc().status()), qcStatus(otherPurity.Purity.qc().status()));
 
@@ -134,7 +142,9 @@ public class PurityData implements ComparableItem
                 diffs, FLD_TML_STATUS,
                 Purity.tumorMutationalLoadStatus().toString(), otherPurity.Purity.tumorMutationalLoadStatus().toString());
 
-        return !diffs.isEmpty() ? new Mismatch(this, other, VALUE, diffs) : null;
+        checkDiff(diffs, FLD_TINC_LEVEL, Purity.qc().tincLevel(), otherPurity.Purity.qc().tincLevel(), thresholds);
+
+        return createMismatchFromDiffs(this, other, diffs, matchLevel, includeMatches);
     }
 
     private static String germlineAberrations(final Set<GermlineAberration> aberrations)

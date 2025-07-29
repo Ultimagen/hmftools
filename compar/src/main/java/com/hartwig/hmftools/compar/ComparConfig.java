@@ -2,8 +2,8 @@ package com.hartwig.hmftools.compar;
 
 import static java.lang.String.format;
 
-import static com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL_OPTION;
-import static com.hartwig.hmftools.common.drivercatalog.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL_OPTION_DESC;
+import static com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL;
+import static com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig.DRIVER_GENE_PANEL_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE_DESC;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.IGNORE_SAMPLE_ID;
@@ -11,12 +11,13 @@ import static com.hartwig.hmftools.common.utils.config.ConfigUtils.SAMPLE_ID_FIL
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.addLoggingOptions;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.addSampleIdFile;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.CSV_DELIM;
+import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileReaderUtils.createFieldsIndexMap;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.OUTPUT_ID;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.addOutputOptions;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.parseOutputDir;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.addThreadOptions;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.parseThreads;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.addThreadOptions;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.parseThreads;
 import static com.hartwig.hmftools.compar.common.Category.ALL_CATEGORIES;
 import static com.hartwig.hmftools.compar.common.Category.DRIVER;
 import static com.hartwig.hmftools.compar.common.Category.GENE_COPY_NUMBER;
@@ -43,8 +44,8 @@ import java.util.Set;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGene;
-import com.hartwig.hmftools.common.drivercatalog.panel.DriverGeneFile;
+import com.hartwig.hmftools.common.driver.panel.DriverGene;
+import com.hartwig.hmftools.common.driver.panel.DriverGeneFile;
 import com.hartwig.hmftools.common.genome.refgenome.GenomeLiftoverCache;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.compar.common.Category;
@@ -60,7 +61,7 @@ public class ComparConfig
 {
     public final List<String> SampleIds;
 
-    public final Map<Category, MatchLevel> Categories;
+    public final Map<Category,MatchLevel> Categories;
 
     public final List<String> SourceNames; // list of sources to compare, eg prod vs pilot, or pipeline_1 vs pipeline_2
 
@@ -78,6 +79,7 @@ public class ComparConfig
     public final String OutputId;
 
     public final boolean WriteDetailed;
+    public final boolean IncludeMatches;
     public final int Threads;
 
     public final GenomeLiftoverCache LiftoverCache;
@@ -86,6 +88,7 @@ public class ComparConfig
     private boolean mIsValid;
 
     // config strings
+    public static final String GERMLINE_SAMPLE = "germline_sample";
     public static final String CATEGORIES = "categories";
     public static final String MATCH_LEVEL = "match_level";
 
@@ -93,6 +96,7 @@ public class ComparConfig
     public static final String THRESHOLDS = "thresholds";
 
     public static final String WRITE_DETAILED_FILES = "write_detailed";
+    public static final String INCLUDE_MATCHES = "include_matches";
     public static final String RESTRICT_TO_DRIVERS = "restrict_to_drivers";
 
     public static final Logger CMP_LOGGER = LogManager.getLogger(ComparConfig.class);
@@ -127,7 +131,8 @@ public class ComparConfig
         }
         else
         {
-            final String[] categoryStrings = configBuilder.getValue(CATEGORIES).split(CSV_DELIM);
+            String itemDelim = categoriesStr.contains(ITEM_DELIM) ? ITEM_DELIM : CSV_DELIM;
+            final String[] categoryStrings = categoriesStr.split(itemDelim);
 
             for(String catStr : categoryStrings)
             {
@@ -143,6 +148,7 @@ public class ComparConfig
         OutputDir = parseOutputDir(configBuilder);
         OutputId = configBuilder.getValue(OUTPUT_ID);
         WriteDetailed = configBuilder.hasFlag(WRITE_DETAILED_FILES);
+        IncludeMatches = configBuilder.hasFlag(INCLUDE_MATCHES);
         Threads = parseThreads(configBuilder);
 
         SourceNames = Lists.newArrayList(REF_SOURCE, NEW_SOURCE);
@@ -172,11 +178,11 @@ public class ComparConfig
         DriverGenes = Sets.newHashSet();
         AlternateTranscriptDriverGenes = Sets.newHashSet();
 
-        if(configBuilder.hasValue(DRIVER_GENE_PANEL_OPTION))
+        if(configBuilder.hasValue(DRIVER_GENE_PANEL))
         {
             try
             {
-                List<DriverGene> driverGenes = DriverGeneFile.read(configBuilder.getValue(DRIVER_GENE_PANEL_OPTION));
+                List<DriverGene> driverGenes = DriverGeneFile.read(configBuilder.getValue(DRIVER_GENE_PANEL));
 
                 for(DriverGene driverGene : driverGenes)
                 {
@@ -213,38 +219,70 @@ public class ComparConfig
 
         if(mapping == null || !mapping.SourceMapping.containsKey(source))
         {
-            CMP_LOGGER.warn("sample({}) source({}) missed mapping", sampleId, source);
             return sampleId;
         }
 
         return mapping.SourceMapping.get(source);
     }
 
+    public String sourceGermlineSampleId(final String source, final String sampleId)
+    {
+        if(!mSampleIdMappings.isEmpty())
+        {
+            SampleIdMapping mapping = mSampleIdMappings.get(sampleId);
+
+            if(mapping != null && mapping.GermlineSourceMapping.containsKey(source))
+            {
+                return mapping.GermlineSourceMapping.get(source);
+            }
+            else if(mapping != null && mapping.GermlineSampleId != null)
+            {
+                return mapping.GermlineSampleId;
+            }
+        }
+        return sourceSampleId(source, sampleId) + "-ref";
+    }
+
     public boolean isValid() { return mIsValid; }
     public boolean singleSample() { return SampleIds.size() == 1; }
     public boolean multiSample() { return SampleIds.size() > 1; }
 
-    private class SampleIdMapping
+    private static class SampleIdMapping
     {
         public final String SampleId;
+        public final String GermlineSampleId;
         public Map<String,String> SourceMapping;
+        public Map<String,String> GermlineSourceMapping;
 
-        public SampleIdMapping(final String sampleId)
+        public SampleIdMapping(final String sampleId, final String germlineSampleId)
         {
             SampleId = sampleId;
+            GermlineSampleId = germlineSampleId;
             SourceMapping = Maps.newHashMap();
+            GermlineSourceMapping = Maps.newHashMap();
         }
     }
 
     private static final String COL_SAMPLE_ID = "SampleId";
+    private static final String COL_GERMLINE_SAMPLE_ID = "GermlineSampleId";
     private static final String COL_REF_SAMPLE_ID = "RefSampleId";
+    private static final String COL_REF_GERMLINE_SAMPLE_ID = "RefGermlineSampleId";
     private static final String COL_NEW_SAMPLE_ID = "NewSampleId";
+    private static final String COL_NEW_GERMLINE_SAMPLE_ID = "NewGermlineSampleId";
 
     private void loadSampleIds(final ConfigBuilder configBuilder)
     {
+        if(configBuilder.hasValue(SAMPLE_ID_FILE) && (configBuilder.hasFlag(SAMPLE) || configBuilder.hasFlag(GERMLINE_SAMPLE)))
+        {
+            CMP_LOGGER.error("when the argument '{}' is set, the arguments '{}' and '{}' should not be set",
+                    SAMPLE_ID_FILE, SAMPLE, GERMLINE_SAMPLE);
+            mIsValid = false;
+            return;
+        }
+
         if(configBuilder.hasValue(SAMPLE))
         {
-            SampleIds.add(configBuilder.getValue(SAMPLE));
+            registerSampleIds(configBuilder.getValue(SAMPLE), configBuilder.getValue(GERMLINE_SAMPLE, null));
             return;
         }
 
@@ -264,8 +302,11 @@ public class ComparConfig
             Map<String,Integer> fieldsIndexMap = createFieldsIndexMap(header, CSV_DELIM);
 
             int sampleIndex = fieldsIndexMap.get(COL_SAMPLE_ID);
+            Integer germlineSampleIndex = fieldsIndexMap.get(COL_GERMLINE_SAMPLE_ID);
             Integer refSampleIndex = fieldsIndexMap.get(COL_REF_SAMPLE_ID);
+            Integer refGermlineSampleIndex = fieldsIndexMap.get(COL_REF_GERMLINE_SAMPLE_ID);
             Integer newSampleIndex = fieldsIndexMap.get(COL_NEW_SAMPLE_ID);
+            Integer newGermlineSampleIndex = fieldsIndexMap.get(COL_NEW_GERMLINE_SAMPLE_ID);
 
             for(String line : lines)
             {
@@ -275,23 +316,13 @@ public class ComparConfig
                 String[] values = line.split(CSV_DELIM, -1);
 
                 String sampleId = values[sampleIndex];
-
-                SampleIds.add(sampleId);
-
+                String germlineSampleId = germlineSampleIndex != null ? values[germlineSampleIndex] : null;
                 String refSampleId = refSampleIndex != null ? values[refSampleIndex] : null;
+                String refGermlineSampleId = refGermlineSampleIndex != null ? values[refGermlineSampleIndex] : null;
                 String newSampleId = newSampleIndex != null ? values[newSampleIndex] : null;
+                String newGermlineSampleId = newGermlineSampleIndex != null ? values[newGermlineSampleIndex] : null;
 
-                if(refSampleId != null || newSampleId != null)
-                {
-                    SampleIdMapping mapping = new SampleIdMapping(sampleId);
-                    mSampleIdMappings.put(sampleId, mapping);
-
-                    if(refSampleId != null && SourceNames.size() >= 1);
-                        mapping.SourceMapping.put(SourceNames.get(0), refSampleId);
-
-                    if(newSampleId != null && SourceNames.size() >= 2)
-                        mapping.SourceMapping.put(SourceNames.get(1), newSampleId);
-                }
+                registerSampleIds(sampleId, germlineSampleId, refSampleId, refGermlineSampleId, newSampleId, newGermlineSampleId);
             }
 
             CMP_LOGGER.info("loaded {} samples from file", SampleIds.size());
@@ -300,6 +331,31 @@ public class ComparConfig
         {
             CMP_LOGGER.error("failed to load sample IDs: {}", e.toString());
         }
+    }
+
+    private void registerSampleIds(final String sampleId, final String germlineSampleId)
+    {
+        registerSampleIds(sampleId, germlineSampleId, null, null, null, null);
+    }
+    
+    private void registerSampleIds(
+            final String sampleId, final String germlineSampleId, final String refSampleId,
+            final String refGermlineSampleId, final String newSampleId, final String newGermlineSampleId)
+    {
+        SampleIds.add(sampleId);
+
+        SampleIdMapping mapping = new SampleIdMapping(sampleId, germlineSampleId);
+        mSampleIdMappings.put(sampleId, mapping);
+
+        if(refSampleId != null && SourceNames.size() >= 1)
+            mapping.SourceMapping.put(SourceNames.get(0), refSampleId);
+        if(newSampleId != null && SourceNames.size() >= 2)
+            mapping.SourceMapping.put(SourceNames.get(1), newSampleId);
+
+        if(refGermlineSampleId != null && SourceNames.size() >= 1)
+            mapping.GermlineSourceMapping.put(SourceNames.get(0), refGermlineSampleId);
+        if(newGermlineSampleId != null && SourceNames.size() >= 2)
+            mapping.GermlineSourceMapping.put(SourceNames.get(1), newGermlineSampleId);
     }
 
     private static String formConfigSourceStr(final String sourceType, final String sourceName)
@@ -371,8 +427,9 @@ public class ComparConfig
                 MATCH_LEVEL, false, "Match level from REPORTABLE (default) or DETAILED", REPORTABLE.toString());
 
         configBuilder.addConfigItem(SAMPLE, SAMPLE_DESC);
+        configBuilder.addConfigItem(GERMLINE_SAMPLE, false, "Sample ID of germline sample if tumor-normal run");
         addSampleIdFile(configBuilder, false);
-        configBuilder.addConfigItem(DRIVER_GENE_PANEL_OPTION, DRIVER_GENE_PANEL_OPTION_DESC);
+        configBuilder.addConfigItem(DRIVER_GENE_PANEL, DRIVER_GENE_PANEL_DESC);
         configBuilder.addConfigItem(THRESHOLDS, "In form: Field,AbsoluteDiff,PercentDiff, separated by ';'");
 
         configBuilder.addConfigItem(formConfigSourceStr(DB_SOURCE, REF_SOURCE), false, "Database configurations for reference data");
@@ -381,6 +438,7 @@ public class ComparConfig
         registerConfig(configBuilder);
 
         configBuilder.addFlag(WRITE_DETAILED_FILES, "Write per-type details files");
+        configBuilder.addFlag(INCLUDE_MATCHES, "Also write matches to output file(s)");
         configBuilder.addFlag(RESTRICT_TO_DRIVERS, "Restrict any comparison involving genes to driver gene panel");
         configBuilder.addFlag(REQUIRES_LIFTOVER, "Lift over ref positions from v37 to v 38");
 
@@ -399,6 +457,7 @@ public class ComparConfig
         OutputDir = null;
         OutputId = "";
         WriteDetailed = false;
+        IncludeMatches = false;
         Threads = 0;
 
         DbConnections = Maps.newHashMap();

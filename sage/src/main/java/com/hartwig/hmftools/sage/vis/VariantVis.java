@@ -3,6 +3,7 @@ package com.hartwig.hmftools.sage.vis;
 import static java.lang.Math.abs;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
+import static java.lang.Math.round;
 import static java.lang.String.format;
 import static java.util.Map.entry;
 
@@ -18,9 +19,12 @@ import static com.hartwig.hmftools.common.bam.SamRecordUtils.getMateAlignmentEnd
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.getOrientationString;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.AVG_RAW_BASE_QUAL;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.MIN_COORDS_COUNT;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.UMI_TYPE_COUNTS;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.AVG_BASE_QUAL;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
 import static com.hartwig.hmftools.sage.common.NumberEvents.rawNM;
-import static com.hartwig.hmftools.sage.vcf.VcfTags.AVG_BASE_QUAL;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.AVG_MAP_QUALITY;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.FRAG_STRAND_BIAS;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_STRAND_BIAS;
@@ -80,13 +84,13 @@ import com.hartwig.hmftools.common.genome.refgenome.RefGenomeCoordinates;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource;
 import com.hartwig.hmftools.common.region.BaseRegion;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
+import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.sage.SageConfig;
 import com.hartwig.hmftools.sage.common.ReadContextMatch;
 import com.hartwig.hmftools.sage.common.VariantReadContext;
 import com.hartwig.hmftools.sage.common.RefSequence;
 import com.hartwig.hmftools.sage.common.SageVariant;
-import com.hartwig.hmftools.sage.common.SimpleVariant;
-import com.hartwig.hmftools.sage.common.VariantTier;
+import com.hartwig.hmftools.common.variant.SimpleVariant;
 import com.hartwig.hmftools.sage.evidence.ReadContextCounter;
 import com.hartwig.hmftools.sage.quality.QualityScores;
 import com.hartwig.hmftools.sage.sync.FragmentData;
@@ -269,8 +273,13 @@ public class VariantVis
                 header(JQUERY_SCRIPT),
                 body(
                         firstVis.renderVariantInfo(
-                                sageVariant.totalQuality(),
-                                firstCounter.readEdgeDistance().maxAltDistanceFromEdge(), sageVariant.filtersStringSet()),
+                                (int)(-10*firstCounter.logTqp()),
+                                Math.round((double)round(firstCounter.mapQualFactor() * 10d) / 10d),
+                                sageVariant.nearIndel(),
+                                firstCounter.readEdgeDistance().maxAltDistanceFromEdge(),
+                                firstCounter.readEdgeDistance().avgDistanceFromEdge(),
+                                firstCounter.readEdgeDistance().avgAltDistanceFromEdge(),
+                                sageVariant.filtersStringSet()),
                         verticalSpacer,
                         renderSampleInfoTable(tumorReadCounters, refReadCounters, tumorIds, referenceIds),
                         readTable,
@@ -306,9 +315,9 @@ public class VariantVis
 
         List<DomContent> rows = Lists.newArrayList();
 
-        List<String> headers = Lists.newArrayList("SAMPLE", "QUAL", "AD", ALLELE_FREQUENCY_KEY, "DP");
+        List<String> headers = Lists.newArrayList("SAMPLE", "RAW_QUAL", "AD", ALLELE_FREQUENCY_KEY, "DP");
         headers.addAll(SORTED_MATCH_TYPES.stream().map(ReadContextMatch::name).collect(Collectors.toList()));
-        headers.addAll(Lists.newArrayList(AVG_BASE_QUAL, AVG_MAP_QUALITY, FRAG_STRAND_BIAS, READ_STRAND_BIAS, "JIT"));
+        headers.addAll(Lists.newArrayList(AVG_BASE_QUAL, AVG_RAW_BASE_QUAL, AVG_MAP_QUALITY, FRAG_STRAND_BIAS, READ_STRAND_BIAS, "JIT", MIN_COORDS_COUNT, UMI_TYPE_COUNTS));
 
         List<DomContent> headerColumns = Lists.newArrayList();
         for(int i = 0; i < headers.size(); i++)
@@ -365,11 +374,15 @@ public class VariantVis
             }
 
             columnElems.addAll(Lists.newArrayList(
+                    td(String.valueOf((int) counter.averageAltRecalibratedBaseQuality())),
                     td(String.valueOf((int) counter.averageAltBaseQuality())),
                     td(format("%d", avgAltMapQuality)),
                     td(format("%.2f", counter.fragmentStrandBiasAlt().bias())),
                     td(format("%.2f", counter.readStrandBiasAlt().bias())),
-                    td(format("%d-%d", counter.jitter().shortened(), counter.jitter().lengthened()))));
+                    td(format("%d-%d", counter.jitter().shortened(), counter.jitter().lengthened())),
+                    td(format("%d", counter.fragmentCoords().minCount())),
+                    td(Arrays.toString(counter.umiTypeCounts()).replace("[", "").replace("]", ""))
+                    ));
 
             for(int j = 0; j < columnElems.size(); ++j)
             {
@@ -458,7 +471,8 @@ public class VariantVis
         records.add(new ReadEvidenceRecord(read, fragment, matchType, modifiedQualities, mVariant.Position));
     }
 
-    private DomContent renderVariantInfo(int totalTumorQuality, int maxDistanceFromEdge, final Set<String> filters)
+    private DomContent renderVariantInfo(int totalTumorQuality, double mapQualFactor, boolean nearbyIndel, int maxDistanceFromEdge,
+                                         int nonAltAvgEdgeDist, int altAvgEdgeDist, final Set<String> filters)
     {
         CssBuilder horizontalSpacerStyle = CssBuilder.EMPTY.width(VARIANT_INFO_SPACING_SIZE).display("inline-block");
         CssBuilder coreStyle = CssBuilder.EMPTY.fontWeight("bold");
@@ -490,9 +504,15 @@ public class VariantVis
                 td(horizontalSpacer),
                 td("QUAL = " + totalTumorQuality),
                 td(horizontalSpacer),
+                td("MQF = " + mapQualFactor),
+                td(horizontalSpacer),
                 td(repeatStr),
                 td(horizontalSpacer),
+                td("NEARBY_INDEL = " + nearbyIndel),
+                td(horizontalSpacer),
                 td("MED = " + maxDistanceFromEdge),
+                td(horizontalSpacer),
+                td("AED = " + nonAltAvgEdgeDist + "," + altAvgEdgeDist),
                 td(horizontalSpacer),
                 td(filterStr),
                 td(horizontalSpacer),

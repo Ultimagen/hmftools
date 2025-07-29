@@ -11,7 +11,6 @@ import java.util.Set;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 // store the data for each MS table for a repeat unit such as (A/T)
@@ -50,23 +49,41 @@ public class JitterCountsTable
             return jitterCounts.getOrDefault(jitter, 0);
         }
 
-        String getRepeatUnit() { return repeatUnit; }
+        void setJitterReadCount(int jitter, int count)
+        {
+            jitterCounts.put(jitter, count);
+        }
+
+        int getTotalReadCount() { return totalReadCount; }
+
+        String getRepeatUnit() { return RepeatUnit; }
+
+        ConsensusType getConsensusType() { return ConsensusType; }
     }
 
-    public final String repeatUnit;
+    public final String RepeatUnit;
+    public final ConsensusType ConsensusType;
 
     // ref num unit to rows
     private final List<Row> mRows = new ArrayList<>();
 
-    JitterCountsTable(final String repeatUnit)
+    JitterCountsTable(final String repeatUnit, final ConsensusType consensusType, final double maxSingleAltSiteContributionPerc)
     {
-        this.repeatUnit = repeatUnit;
+        RepeatUnit = repeatUnit;
+        ConsensusType = consensusType;
+    }
+
+    public int repeatUnitLength()
+    {
+        if(this.RepeatUnit.contains("/"))
+            return this.RepeatUnit.split("/")[0].length();
+        return 3;
     }
 
     // summarise the data from
     static JitterCountsTable summariseFrom(
-            final String repeatUnit,
-            @NotNull final Collection<MicrosatelliteSiteAnalyser> microsatelliteSiteAnalysers)
+            final String repeatUnit, final ConsensusType consensusType, final double maxSingleAltSiteContributionPerc,
+            final Collection<MicrosatelliteSiteAnalyser> microsatelliteSiteAnalysers)
     {
         // In order to filter out outliers, we perform the stats summation in a loop
         // We create a table of all read stats, then use that table to filter out outliers and create a
@@ -77,7 +94,7 @@ public class JitterCountsTable
 
         while(true)
         {
-            JitterCountsTable newTable = new JitterCountsTable(repeatUnit);
+            JitterCountsTable newTable = new JitterCountsTable(repeatUnit, consensusType, maxSingleAltSiteContributionPerc);
 
             for(MicrosatelliteSiteAnalyser microsatelliteSiteAnalyser : microsatelliteSiteAnalysers)
             {
@@ -88,31 +105,23 @@ public class JitterCountsTable
 
                 if(!microsatelliteSiteAnalyser.shouldKeepSite(JitterAnalyserConstants.ALT_COUNT_FRACTION_INIT,
                         JitterAnalyserConstants.ALT_COUNT_FRACTION_STEP,
-                        JitterAnalyserConstants.MAX_REJECTED_READ_FRACTION))
+                        JitterAnalyserConstants.MAX_REJECTED_READ_FRACTION,
+                        JitterAnalyserConstants.MIN_PASSING_SITE_READS))
                 {
                     continue;
                 }
 
                 // get all the read counts into a row object
-                Row row = newTable.new Row(microsatelliteSiteAnalyser.refGenomeMicrosatellite.numRepeat);
+                Row row = newTable.new Row(microsatelliteSiteAnalyser.refGenomeMicrosatellite().numRepeat);
 
-                for(MicrosatelliteRead microsatelliteRead : microsatelliteSiteAnalyser.getPassingReadRepeatMatches())
+                for(Map.Entry<Integer, Integer> entry : microsatelliteSiteAnalyser.passingJitterCounts(consensusType).entrySet())
                 {
-                    int numRepeatUnits = microsatelliteRead.numRepeatUnits();
-                    int jitter = numRepeatUnits - row.refNumUnits;
-                    row.addRead(jitter);
+                    int jitter = entry.getKey();
+                    int numReads = entry.getValue();
+                    row.addReads(jitter, numReads);
                 }
 
-                // use the row object to perform outlier test
-                if(outlierTestTable != null && outlierTestTable.isOutlier(row))
-                {
-                    outliers.add(microsatelliteSiteAnalyser);
-                    outlierFound = true;
-                }
-                else
-                {
-                    newTable.mergeCounts(row);
-                }
+                newTable.mergeCounts(row);
             }
 
             if(outlierTestTable != null && !outlierFound)
@@ -136,33 +145,6 @@ public class JitterCountsTable
         }
     }
 
-    boolean isOutlier(Row siteCounts)
-    {
-        for(Map.Entry<Integer, Integer> entry: siteCounts.jitterCounts.entrySet())
-        {
-            int jitter = entry.getKey();
-
-            if(jitter == 0)
-            {
-                continue;
-            }
-
-            int siteJitterReadCount = entry.getValue();
-            int allJitterReadCount = getJitterReadCount(siteCounts.refNumUnits, jitter);
-
-            if(siteJitterReadCount >= JitterAnalyserConstants.MIN_SITE_READS_BEFORE_OUTLIER_CHECK &&
-                    siteJitterReadCount >= allJitterReadCount * JitterAnalyserConstants.MAX_SINGLE_SITE_ALT_CONTRIBUTION)
-            {
-                sLogger.trace("{} x unit({}), site jitter({}) read count({}) > all sites jitter read count({}) * {}, filtering",
-                        siteCounts.refNumUnits,
-                        siteCounts.getRepeatUnit(),
-                        jitter, siteJitterReadCount, allJitterReadCount, JitterAnalyserConstants.MAX_SINGLE_SITE_ALT_CONTRIBUTION);
-                return true;
-            }
-        }
-        return false;
-    }
-
     public List<Row> getRows()
     {
         return mRows;
@@ -174,13 +156,6 @@ public class JitterCountsTable
         return row == null ? 0 : row.totalReadCount;
     }
 
-    public int getJitterReadCount(int refNumRepeats, int jitter)
-    {
-        Row row = getRow(refNumRepeats);
-        return row == null ? 0 : row.getJitterReadCount(jitter);
-    }
-
-    @NotNull
     public Row getOrCreateRow(int refNumUnits)
     {
         for(int i = 0; i < mRows.size(); ++i)
@@ -216,4 +191,6 @@ public class JitterCountsTable
         }
         return null;
     }
+
+    public int totalReadCount() { return mRows.stream().mapToInt(Row::getTotalReadCount).sum(); }
 }

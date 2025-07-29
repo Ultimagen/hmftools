@@ -20,6 +20,7 @@ import com.hartwig.hmftools.common.genome.chromosome.CobaltChromosomes;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.purple.GermlineStatus;
 import com.hartwig.hmftools.common.purple.ImmutablePurpleCopyNumber;
+import com.hartwig.hmftools.purple.copynumber.sv.SvImpliedCopyNumber;
 import com.hartwig.hmftools.purple.fitting.PurityAdjuster;
 import com.hartwig.hmftools.common.purple.PurpleCopyNumber;
 import com.hartwig.hmftools.common.purple.SegmentSupport;
@@ -70,9 +71,9 @@ public class PurpleCopyNumberFactory
             diploidExtension.putAll(chromosome, nonDiploidExtended);
         }
 
-        StructuralVariantImplied svImpliedFactory = new StructuralVariantImplied(mAverageReadDepth, mPloidy, mPurityAdjuster);
+        SvImpliedCopyNumber svImpliedFactory = new SvImpliedCopyNumber(mAverageReadDepth, mPloidy, mPurityAdjuster);
 
-        ListMultimap<Chromosome, CombinedRegion> allSVImplied = svImpliedFactory.svImpliedCopyNumber(structuralVariants, diploidExtension);
+        ListMultimap<Chromosome,CombinedRegion> allSVImplied = svImpliedFactory.svImpliedCopyNumber(structuralVariants, diploidExtension);
 
         for(HumanChromosome chromosome : HumanChromosome.values())
         {
@@ -141,6 +142,7 @@ public class PurpleCopyNumberFactory
     private static PurpleCopyNumber toCopyNumber(final CombinedRegion region, int copyNumberStartPos, final SegmentSupport trailingSupport)
     {
         return ImmutablePurpleCopyNumber.builder()
+                .gcContent(region.region().gcContent())
                 .chromosome(region.chromosome())
                 .start(copyNumberStartPos)
                 .end(region.end())
@@ -218,6 +220,7 @@ public class PurpleCopyNumberFactory
             if(chromosome == CDKN2A_CHR
             && positionsOverlap(copyNumber.start(), copyNumber.end(), CDKN2A_DELETION_REGION.start(), CDKN2A_DELETION_REGION.end()))
             {
+                // factor out any part of a copy number region which overlaps with CDKN2A
                 int baseOverlap = min(copyNumber.end(), CDKN2A_DELETION_REGION.end()) - max(copyNumber.start(), CDKN2A_DELETION_REGION.start());
                 double nonGeneDeletedFraction = (copyNumber.length() - baseOverlap) / (double)copyNumber.length();
                 deletedWindows = (int)round(nonGeneDeletedFraction * deletedWindows);

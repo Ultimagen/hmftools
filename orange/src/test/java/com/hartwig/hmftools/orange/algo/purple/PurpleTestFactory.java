@@ -12,7 +12,7 @@ import com.hartwig.hmftools.common.purple.PurityContext;
 import com.hartwig.hmftools.common.purple.PurpleQC;
 import com.hartwig.hmftools.common.purple.RunMode;
 import com.hartwig.hmftools.common.purple.TumorMutationalStatus;
-import com.hartwig.hmftools.common.variant.msi.MicrosatelliteStatus;
+import com.hartwig.hmftools.common.purple.MicrosatelliteStatus;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -20,6 +20,12 @@ public final class PurpleTestFactory
 {
     @NotNull
     public static PurpleData createMinimalTestPurpleData()
+    {
+        return createMinimalTestPurpleDataBuilder().build();
+    }
+
+    @NotNull
+    public static ImmutablePurpleData.Builder createMinimalTestPurpleDataBuilder()
     {
         PurityContext minimalContext = ImmutablePurityContext.builder()
                 .gender(Gender.FEMALE)
@@ -40,7 +46,7 @@ public final class PurpleTestFactory
                 .tumorMutationalBurdenStatus(TumorMutationalStatus.UNKNOWN)
                 .build();
 
-        return ImmutablePurpleData.builder().purityContext(minimalContext).build();
+        return ImmutablePurpleData.builder().purityContext(minimalContext);
     }
 
     @NotNull
@@ -83,6 +89,8 @@ public final class PurpleTestFactory
                 .cobaltGender(Gender.FEMALE)
                 .amberGender(Gender.FEMALE)
                 .lohPercent(0)
+                .tincLevel(0)
+                .chimerismPercentage(0)
                 .build();
     }
 }

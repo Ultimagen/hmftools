@@ -1,5 +1,6 @@
 package com.hartwig.hmftools.geneutils.common;
 
+import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 
 import java.io.BufferedWriter;
@@ -13,7 +14,6 @@ import java.util.List;
 
 import com.google.common.io.Resources;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
-import com.hartwig.hmftools.common.utils.version.VersionInfo;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -30,6 +30,7 @@ public final class CommonUtils
 
     public static final String RESOURCE_REPO_DIR = "resource_repo_dir";
     public static final String RESOURCE_REPO_DIR_DESC = "The directory holding the public HMF resources repo";
+
     public static final String ENSEMBL_DIR = "ensembl_data_cache";
 
     public static String getEnsemblDirectory(final RefGenomeVersion refGenomeVersion, final String resourceRepoDir)
@@ -71,7 +72,7 @@ public final class CommonUtils
         {
             BufferedWriter writer = createBufferedWriter(outputFile, false);
 
-            final CSVFormat format = new CSVFormat().header(true).delimiter('\t').nullString("").quoteString("");
+            final CSVFormat format = new CSVFormat().header(true).delimiter(TSV_DELIM).nullString("").quoteString("");
             writer.write(records.formatCSV(format));
             writer.close();
         }
@@ -81,4 +82,15 @@ public final class CommonUtils
         }
     }
 
+    public static boolean createOutputDir(final String outputDir)
+    {
+        final File dir = new File(outputDir);
+        if(!dir.exists() && !dir.mkdirs())
+        {
+            GU_LOGGER.error("unable to write directory " + outputDir);
+            return false;
+        }
+
+        return true;
+    }
 }

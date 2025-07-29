@@ -8,16 +8,15 @@ import static com.hartwig.hmftools.common.purple.SegmentSupport.TELOMERE;
 import static com.hartwig.hmftools.common.purple.SegmentSupport.UNKNOWN;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.PON_FILTER_PON;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDirSeparator;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.isStart;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.isStart;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.INF;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.INS;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.SGL;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
 import static com.hartwig.hmftools.linx.cn.LohEvent.CN_DATA_NO_SV;
 import static com.hartwig.hmftools.linx.types.LinxConstants.SHORT_TI_LENGTH;
-import static com.hartwig.hmftools.linx.types.SvVarData.ASSEMBLY_TYPE_EQV;
 import static com.hartwig.hmftools.linx.types.SvVarData.NONE_SEGMENT_INFERRED;
 
 import java.io.IOException;
@@ -74,7 +73,7 @@ public class CnDataLoader
     public final Map<Integer, JcnCalcData> getSvJcnCalcMap() { return mCnJcnCalcs.getSvJcnCalcMap(); }
     public final List<LohEvent> getLohData() { return mLohEventData; }
     public final List<HomLossEvent> getHomLossData() { return mHomLossData; }
-    public final Map<String, TelomereCentromereCnData> getChrTeleCentroData() { return mChrEndsCNMap; }
+    public final Map<String,TelomereCentromereCnData> getChrTeleCentroData() { return mChrEndsCNMap; }
     public final Map<String,List<SvCNData>> getChrCnDataMap() { return mChrCnDataMap; }
     public final Map<Integer,SvCNData[]> getSvIdCnDataMap() { return mSvIdCnDataMap; }
     public final PurityContext getPurityContext() { return mPurityContext; }
@@ -197,10 +196,7 @@ public class CnDataLoader
 
                     // a match has been found
 
-                    // don't override with a duplicate breakend
-                    boolean isDuplicateSgl = svData.type() == SGL && svData.startLinkedBy().contains(ASSEMBLY_TYPE_EQV);
-
-                    if(cnData.getStructuralVariantData() == null || !isDuplicateSgl)
+                    if(cnData.getStructuralVariantData() == null)
                     {
                         cnData.setStructuralVariantData(svData, isStart);
                     }
@@ -399,10 +395,6 @@ public class CnDataLoader
                     StructuralVariantData svData = findSvData(cnData, 1);
 
                     if(lohLost && cnData.matchesSV(true) && svData == null)
-                    {
-                        lohLost = false;
-                    }
-                    else if(svData != null && svData.type() == SGL && svData.startLinkedBy().contains(ASSEMBLY_TYPE_EQV))
                     {
                         lohLost = false;
                     }

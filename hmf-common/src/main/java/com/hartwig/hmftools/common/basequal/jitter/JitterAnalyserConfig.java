@@ -1,131 +1,84 @@
 package com.hartwig.hmftools.common.basequal.jitter;
 
-import static com.hartwig.hmftools.common.bam.BamUtils.addValidationStringencyOption;
-import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.REF_GENOME;
-import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.REF_GENOME_CFG_DESC;
-import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.addRefGenomeVersion;
-import static com.hartwig.hmftools.common.region.SpecificRegions.SPECIFIC_REGIONS;
-import static com.hartwig.hmftools.common.region.SpecificRegions.addSpecificChromosomesRegionsConfig;
-import static com.hartwig.hmftools.common.region.SpecificRegions.loadSpecificRegions;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.addThreadOptions;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.parseThreads;
-import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE;
-import static com.hartwig.hmftools.common.utils.config.ConfigUtils.addLoggingOptions;
-import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.addOutputDir;
-import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkCreateOutputDir;
-import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
-import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.parseOutputDir;
+import static com.hartwig.hmftools.common.basequal.jitter.JitterAnalyserConstants.DEFAULT_MAX_SINGLE_SITE_ALT_CONTRIBUTION;
 
-import java.util.List;
-
-import com.hartwig.hmftools.common.bam.BamUtils;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
-import com.hartwig.hmftools.common.region.ChrBaseRegion;
+import com.hartwig.hmftools.common.sequencing.SequencingType;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 
-import org.apache.commons.cli.ParseException;
-
-import htsjdk.samtools.ValidationStringency;
+import org.jetbrains.annotations.Nullable;
 
 public class JitterAnalyserConfig
 {
     public final String SampleId;
-    public final String BamPath;
     public final RefGenomeVersion RefGenVersion;
     public final String RefGenomeFile;
+    public final SequencingType Sequencing;
+    public final boolean UsesDuplexUMIs;
 
     public final String RefGenomeMsiFile;
     public final String OutputDir;
 
     public final int MinMappingQuality;
-
     public final int MaxSitesPerType;
+    public final double MaxSingleSiteAltContribution;
 
-    public final int PartitionSize;
-    public final ValidationStringency BamStringency;
-    public final int Threads;
     public final boolean WritePlots;
+    public final boolean WriteSiteFile;
 
-    public final List<ChrBaseRegion> SpecificRegions;
+    public static final String JITTER_WRITE_MSI_PLOTS = "write_msi_plots";
+    public static final String JITTER_WRITE_MSI_PLOTS_DESC = "Generate MSI jitter plots";
 
     public static final String JITTER_MSI_SITES_FILE = "ref_genome_msi_file";
-    public static final String JITTER_MSI_SITES_FILE_DESC = "Path to ref genome MSI sitesΩ tsv";
+    public static final String JITTER_MSI_SITES_FILE_DESC = "Path to ref genome MSI sites file";
 
-    public static final String JITTER_MAX_SITES_PER_TYPE = "max_sites_per_type";
+    public static final String JITTER_MAX_SITES_PER_TYPE = "msi_max_sites_per_type";
     public static final String JITTER_MAX_SITES_PER_TYPE_DESC = "Max number of sites per microsatellite unit / length type";
 
-    private static final String MIN_MAP_QUALITY = "min_map_quality";
-    private static final String PARTITION_SIZE = "partition_size";
+    private static final String MIN_MAP_QUALITY = "msi_min_map_quality";
+    private static final String MAX_SINGLE_SITE_ALT_CONTRIBUTION = "max_site_alt_contribution";
+
+    public static final String JITTER_WRITE_SITE_FILE = "write_msi_site_file";
+    public static final String JITTER_WRITE_SITE_FILE_DESC = "Write MSI site file (useful for debugging)";
 
     public static final int DEFAULT_MIN_MAPPING_QUALITY = 50;
     public static final int DEFAULT_NUM_SITES_PER_TYPE = 5_000;
-    public static final int DEFAULT_PARTITION_SIZE = 1_000_000;
 
-    public JitterAnalyserConfig(final ConfigBuilder configBuilder) throws ParseException
-    {
-        SampleId = configBuilder.getValue(SAMPLE);
-        BamPath = configBuilder.getValue("bam");
-        RefGenVersion = RefGenomeVersion.from(configBuilder);
-        RefGenomeFile = configBuilder.getValue(REF_GENOME);
-        RefGenomeMsiFile = configBuilder.getValue(JITTER_MSI_SITES_FILE);
-        OutputDir = parseOutputDir(configBuilder);
-        Threads = parseThreads(configBuilder);
-        MinMappingQuality = configBuilder.getInteger(MIN_MAP_QUALITY);
-        MaxSitesPerType = configBuilder.getInteger(JITTER_MAX_SITES_PER_TYPE);
-        PartitionSize = configBuilder.getInteger(PARTITION_SIZE);
-        BamStringency = BamUtils.validationStringency(configBuilder);
-        WritePlots = true;
-        SpecificRegions = loadSpecificRegions(configBuilder.getValue(SPECIFIC_REGIONS));
-    }
-
-    public JitterAnalyserConfig(
-            final String sampleId, final RefGenomeVersion refGenVersion, final String refGenomeFile,
-            final String refGenomeMsiFile, final String outputDir, int minMappingQuality, int maxSitesPerType, int threads, boolean writePlots)
+    private JitterAnalyserConfig(final String sampleId, final String refGenomeFile, final RefGenomeVersion refGenVersion,
+            final SequencingType sequencing, boolean usesDuplexUMIs, final String outputDir, final ConfigBuilder configBuilder)
     {
         SampleId = sampleId;
-        BamPath = null;
-        RefGenVersion = refGenVersion;
         RefGenomeFile = refGenomeFile;
-        RefGenomeMsiFile = refGenomeMsiFile;
+        RefGenVersion = refGenVersion;
+        Sequencing = sequencing;
+        UsesDuplexUMIs = usesDuplexUMIs;
         OutputDir = outputDir;
-        MinMappingQuality = minMappingQuality;
-        MaxSitesPerType = maxSitesPerType;
-        PartitionSize = DEFAULT_PARTITION_SIZE;
-        BamStringency = ValidationStringency.STRICT;
-        Threads = threads;
-        WritePlots = writePlots;
-        SpecificRegions = null;
+
+        RefGenomeMsiFile = configBuilder.getValue(JITTER_MSI_SITES_FILE);
+        MinMappingQuality = configBuilder.getInteger(MIN_MAP_QUALITY);
+        MaxSitesPerType = configBuilder.getInteger(JITTER_MAX_SITES_PER_TYPE);
+        MaxSingleSiteAltContribution = configBuilder.getDecimal(MAX_SINGLE_SITE_ALT_CONTRIBUTION);
+        WritePlots = configBuilder.hasFlag(JITTER_WRITE_MSI_PLOTS);
+        WriteSiteFile = configBuilder.hasFlag(JITTER_WRITE_SITE_FILE);
     }
 
-    public static void registerConfig(final ConfigBuilder configBuilder)
+    @Nullable
+    public static JitterAnalyserConfig create(final String sampleId, final String refGenomeFile, final RefGenomeVersion refGenVersion,
+            final SequencingType sequencing, boolean usesDuplexUMIs, final String outputDir, final ConfigBuilder configBuilder)
     {
-        configBuilder.addConfigItem(SAMPLE, true, "sample id");
-        configBuilder.addPath("bam", true, "path to bam file");
+        if(!configBuilder.hasValue(JITTER_MSI_SITES_FILE))
+            return null;
 
-        addRefGenomeVersion(configBuilder);
-        configBuilder.addPath(REF_GENOME, true, REF_GENOME_CFG_DESC + ", required when using CRAM files");
+        return new JitterAnalyserConfig(sampleId, refGenomeFile, refGenVersion, sequencing, usesDuplexUMIs, outputDir, configBuilder);
+    }
 
-        configBuilder.addPath(JITTER_MSI_SITES_FILE, true, JITTER_MSI_SITES_FILE_DESC);
-
-        addOutputDir(configBuilder);
-
-        configBuilder.addInteger(
-                MIN_MAP_QUALITY, "Minimum mapping quality for an alignment to be used", DEFAULT_MIN_MAPPING_QUALITY);
-
+    public static void addConfig(final ConfigBuilder configBuilder)
+    {
+        configBuilder.addPath(JITTER_MSI_SITES_FILE, false, JITTER_MSI_SITES_FILE_DESC);
+        configBuilder.addInteger(MIN_MAP_QUALITY, "Minimum mapping quality for an alignment to be used", DEFAULT_MIN_MAPPING_QUALITY);
         configBuilder.addInteger(JITTER_MAX_SITES_PER_TYPE, JITTER_MAX_SITES_PER_TYPE_DESC, DEFAULT_NUM_SITES_PER_TYPE);
-
-        configBuilder.addInteger(PARTITION_SIZE, "size of the partitions/jobs processed by worker threads", DEFAULT_PARTITION_SIZE);
-
-        addThreadOptions(configBuilder);
-        addValidationStringencyOption(configBuilder);
-        addLoggingOptions(configBuilder);
-
-        addSpecificChromosomesRegionsConfig(configBuilder);
-    }
-
-    public boolean isValid()
-    {
-        checkCreateOutputDir(OutputDir);
-        return true;
+        configBuilder.addDecimal(MAX_SINGLE_SITE_ALT_CONTRIBUTION, "Max percentage a single alt site can contribute", DEFAULT_MAX_SINGLE_SITE_ALT_CONTRIBUTION);
+        configBuilder.addFlag(JITTER_WRITE_MSI_PLOTS, JITTER_WRITE_MSI_PLOTS_DESC);
+        configBuilder.addFlag(JITTER_WRITE_SITE_FILE, JITTER_WRITE_SITE_FILE_DESC);
     }
 }

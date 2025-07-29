@@ -6,8 +6,8 @@ import static java.lang.Math.min;
 import static com.hartwig.hmftools.common.purple.GermlineStatus.DIPLOID;
 import static com.hartwig.hmftools.common.purple.GermlineStatus.HET_DELETION;
 import static com.hartwig.hmftools.common.purple.GermlineStatus.HOM_DELETION;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.addThreadOptions;
-import static com.hartwig.hmftools.common.utils.TaskExecutor.parseThreads;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.addThreadOptions;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.parseThreads;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.PURPLE_DIR_CFG;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.addLoggingOptions;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.addSampleIdFile;
@@ -29,10 +29,10 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
-import com.hartwig.hmftools.common.utils.TaskExecutor;
+import com.hartwig.hmftools.common.perf.TaskExecutor;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.purple.region.ObservedRegion;
-import com.hartwig.hmftools.purple.segment.SegmentFile;
+import com.hartwig.hmftools.common.purple.PurpleSegment;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -93,7 +93,7 @@ public class SegmentAnalyser
             ++taskIndex;
         }
 
-        final List<Callable> callableList = sampleTasks.stream().collect(Collectors.toList());
+        final List<Callable<Void>> callableList = sampleTasks.stream().collect(Collectors.toList());
         TaskExecutor.executeTasks(callableList, mThreads);
 
         closeBufferedWriter(mWriter);
@@ -101,7 +101,7 @@ public class SegmentAnalyser
         PPL_LOGGER.info("Purple segment analysis complete");
     }
 
-    private class SampleTask implements Callable
+    private class SampleTask implements Callable<Void>
     {
         private final int mTaskId;
         private final List<String> mSampleIds;
@@ -115,7 +115,7 @@ public class SegmentAnalyser
         public List<String> getSampleIds() { return mSampleIds; }
 
         @Override
-        public Long call()
+        public Void call()
         {
             for(int i = 0; i < mSampleIds.size(); ++i)
             {
@@ -125,7 +125,8 @@ public class SegmentAnalyser
 
                 try
                 {
-                    List<ObservedRegion> fittedRegions = SegmentFile.read(SegmentFile.generateFilename(samplePurpleDir, sampleId));
+                    List<PurpleSegment> segments = PurpleSegment.read(PurpleSegment.generateFilename(samplePurpleDir, sampleId));
+                    List<ObservedRegion> fittedRegions = segments.stream().map(x -> ObservedRegion.fromSegment(x)).collect(Collectors.toList());
 
                     if(mAnalysisType == AnalysisType.GERMLINE_AMP_DEL)
                         findGermlineAmpDels(sampleId, fittedRegions);
@@ -146,7 +147,7 @@ public class SegmentAnalyser
 
             PPL_LOGGER.info("{}: tasks complete for {} samples", mTaskId, mSampleIds.size());
 
-            return (long)0;
+            return null;
         }
 
         private void findGermlineAmpDels(final String sampleId, final List<ObservedRegion> fittedRegions)

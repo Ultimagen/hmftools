@@ -1,8 +1,11 @@
 package com.hartwig.hmftools.esvee.caller;
 
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_END;
-import static com.hartwig.hmftools.common.utils.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
+import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.PANEL_INCLUSION_BUFFER;
 
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -24,6 +27,7 @@ public class SvDataCache
 
     private final List<Variant> mSvData;
     private final Map<String,List<Breakend>> mChromosomeBreakends;
+
     private int mHardFilteredCount;
 
     public SvDataCache(final CallerConfig config, final TargetRegions targetRegions)
@@ -83,12 +87,22 @@ public class SvDataCache
         if(currentSvCount == mSvFactory.results().size())
             return;
 
-        final StructuralVariant sv = popLastSv(); // get and clear from storage
+        StructuralVariant sv = popLastSv(); // get and clear from storage
 
         if(sv == null)
             return;
 
+        // one of the breakends at least must be within a targeted region
+        if(mTargetRegions.hasTargetRegions() && !svWithinTargetedRegion(sv))
+            return;
+
         addSvData(new Variant(sv, genotypeIds));
+    }
+
+    private boolean svWithinTargetedRegion(final StructuralVariant sv)
+    {
+        return mTargetRegions.inTargetRegions(sv.chromosome(true), sv.position(true), PANEL_INCLUSION_BUFFER)
+            || mTargetRegions.inTargetRegions(sv.chromosome(false), sv.position(false), PANEL_INCLUSION_BUFFER);
     }
 
     private StructuralVariant popLastSv()
@@ -113,7 +127,12 @@ public class SvDataCache
 
     public void buildBreakendMap()
     {
-        for(Variant var : mSvData)
+        buildBreakendMap(mSvData, mChromosomeBreakends);
+    }
+
+    public static void buildBreakendMap(final List<Variant> variants, final Map<String,List<Breakend>> chrBreakendMap)
+    {
+        for(Variant var : variants)
         {
             for(int se = SE_START; se <= SE_END; ++se)
             {
@@ -122,78 +141,40 @@ public class SvDataCache
                 if(breakend == null)
                     continue;
 
-                List<Breakend> breakends = mChromosomeBreakends.get(breakend.Chromosome);
+                List<Breakend> breakends = chrBreakendMap.get(breakend.Chromosome);
 
                 if(breakends == null)
                 {
                     breakends = Lists.newArrayList();
-                    mChromosomeBreakends.put(breakend.Chromosome, breakends);
+                    chrBreakendMap.put(breakend.Chromosome, breakends);
                 }
 
-                int index = 0;
-                while(index < breakends.size())
-                {
-                    if(breakend.Position < breakends.get(index).Position)
-                        break;
-
-                    ++index;
-                }
-
-                breakends.add(index, breakend);
+                breakends.add(breakend);
             }
         }
 
-        for(List<Breakend> breakends : mChromosomeBreakends.values())
+        for(List<Breakend> breakends : chrBreakendMap.values())
         {
-            for(int index = 0; index < breakends.size(); ++index)
-            {
-                breakends.get(index).setChrLocationIndex(index);
-            }
+            Collections.sort(breakends, new BreakendPositionComparator());
         }
     }
 
-    public List<Breakend> selectOthersNearby(final Breakend breakend, int additionalDistance, int maxSeekDistance)
+    public static class BreakendPositionComparator implements Comparator<Breakend>
     {
-        List<Breakend> breakends = mChromosomeBreakends.get(breakend.Chromosome);
-
-        List<Breakend> closeBreakends = Lists.newArrayList();
-
-        if(breakends == null)
-            return closeBreakends;
-
-        int minStart = breakend.minPosition() - additionalDistance;
-        int maxStart = breakend.maxPosition() + additionalDistance;
-
-        // search down
-        for(int index = breakend.chrLocationIndex() - 1; index >= 0; --index)
+        public int compare(final Breakend first, final Breakend second)
         {
-            Breakend nextBreakend = breakends.get(index);
-
-            if(nextBreakend.sv() == breakend.sv())
-                continue;
-
-            if(nextBreakend.maxPosition() < breakend.minPosition() - maxSeekDistance)
-                break;
-
-            if(nextBreakend.minPosition() <= maxStart && nextBreakend.maxPosition() >= minStart)
-                closeBreakends.add(0, nextBreakend);
+            if(first.Position == second.Position)
+            {
+                if(first.Orient == second.Orient)
+                    return 0;
+                else
+                    return first.Orient.isForward() ? -1 : 1;
+            }
+            else
+            {
+                return first.Position < second.Position ? -1 : 1;
+            }
         }
-
-        for(int index = breakend.chrLocationIndex() + 1; index < breakends.size(); ++index)
-        {
-            Breakend nextBreakend = breakends.get(index);
-
-            if(nextBreakend.sv() == breakend.sv())
-                continue;
-
-            if(nextBreakend.minPosition() > breakend.maxPosition() + maxSeekDistance)
-                break;
-
-            if(nextBreakend.minPosition() <= maxStart && nextBreakend.maxPosition() >= minStart)
-                closeBreakends.add(nextBreakend);
-        }
-
-        return closeBreakends;
     }
 
     public void clear()

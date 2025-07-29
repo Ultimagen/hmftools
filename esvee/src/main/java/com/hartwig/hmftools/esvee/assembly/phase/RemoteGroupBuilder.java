@@ -4,20 +4,19 @@ import static java.lang.Math.round;
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
-import static com.hartwig.hmftools.esvee.AssemblyConfig.SV_LOGGER;
-import static com.hartwig.hmftools.esvee.AssemblyConstants.REMOTE_PHASING_MIN_READS;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.REMOTE_PHASING_MIN_READS;
 import static com.hartwig.hmftools.esvee.assembly.phase.PhaseGroupBuilder.linkToPhaseGroups;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Queue;
 import java.util.Set;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.hartwig.hmftools.esvee.AssemblyConfig;
+import com.hartwig.hmftools.esvee.assembly.AssemblyConfig;
 import com.hartwig.hmftools.esvee.assembly.read.Read;
 import com.hartwig.hmftools.esvee.assembly.types.SupportRead;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
@@ -27,22 +26,22 @@ import com.hartwig.hmftools.esvee.assembly.types.RefSideSoftClip;
 import com.hartwig.hmftools.esvee.assembly.types.RemoteRegion;
 import com.hartwig.hmftools.esvee.assembly.types.ThreadTask;
 import com.hartwig.hmftools.esvee.assembly.output.PhaseGroupBuildWriter;
+import com.hartwig.hmftools.common.perf.TaskQueue;
 
 public class RemoteGroupBuilder extends ThreadTask
 {
     private final AssemblyConfig mConfig;
     private final PhaseGroupBuildWriter mWriter;
-    private final Queue<JunctionGroup> mJunctionGroups;
+    private final TaskQueue mJunctionGroups;
     private final Map<String, List<JunctionGroup>> mJunctionGroupMap;
 
     private final Set<PhaseGroup> mPhaseGroupsSets;
     private final List<PhaseGroup> mRemovedPhaseGroups;
-    private final int mJunctionGroupCount;
 
     private final RemoteBuildStats mBuildStats;
 
     public RemoteGroupBuilder(
-            final AssemblyConfig config, final Queue<JunctionGroup> junctionGroups,
+            final AssemblyConfig config, final TaskQueue junctionGroups,
             final Map<String,List<JunctionGroup>> junctionGroupMap, final PhaseGroupBuildWriter writer)
     {
         super("RemotePhaseGroups");
@@ -52,7 +51,6 @@ public class RemoteGroupBuilder extends ThreadTask
         mJunctionGroups = junctionGroups;
         mJunctionGroupMap = junctionGroupMap;
 
-        mJunctionGroupCount = junctionGroups.size();
         mPhaseGroupsSets = Sets.newHashSet();
         mRemovedPhaseGroups = Lists.newArrayList();
         mBuildStats = new RemoteBuildStats();
@@ -62,22 +60,16 @@ public class RemoteGroupBuilder extends ThreadTask
     {
         return mPhaseGroupsSets;
     }
-
-    public List<PhaseGroup> removedPhaseGroups()
-    {
-        return mRemovedPhaseGroups;
-    }
+    public List<PhaseGroup> removedPhaseGroups() { return mRemovedPhaseGroups; }
 
     public void logStats()
     {
-        if(mConfig.PerfDebug || mConfig.PerfLogTime > 0)
+        if(AssemblyConfig.PerfDebug || AssemblyConfig.PerfLogTime > 0)
         {
             // now appears inconsequential
             // SV_LOGGER.debug("remote phase group building stats: {}", mBuildStats);
         }
     }
-
-    private static final int LOG_COUNT = 10000;
 
     @Override
     public void run()
@@ -86,26 +78,16 @@ public class RemoteGroupBuilder extends ThreadTask
         {
             try
             {
-                int remainingCount = mJunctionGroups.size();
-                int processedCount = mJunctionGroupCount - remainingCount;
-
                 mPerfCounter.start();
 
-                ++processedCount;
-
-                JunctionGroup junctionGroup = mJunctionGroups.remove();
-
-                if((processedCount % LOG_COUNT) == 0)
-                {
-                    SV_LOGGER.debug("processed {} junction groups into phase groups", processedCount, mPhaseGroupsSets.size());
-                }
+                JunctionGroup junctionGroup = (JunctionGroup)mJunctionGroups.removeItem();
 
                 for(JunctionAssembly assembly : junctionGroup.junctionAssemblies())
                 {
                     findRemotePhasedAssemblies(junctionGroup, assembly);
                 }
 
-                stopCheckLog(junctionGroup.toString(), mConfig.PerfLogTime);
+                stopCheckLog(format("juncGroup(%s)", junctionGroup), AssemblyConfig.PerfLogTime);
             }
             catch(NoSuchElementException e)
             {
@@ -124,7 +106,7 @@ public class RemoteGroupBuilder extends ThreadTask
     {
         // for the given assembly, looks in all overlapping other junction groups (based on remote regions, ref-side soft-clips, and
         // the local junction group for indels) for other assemblies with shared reads
-        if(assembly.remoteRegions().isEmpty() && assembly.refSideSoftClips().isEmpty())
+        if(assembly.remoteRegions().isEmpty())
             return;
 
         Set<JunctionGroup> linkedJunctionGroups = Sets.newHashSet();
@@ -140,19 +122,6 @@ public class RemoteGroupBuilder extends ThreadTask
                 continue;
 
             linkedJunctionGroups.addAll(overlappingJunctions);
-        }
-
-        // CHECK: really necessary if already checked by local phase group (same junction) building?
-        if(!assembly.refSideSoftClips().isEmpty())
-        {
-            // if the assembly has candidate facing TI links, then add its own junction group - they will often share reads which are
-            // discordant in one and a junction read in the other
-            RefSideSoftClip refSideSoftClip = assembly.refSideSoftClips().get(0);
-
-            if(positionWithin(refSideSoftClip.Position, junctionGroup.minPosition(), junctionGroup.maxPosition()))
-            {
-                linkedJunctionGroups.add(junctionGroup);
-            }
         }
 
         for(JunctionGroup otherJunctionGroup : linkedJunctionGroups)
@@ -182,9 +151,7 @@ public class RemoteGroupBuilder extends ThreadTask
         ++mBuildStats.AssemblyChecks;
 
         RemoteRegion overlappingRegion = assembly.remoteRegions().stream()
-                .filter(x -> x.overlaps(
-                        otherAssembly.junction().Chromosome, otherAssembly.minAlignedPosition(), otherAssembly.maxAlignedPosition()))
-                .findFirst().orElse(null);
+                .filter(x -> x.overlapsAssembly(otherAssembly)).findFirst().orElse(null);
 
         if(overlappingRegion == null)
             return false;

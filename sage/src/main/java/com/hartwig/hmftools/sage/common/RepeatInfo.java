@@ -165,7 +165,7 @@ public class RepeatInfo
 
             ++extraCount;
 
-            if(repeatStart - repeatLength < 0)
+            if(repeatStart - repeatLength <= 0)
                 break;
 
             repeatStart -= repeatLength;
@@ -193,19 +193,6 @@ public class RepeatInfo
 
         repeats.add(newRepeat);
         return true;
-    }
-
-    public static void setReferenceMaxRepeatInfo(final SageVariant variant, final RefSequence refSequence)
-    {
-        int refIndex = refSequence.index(variant.position());
-
-        int searchIndexStart = refIndex - REPEAT_SEARCH_LENGTH;
-        int searchIndexEnd = refIndex + variant.ref().length();
-
-        RepeatInfo maxRepeat = findMaxRepeat(
-                refSequence.Bases, searchIndexStart, searchIndexEnd, MAX_REPEAT_LENGTH, MIN_REPEAT_COUNT, true, refIndex);
-
-        variant.readContext().setRefMaxRepeat(maxRepeat);
     }
 
     public static RepeatInfo findMaxRepeat(

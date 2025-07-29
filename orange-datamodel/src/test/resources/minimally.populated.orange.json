@@ -59,6 +59,14 @@
       "minPloidy": 3.1,
       "maxPloidy": 3.15
     },
+    "tumorStats": {
+      "maxDiploidProportion": 0.0211,
+      "hotspotMutationCount": 3,
+      "hotspotStructuralVariantCount": 0,
+      "smallVariantAlleleReadCount": 2273196,
+      "structuralVariantTumorFragmentCount": 4908,
+      "bafCount": 675344
+    },
     "characteristics": {
       "wholeGenomeDuplication": true,
       "microsatelliteIndelsPerMb": 0.1,
@@ -132,6 +140,7 @@
         "minorAlleleCopyNumber": 0.4,
         "variantCopyNumber": 2.03,
         "biallelic": false,
+        "biallelicProbability": 0.1,
         "genotypeStatus": "UNKNOWN",
         "subclonalLikelihood": 0.0,
         "localPhaseSets": null
@@ -172,6 +181,7 @@
         "minorAlleleCopyNumber": 0.4,
         "variantCopyNumber": 2.03,
         "biallelic": false,
+        "biallelicProbability": 0.1,
         "genotypeStatus": "UNKNOWN",
         "subclonalLikelihood": 0.0,
         "localPhaseSets": null
@@ -213,6 +223,7 @@
         "minorAlleleCopyNumber": 0.8,
         "variantCopyNumber": 1.0,
         "biallelic": false,
+        "biallelicProbability": 0.0,
         "genotypeStatus": "HET",
         "subclonalLikelihood": 0.2,
         "localPhaseSets": [
@@ -257,6 +268,7 @@
         "minorAlleleCopyNumber": 0.8,
         "variantCopyNumber": 1.0,
         "biallelic": false,
+        "biallelicProbability": 0.0,
         "genotypeStatus": "HET",
         "subclonalLikelihood": 0.2,
         "localPhaseSets": [
@@ -278,14 +290,16 @@
         "gene": "gene",
         "chromosome": "12",
         "chromosomeBand": "p13",
+        "transcript": "trans",
+        "isCanonical": true,
         "minCopyNumber": 1.2,
         "maxCopyNumber": 1.2,
         "minMinorAlleleCopyNumber": 0.4
       }
     ],
-    "allSomaticGainsLosses": [
+    "allSomaticGainsDels": [
       {
-        "interpretation": "FULL_LOSS",
+        "interpretation": "FULL_DEL",
         "chromosome": 5,
         "chromosomeBand": "q2.2",
         "gene": "SMAD4",
@@ -295,9 +309,9 @@
         "maxCopies": 1.2
       }
     ],
-    "reportableSomaticGainsLosses": [
+    "reportableSomaticGainsDels": [
       {
-        "interpretation": "FULL_LOSS",
+        "interpretation": "FULL_DEL",
         "chromosome": "5",
         "chromosomeBand": "q2.2",
         "gene": "SMAD4",
@@ -312,11 +326,17 @@
         "gene": "gene",
         "chromosome": "12",
         "chromosomeBand": "p13",
+        "transcript": "trans",
+        "isCanonical": true,
         "minCopyNumber": 1.2,
         "maxCopyNumber": 1.2,
         "minMinorAlleleCopyNumber": 0.4
       }
-    ]
+    ],
+    "chromosomalRearrangements": {
+      "hasTrisomy1q": false,
+      "hasCodeletion1p19q": false
+    }
   },
   "linx": {
     "allSomaticStructuralVariants": [
@@ -536,15 +556,7 @@
     }
   ],
   "cuppa": {
-    "bestPrediction": {
-      "cancerType": "Melanoma",
-      "likelihood": 0.996,
-      "snvPairwiseClassifier": 0.979,
-      "genomicPositionClassifier": 0.990,
-      "featureClassifier": 0.972,
-      "altSjCohortClassifier": null,
-      "expressionPairwiseClassifier": null
-    },
+    "mode" : "WGS",
     "predictions": [
       {
         "cancerType": "Melanoma",
@@ -556,6 +568,15 @@
         "expressionPairwiseClassifier": null
       }
     ],
+    "bestPrediction": {
+      "cancerType": "Melanoma",
+      "likelihood": 0.996,
+      "snvPairwiseClassifier": 0.979,
+      "genomicPositionClassifier": 0.990,
+      "featureClassifier": 0.972,
+      "altSjCohortClassifier": null,
+      "expressionPairwiseClassifier": null
+    },
     "simpleDups32To200B": 0,
     "maxComplexSize": 0,
     "telomericSGLs": 0,

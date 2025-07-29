@@ -1,20 +1,28 @@
 package com.hartwig.hmftools.sage.quality;
 
 import static com.hartwig.hmftools.common.basequal.jitter.JitterModelParams.MAX_SPECIFIC_LENGTH_UNIT;
+import static com.hartwig.hmftools.common.qual.BaseQualAdjustment.probabilityToPhredQual;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
-import static com.hartwig.hmftools.sage.SageConstants.DEFAULT_JITTER_PARAMS;
 import static com.hartwig.hmftools.sage.SageConstants.MAX_REPEAT_LENGTH;
 import static com.hartwig.hmftools.sage.SageConstants.MIN_REPEAT_COUNT;
 import static com.hartwig.hmftools.sage.SageConstants.MSI_JITTER_DEFAULT_ERROR_RATE;
 import static com.hartwig.hmftools.sage.SageConstants.MSI_JITTER_MAX_REPEAT_CHANGE;
+import static com.hartwig.hmftools.sage.quality.JitterConstants.DEFAULT_HD_JITTER_PARAMS;
+import static com.hartwig.hmftools.sage.quality.JitterConstants.DEFAULT_JITTER_PARAMS;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Collection;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.hartwig.hmftools.common.basequal.jitter.ConsensusType;
+import com.hartwig.hmftools.common.basequal.jitter.JitterCountsTable;
+import com.hartwig.hmftools.common.basequal.jitter.JitterCountsTableFile;
 import com.hartwig.hmftools.common.basequal.jitter.JitterModelParams;
 import com.hartwig.hmftools.common.basequal.jitter.JitterModelParamsFile;
 import com.hartwig.hmftools.sage.common.RepeatInfo;
@@ -25,62 +33,174 @@ import org.jetbrains.annotations.Nullable;
 public class MsiJitterCalcs
 {
     private final Map<String,List<MsiModelParams>> mSampleParams;
+    private final Map<String,Boolean> mProbableMsiSample;
 
     public MsiJitterCalcs()
     {
         mSampleParams = Maps.newHashMap();
+        mProbableMsiSample = Maps.newHashMap();
     }
 
-    public static MsiJitterCalcs build(final List<String> sampleIds, @Nullable final String jitterParamsDir)
+    public static MsiJitterCalcs build(final List<String> sampleIds, @Nullable final String jitterParamsDir, final boolean highDepthMode)
     {
         MsiJitterCalcs msiJitterCalcs = new MsiJitterCalcs();
 
+        List<JitterModelParams> jitterDefaults = highDepthMode ? DEFAULT_HD_JITTER_PARAMS : DEFAULT_JITTER_PARAMS;
+
         if(jitterParamsDir != null)
         {
-            msiJitterCalcs.loadSampleJitterParams(sampleIds, jitterParamsDir);
+            if(msiJitterCalcs.loadSampleJitterParams(sampleIds, jitterParamsDir, jitterDefaults))
+                return msiJitterCalcs;
+            else
+                System.exit(1);
         }
-        else
+
+        for(String sampleId : sampleIds)
         {
-            for(String sampleId : sampleIds)
-            {
-                msiJitterCalcs.setSampleParams(sampleId, DEFAULT_JITTER_PARAMS);
-            }
+            msiJitterCalcs.setSampleParams(sampleId, jitterDefaults);
         }
 
         return msiJitterCalcs;
     }
 
     public List<MsiModelParams> getSampleParams(final String sampleId) { return mSampleParams.get(sampleId); }
+    public boolean getProbableMsiStatus(final String sampleId) { return mProbableMsiSample.get(sampleId); }
 
     public void setSampleParams(final String sampleId, final List<JitterModelParams> params)
     {
         mSampleParams.put(sampleId, params.stream().map(x -> new MsiModelParams(x)).collect(Collectors.toList()));
+        mProbableMsiSample.put(sampleId, false);
     }
 
-    public boolean loadSampleJitterParams(final List<String> sampleIds, final String jitterParamsDir)
+    public boolean loadSampleJitterParams(final List<String> sampleIds, final String jitterParamsDir, final List<JitterModelParams> defaultParams)
     {
         try
         {
             for(String sampleId : sampleIds)
             {
                 String jitterParamFile = JitterModelParamsFile.generateFilename(jitterParamsDir, sampleId);
+                String jitterCountFile = JitterCountsTableFile.generateFilename(jitterParamsDir, sampleId);
 
-                if(!Files.exists(Paths.get(jitterParamFile)))
+                if(!Files.exists(Paths.get(jitterParamFile)) || !Files.exists(Paths.get(jitterCountFile)))
+                {
+                    SG_LOGGER.error("missing jitter param files: params({}) counts({})", jitterParamFile, jitterCountFile);
                     return false;
+                }
+
+                List<MsiModelParams> defaultMsiParams = defaultParams.stream().map(x -> new MsiModelParams(x)).collect(Collectors.toList());
+                Collection<JitterCountsTable> jitterCounts = JitterCountsTableFile.read(jitterCountFile);
+                ConsensusType consensusType = selectConsensusType(jitterCounts);
 
                 List<JitterModelParams> rawParams = JitterModelParamsFile.read(jitterParamFile);
-                List<MsiModelParams> modelParams = rawParams.stream().map(x -> new MsiModelParams(x)).collect(Collectors.toList());
-                mSampleParams.put(sampleId, modelParams);
+                List<MsiModelParams> msiParams = rawParams.stream()
+                        .filter(x -> x.ConsensusType == consensusType)
+                        .map(x -> new MsiModelParams(x))
+                        .collect(Collectors.toList());
+
+                jitterCounts = jitterCounts.stream().filter(x -> x.ConsensusType == consensusType).collect(Collectors.toList());
+
+                PerSampleJitterParams sampleJitterParams = shouldRevertToDefaults(msiParams, defaultMsiParams, jitterCounts);
+
+                mSampleParams.put(sampleId, sampleJitterParams.UseDefaults ? sampleJitterParams.ParamList : msiParams);
+                mProbableMsiSample.put(sampleId, sampleJitterParams.UseDefaults);
             }
 
-            SG_LOGGER.debug("loaded {} fitter param files", sampleIds.size());
+            SG_LOGGER.debug("loaded {} jitter param files", sampleIds.size());
         }
         catch(Exception e)
         {
+            SG_LOGGER.error("missing jitter param file: {}", e.toString());
+            e.printStackTrace();
             return false;
         }
 
         return true;
+    }
+
+    private ConsensusType selectConsensusType(final Collection<JitterCountsTable> jitterCounts)
+    {
+        EnumMap<ConsensusType, Integer> readCountByConsensusType = Maps.newEnumMap(ConsensusType.class);
+        for(JitterCountsTable jitterCount : jitterCounts)
+            readCountByConsensusType.merge(jitterCount.ConsensusType, jitterCount.totalReadCount(), Integer::sum);
+
+        if(readCountByConsensusType.size() == 1)
+            return readCountByConsensusType.keySet().stream().findAny().orElse(null);
+
+        int maxReadCount = -1;
+        ConsensusType maxConsensusType = ConsensusType.NONE;
+        for(Map.Entry<ConsensusType, Integer> entry : readCountByConsensusType.entrySet())
+        {
+            ConsensusType consensusType = entry.getKey();
+            int readCount = entry.getValue();
+            if(readCount > maxReadCount || (readCount == maxReadCount && consensusType == ConsensusType.NONE))
+            {
+                maxReadCount = readCount;
+                maxConsensusType = consensusType;
+            }
+        }
+
+        return maxConsensusType;
+    }
+
+    private class PerSampleJitterParams
+    {
+        public final List<MsiModelParams> ParamList;
+        public final boolean UseDefaults;
+
+        public PerSampleJitterParams(final List<MsiModelParams> paramList, final boolean useDefaults)
+        {
+            ParamList = paramList;
+            UseDefaults = useDefaults;
+        }
+    }
+
+    private PerSampleJitterParams shouldRevertToDefaults(
+            final List<MsiModelParams> msiParams, final List<MsiModelParams> defaultParams, final Collection<JitterCountsTable> jitterCounts)
+    {
+        double comparisonScore = 0;
+
+        List<MsiModelParams> sampleParamList = Lists.newArrayListWithCapacity(msiParams.size());
+
+        for(JitterCountsTable unitParams : jitterCounts)
+        {
+            String repeatUnit = unitParams.RepeatUnit.split("/")[0];
+            MsiModelParams relevantMsiParams = findApplicableParams(msiParams, repeatUnit);
+            MsiModelParams relevantDefaultParams = findApplicableParams(defaultParams, repeatUnit);
+
+            double relevantMsiSkew = relevantMsiParams.params().MicrosatelliteSkew;
+
+            JitterModelParams sampleJitterParams = new JitterModelParams(
+                    relevantDefaultParams.params().RepeatUnit, relevantDefaultParams.params().ConsensusType, relevantDefaultParams.params().OptimalScaleRepeat4,
+                    relevantDefaultParams.params().OptimalScaleRepeat5, relevantDefaultParams.params().OptimalScaleRepeat6,
+                    relevantDefaultParams.params().ScaleFitGradient, relevantDefaultParams.params().ScaleFitIntercept, relevantMsiSkew);
+
+            MsiModelParams sampleModelParams = new MsiModelParams(sampleJitterParams);
+
+            sampleParamList.add(sampleModelParams);
+
+            for(JitterCountsTable.Row perRepeatData : unitParams.getRows())
+            {
+                int refLength = perRepeatData.refNumUnits;
+                for(Map.Entry<Integer, Integer> entry : perRepeatData.jitterCounts.entrySet())
+                {
+                    int jitterLength = entry.getKey();
+
+                    if(Math.abs(jitterLength) > MSI_JITTER_MAX_REPEAT_CHANGE || jitterLength == 0)
+                        continue;
+
+                    Double rawScale = getScaleParam(relevantMsiParams.params(), refLength);
+                    double rawErrorRate = relevantMsiParams.calcErrorRate(refLength, jitterLength, rawScale);
+
+                    double rawPhredScore = probabilityToPhredQual(rawErrorRate);
+                    Double defaultScale = getScaleParam(sampleModelParams.params(), refLength);
+                    double defaultErrorRate = sampleModelParams.calcErrorRate(refLength, jitterLength, defaultScale);
+                    double defaultPhredScore = probabilityToPhredQual(defaultErrorRate);
+                    comparisonScore += (rawPhredScore - defaultPhredScore) * entry.getValue();
+                }
+            }
+        }
+
+        return new PerSampleJitterParams(sampleParamList, comparisonScore < 0);
     }
 
     public double calcErrorRate(final VariantReadContext readContext, final String sampleId)
@@ -89,24 +209,37 @@ public class MsiJitterCalcs
             return 0;
 
         int repeatIndexStart = readContext.variantRefIndex() + 1;
+        int readRepeatIndexStart = readContext.VarIndex + 1;
 
         RepeatInfo refRepeat = RepeatInfo.findMaxRepeat(
                 readContext.RefBases, repeatIndexStart, repeatIndexStart, MAX_REPEAT_LENGTH, MIN_REPEAT_COUNT + 1,
                 false, repeatIndexStart);
 
-        if(refRepeat == null)
-            return 0;
+        RepeatInfo inferredRefRepeat = RepeatInfo.findMaxRepeat(
+                readContext.ReadBases, readRepeatIndexStart, readRepeatIndexStart, MAX_REPEAT_LENGTH, MIN_REPEAT_COUNT + 1,
+                false, readRepeatIndexStart);
 
-        // check if the alt adjusts the repeat by +/- one unit
         String altBases = readContext.variant().isInsert() ?
                 readContext.variant().Alt.substring(1) : readContext.variant().Ref.substring(1);
 
-        int impliedAltChange = altBases.length() / refRepeat.repeatLength();
+        RepeatInfo repeatToUse;
+        if(inferredRefRepeat == null || !altBases.startsWith(inferredRefRepeat.Bases))
+        {
+            repeatToUse = refRepeat;
+        }
+        else
+        {
+            int refRepeatCount = refRepeat == null ? 0 : refRepeat.Count;
+            int inferredRefRepeatCount = inferredRefRepeat.Count - getImpliedAltChange(readContext, altBases, inferredRefRepeat);
+            repeatToUse = new RepeatInfo(inferredRefRepeat.Index, inferredRefRepeat.Bases, Math.max(refRepeatCount, inferredRefRepeatCount));
+        }
 
-        if(readContext.variant().isDelete())
-            impliedAltChange *= -1;
+        if(repeatToUse == null)
+            return 0;
 
-        if(impliedAltChange > MSI_JITTER_MAX_REPEAT_CHANGE)
+        int impliedAltChange = getImpliedAltChange(readContext, altBases, repeatToUse);
+
+        if(impliedAltChange > MSI_JITTER_MAX_REPEAT_CHANGE || impliedAltChange == 0)
             return 0;
 
         List<MsiModelParams> allParams = mSampleParams.get(sampleId);
@@ -114,14 +247,23 @@ public class MsiJitterCalcs
         if(allParams == null)
             return 0;
 
-        MsiModelParams varParams = findApplicableParams(allParams, refRepeat.Bases);
+        MsiModelParams varParams = findApplicableParams(allParams, repeatToUse.Bases);
 
         if(varParams == null)
             return 0;
 
-        Double fixedScale = getScaleParam(varParams.params(), refRepeat.Count);
+        Double fixedScale = getScaleParam(varParams.params(), repeatToUse.Count);
 
-        return varParams.calcErrorRate(refRepeat.Count, impliedAltChange, fixedScale);
+        return varParams.calcErrorRate(repeatToUse.Count, impliedAltChange, fixedScale);
+    }
+
+    private static int getImpliedAltChange(VariantReadContext readContext, String altBases, RepeatInfo repeat)
+    {
+        int impliedAltChange = altBases.length() / repeat.repeatLength();
+
+        if(readContext.variant().isDelete())
+            impliedAltChange *= -1;
+        return impliedAltChange;
     }
 
     private Double getScaleParam(final JitterModelParams params, int repeatCount)

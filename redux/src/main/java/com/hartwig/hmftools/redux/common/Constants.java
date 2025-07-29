@@ -2,9 +2,7 @@ package com.hartwig.hmftools.redux.common;
 
 public class Constants
 {
-    // BAM processing
-    public static final int DEFAULT_PARTITION_SIZE = 1000000;
-    public static final int DEFAULT_POS_BUFFER_SIZE = 500;
+    public static final String FILE_ID = "redux";
 
     public static final int DEFAULT_READ_LENGTH = 151;
 
@@ -12,6 +10,8 @@ public class Constants
     public static final int DEFAULT_MAX_UMI_BASE_DIFF = 1;
     public static final int MAX_IMBALANCED_UMI_BASE_DIFF = 4;
     public static final int MAX_IMBALANCED_UMI_COUNT = 25;
+    public static final int MIN_POLYG_UMI_TAIL_LENGTH = 2;
+    public static final int MAX_UMI_BASE_DIFF_JITTER_COLLAPSE = 1;
 
     public static final char DEFAULT_DUPLEX_UMI_DELIM = '_';
 
@@ -24,9 +24,6 @@ public class Constants
     public static final int UNMAP_CHIMERIC_FRAGMENT_LENGTH_MAX = 1000;
 
     public static final int SUPP_ALIGNMENT_SCORE_MIN = 30;
-
-    // performance
-    public static final double LOCK_ACQUIRE_LONG_TIME_MS = 100;
 
     // consensus building
     public static int CONSENSUS_MAX_DEPTH = 100;
