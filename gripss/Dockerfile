@@ -1,41 +1,43 @@
-# Base image with Maven and JDK
-FROM maven:3.8.4-jdk-11
+# Build stage: Maven + JDK 11 (gripss targets Java 11). Only the jar is kept from this stage.
+FROM maven:3.9-eclipse-temurin-11 AS build
 
 ENV GRIPSS_VER="2.4"
-ENV OPT /opt/wtsi-cgp
-ENV JAVA $OPT/java
-ENV CLASSPATH ${JAVA}/gripss.jar
 
-# Create application directory
-RUN mkdir -p ${JAVA}
-
-# Copy project files into the Docker image
-# Copy the parent POM
-COPY pom.xml /home/app/hmftools/pom.xml
-# Copy the common module
-COPY hmf-common /home/app/hmftools/hmf-common
-# Copy gripss module
-COPY gripss /home/app/hmftools/gripss
-
-# Navigate to the gripss directory to run Maven commands
-WORKDIR /home/app/hmftools/gripss
-
-# Install the required dependencies - parent POM and common module
 WORKDIR /home/app/hmftools
-RUN mvn clean install -N
+# The parent POM, the common module and gripss
+COPY pom.xml pom.xml
+COPY hmf-common hmf-common
+COPY gripss gripss
 
-WORKDIR /home/app/hmftools/hmf-common
-RUN mvn clean install
+# Install the parent POM and the common module, then package gripss
+RUN mvn clean install -N && \
+    mvn -f hmf-common/pom.xml clean install && \
+    mvn -f gripss/pom.xml clean package && \
+    cp gripss/target/gripss-${GRIPSS_VER}-jar-with-dependencies.jar /gripss.jar
 
-# Then, navigate to the gripss directory to run Maven commands for gripss
-WORKDIR /home/app/hmftools/gripss
-RUN mvn clean package && \
-    cp target/gripss-${GRIPSS_VER}-jar-with-dependencies.jar ${JAVA}/gripss.jar
 
-# Setup user
-RUN adduser --disabled-password --gecos '' ubuntu && \
-    mkdir -p /home/ubuntu
+# Runtime stage: Java 11 runtime only, on a supported Ubuntu (24.04)
+FROM eclipse-temurin:11-jre-noble
 
+ENV OPT=/opt/wtsi-cgp
+ENV JAVA=$OPT/java
+ENV CLASSPATH=${JAVA}/gripss.jar
+
+# procps (free) and sysstat (iostat) are used by the pipelines' monitoring script
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends procps sysstat && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /gripss.jar ${JAVA}/gripss.jar
+
+# Fail the build if the jar does not start or the user is missing
+RUN id ubuntu && java -version && \
+    ! java -jar ${JAVA}/gripss.jar -help 2>&1 | \
+      grep -E "Could not find or load main class|NoClassDefFoundError|UnsupportedClassVersionError|Invalid or corrupt jarfile"
+
+# The base image already has the non-root user ubuntu (uid 1000)
 USER ubuntu
 WORKDIR /home/ubuntu
 
