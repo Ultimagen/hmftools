@@ -1,10 +1,14 @@
 name: Build gripss Docker image
 
+# Builds gripss from this branch with the shared ugbio-utils workflow: the image is scanned for
+# vulnerabilities (reported, not blocking) before it is pushed.
+# gripss is built from gripss-v2.4.0_ultima (upstream master moved gripss into esvee).
+
 on:
   workflow_dispatch:
     inputs:
       image-tag:
-        description: "Docker image tag, If omitted will use github short sha"
+        description: "Docker image tag. If omitted: gripss-v2.4.0_ultima_<sha> on gripss-v2.4.0_ultima, test_<sha> on other branches"
         required: false
         type: string
 
@@ -23,4 +27,4 @@ jobs:
       docker-image: gripss
       docker-file: gripss/Dockerfile
       docker-tag: ${{ inputs.image-tag }}
-      base-branch: master
+      base-branch: gripss-v2.4.0_ultima

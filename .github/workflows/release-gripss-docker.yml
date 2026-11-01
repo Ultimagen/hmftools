@@ -1,0 +1,35 @@
+name: Release and Build gripss Docker image
+
+# Bumps the version from the latest semver git tag, builds and scans the image
+# (gripss:<version>_<sha> and gripss:<version>), then pushes the git tag.
+# Run it on gripss-v2.4.0_ultima (upstream master moved gripss into esvee).
+
+on:
+  workflow_dispatch:
+    inputs:
+      minor-release:
+        # The shared workflow bumps the patch version when true and the minor version when false
+        description: "Is this a minor release? Checked: patch bump (2.4.1 -> 2.4.2). Unchecked: minor bump (2.4.1 -> 2.5.0)"
+        type: boolean
+        required: false
+        default: false
+      create-release:
+        description: "Create a GitHub Release?"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  release-and-build:
+    uses: Ultimagen/ugbio-utils/.github/workflows/release-and-build-docker.yml@main
+    secrets: inherit
+    with:
+      docker-image: gripss
+      docker-file: gripss/Dockerfile
+      base-branch: gripss-v2.4.0_ultima
+      minor-release: ${{ inputs.minor-release }}
+      create-release: ${{ inputs.create-release }}
