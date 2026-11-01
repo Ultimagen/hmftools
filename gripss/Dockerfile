@@ -32,10 +32,8 @@ RUN apt-get update && \
 
 COPY --from=build /gripss.jar ${JAVA}/gripss.jar
 
-# Fail the build if the jar does not start or the user is missing
-RUN id ubuntu && java -version && \
-    ! java -jar ${JAVA}/gripss.jar -help 2>&1 | \
-      grep -E "Could not find or load main class|NoClassDefFoundError|UnsupportedClassVersionError|Invalid or corrupt jarfile"
+# Fail the build if the jar does not start or the user is missing (gripss exits 0 on -version)
+RUN id ubuntu && java -jar ${JAVA}/gripss.jar -version
 
 # The base image already has the non-root user ubuntu (uid 1000)
 USER ubuntu

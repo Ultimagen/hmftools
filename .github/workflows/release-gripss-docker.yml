@@ -8,7 +8,8 @@ on:
   workflow_dispatch:
     inputs:
       minor-release:
-        description: "Is this a minor release?"
+        # The shared workflow bumps the patch version when true and the minor version when false
+        description: "Is this a minor release? Checked: patch bump (2.4.1 -> 2.4.2). Unchecked: minor bump (2.4.1 -> 2.5.0)"
         type: boolean
         required: false
         default: false
