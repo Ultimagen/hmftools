@@ -18,6 +18,9 @@ on:
         required: false
         default: false
 
+# The placeholder needs no access to the repository
+permissions: {}
+
 jobs:
   placeholder:
     runs-on: ubuntu-latest
