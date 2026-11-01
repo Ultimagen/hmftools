@@ -27,15 +27,20 @@ import java.util.StringJoiner;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.hla.LilacQcData;
+import com.hartwig.hmftools.lilac.GeneSelector;
 import com.hartwig.hmftools.lilac.hla.HlaAllele;
+
+import org.jetbrains.annotations.Nullable;
 
 public final class LilacQC
 {
+    private final GeneSelector mGenes;
+
     public final Set<LilacQCStatus> Status;
     public final double ScoreMargin;
     public final String NextSolutionInfo;
     public final HlaAllele HlaYAllele;
-    public final int MedianBaseQual;
+    public final Integer MedianBaseQual;
 
     public final AminoAcidQC AminoAcidQC;
     public final BamQC BamQC;
@@ -44,10 +49,12 @@ public final class LilacQC
     public final SomaticVariantQC SomaticVariantQC;
 
     public LilacQC(
-            double scoreMargin, final String nextSolutionInfo, int medianBaseQual, final HlaAllele hlaYAllele,
-            final AminoAcidQC aminoAcidQC, final BamQC bamQC,
-            final CoverageQC coverageQC, final HaplotypeQC haplotypeQC, final SomaticVariantQC somaticVariantQC)
+            final GeneSelector genes, double scoreMargin, final String nextSolutionInfo, final Integer medianBaseQual,
+            final HlaAllele hlaYAllele, final AminoAcidQC aminoAcidQC, final BamQC bamQC, final CoverageQC coverageQC,
+            final HaplotypeQC haplotypeQC, final SomaticVariantQC somaticVariantQC)
     {
+        mGenes = genes;
+
         ScoreMargin = scoreMargin;
         NextSolutionInfo = nextSolutionInfo;
         MedianBaseQual = medianBaseQual;
@@ -63,25 +70,27 @@ public final class LilacQC
         populateStatus();
     }
 
-    public List<String> getHeaderItems()
+    private static List<String> getHeaderItems()
     {
         List<String> columns = Lists.newArrayList();
+        columns.add("Genes");
         columns.add(LilacQcData.FLD_QC_STATUS);
         columns.add("ScoreMargin");
         columns.add("NextSolutionAlleles");
         columns.add("MedianBaseQuality");
         columns.add("HlaYAllele");
-        columns.addAll(BamQC.header());
-        columns.addAll(CoverageQC.header());
-        columns.addAll(AminoAcidQC.header());
+        columns.addAll(com.hartwig.hmftools.lilac.qc.BamQC.header());
+        columns.addAll(com.hartwig.hmftools.lilac.qc.CoverageQC.header());
+        columns.addAll(com.hartwig.hmftools.lilac.qc.AminoAcidQC.header());
         columns.addAll(com.hartwig.hmftools.lilac.qc.HaplotypeQC.header());
-        columns.addAll(SomaticVariantQC.header());
+        columns.addAll(com.hartwig.hmftools.lilac.qc.SomaticVariantQC.header());
         return columns;
     }
 
-    public List<String> getBodyItems()
+    private List<String> getBodyItems()
     {
         List<String> columns = Lists.newArrayList();
+        columns.add(mGenes.toString());
 
         StringJoiner sj = new StringJoiner(ITEM_DELIM);
         Status.forEach(x -> sj.add(x.toString()));
@@ -89,7 +98,7 @@ public final class LilacQC
 
         columns.add(String.format("%.3f", ScoreMargin));
         columns.add(NextSolutionInfo);
-        columns.add(String.valueOf(MedianBaseQual));
+        columns.add(MedianBaseQual != null ? String.valueOf(MedianBaseQual) : "-");
         columns.add(HlaYAllele != null ? HlaYAllele.toString() : "NONE");
         columns.addAll(BamQC.body());
         columns.addAll(CoverageQC.body());
@@ -99,17 +108,17 @@ public final class LilacQC
         return columns;
     }
 
-    public String header()
+    public static String header()
     {
         StringJoiner sj = new StringJoiner(TSV_DELIM);
-        getHeaderItems().forEach(x -> sj.add(x));
+        getHeaderItems().forEach(sj::add);
         return sj.toString();
     }
 
-    public String body()
+    private String body()
     {
         StringJoiner sj = new StringJoiner(TSV_DELIM);
-        getBodyItems().forEach(x -> sj.add(x));
+        getBodyItems().forEach(sj::add);
         return sj.toString();
     }
 
@@ -128,23 +137,33 @@ public final class LilacQC
         LL_LOGGER.info("{} QC Stats: {}", sampleId, sj.toString());
     }
 
-    public void writefile(final String fileName)
+    @Nullable
+    public static BufferedWriter initialiseWriter(final String fileName)
     {
         try
         {
-            BufferedWriter writer = createBufferedWriter(fileName, false);
-
+            BufferedWriter writer = createBufferedWriter(fileName);
             writer.write(header());
             writer.newLine();
-
-            writer.write(body());
-            writer.newLine();
-
-            writer.close();
+            return writer;
         }
         catch(IOException e)
         {
             LL_LOGGER.error("failed to write {}: {}", fileName, e.toString());
+            return null;
+        }
+    }
+
+    public void writefile(final BufferedWriter writer)
+    {
+        try
+        {
+            writer.write(body());
+            writer.newLine();
+        }
+        catch(IOException e)
+        {
+            LL_LOGGER.error("failed to write to QC file: {}", e.toString());
         }
     }
 
@@ -156,7 +175,7 @@ public final class LilacQC
             return;
         }
 
-        if(MedianBaseQual < WARN_LOW_BASE_QUAL_THRESHOLD)
+        if(MedianBaseQual != null && MedianBaseQual < WARN_LOW_BASE_QUAL_THRESHOLD)
         {
             Status.add(WARN_LOW_BASE_QUAL);
         }
@@ -177,7 +196,7 @@ public final class LilacQC
             Status.add(WARN_UNMATCHED_AMINO_ACID);
         }
 
-        if(CoverageQC.ATypes == 0 || CoverageQC.BTypes == 0 || CoverageQC.CTypes == 0)
+        if(CoverageQC.CountsByGene.values().stream().anyMatch(x -> x == 0))
         {
             Status.add(WARN_UNMATCHED_ALLELE);
         }

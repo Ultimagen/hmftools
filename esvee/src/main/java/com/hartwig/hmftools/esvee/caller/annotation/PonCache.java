@@ -34,6 +34,7 @@ import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.region.BaseRegion;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
+import com.hartwig.hmftools.common.utils.StartEndPair;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.esvee.assembly.alignment.AlternativeAlignment;
 import com.hartwig.hmftools.esvee.caller.Breakend;
@@ -136,10 +137,12 @@ public class PonCache
                 if(!breakend.isSgl() && breakend.isEnd()) // only looked up on the first breakend
                     continue;
 
+                /*
                 if(lastPosStart > 0 && breakend.Position < lastPosStart)
                 {
                     SV_LOGGER.error("var({}) out of order");
                 }
+                */
 
                 lastPosStart = breakend.Position;
 
@@ -277,9 +280,9 @@ public class PonCache
     {
         // search and up and down from this entry point for a PON match
         int maxPonCount = 0;
-        for(int i = 0; i <= 1; ++i)
+        for(StartEndPair se : StartEndPair.values())
         {
-            boolean searchUp = (i == 0);
+            boolean searchUp = se.isStart();
             int currentIndex = startIndex;
 
             while(currentIndex >= 0 && currentIndex < regions.size())
@@ -370,9 +373,9 @@ public class PonCache
         // search and up and down from this entry point for a PON match
 
         int maxPonCount = 0;
-        for(int i = 0; i <= 1; ++i)
+        for(StartEndPair se : StartEndPair.values())
         {
-            boolean searchUp = (i == 0);
+            boolean searchUp = se.isStart();
             int currentIndex = startIndex;
 
             while(currentIndex >= 0 && currentIndex < regions.size())

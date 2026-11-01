@@ -14,7 +14,6 @@ import static com.hartwig.hmftools.isofox.IsofoxConfig.ISF_LOGGER;
 import static com.hartwig.hmftools.isofox.cohort.AnalysisType.GENE_EXPRESSION_MATRIX;
 import static com.hartwig.hmftools.isofox.cohort.AnalysisType.TRANSCRIPT_EXPRESSION_MATRIX;
 import static com.hartwig.hmftools.isofox.cohort.CohortConfig.formSampleFilenames;
-import static com.hartwig.hmftools.isofox.results.ResultsWriter.DELIMITER;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -128,7 +127,7 @@ public class ExpressionMatrix
 
             boolean buildIndexes = itemCache.isEmpty();
 
-            for(final String data : lines)
+            for(String data : lines)
             {
                 final String[] items = data.split(fileDelim, -1);
 
@@ -216,7 +215,7 @@ public class ExpressionMatrix
             if(mType == TRANSCRIPT_EXPRESSION_MATRIX)
                 writer.write(",TransName");
 
-            for(final String sampleId : mConfig.SampleData.SampleIds)
+            for(String sampleId : mConfig.SampleData.SampleIds)
             {
                 writer.write(String.format(",%s", sampleId));
             }

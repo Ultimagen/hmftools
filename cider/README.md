@@ -14,9 +14,8 @@ java -Xmx16G -cp cider.jar com.hartwig.hmftools.cider.CiderApplication \
    -bam COLO829T.bam \
    -output_dir /path/to/COLO829/cider \
    -ref_genome_version 37 \
+   -ref_genome /path/to/genome/Homo_sapiens.GRCh37.GATK.illumina.fasta \
    -write_cider_bam \
-   -blast /tools/ncbi-blast/ncbi-blast-2.13.0+ \
-   -blast_db /data/blastdb \
    -threads 8
 ```
 ### Mandatory Arguments
@@ -30,27 +29,27 @@ java -Xmx16G -cp cider.jar com.hartwig.hmftools.cider.CiderApplication \
 
 ### Optional Arguments
 
-| Argument                   | Default | Description                                                                                             |
-|----------------------------|---------|---------------------------------------------------------------------------------------------------------|
-| write_cider_bam            | Off     | If specified, write a small bam file of all the extracted reads.                                        |
-| threads                    | 1       | Number of threads to use, defaults to 1                                                                 |
-| max_fragment_length        | 1000    | Approximate length of the longest fragment. Defaults to 1000                                            |
-| threads                    | 1       | Number of threads to use, defaults to 1                                                                 |
-| min_base_quality           | 25      | Minimum base quality for a base to be considered a "support" base, defaults to 25                       |
-| report_match_ref_seq       | Off     | When specified, reports VDJ sequences that match reference genome                                       |
-| num_trim_bases             | 0       | Number of bases to trim on each side of reads. Defaults to 0                                            |
-| max_low_qual_base_fraction | 0.1     | Maximum fraction of bases in a read that can be low quality. Reads that exceed this limit are discarded |
-| max_reads_per_gene         | 600,000 | Maximum number of reads per gene. If number of reads exceed this limit, they are downsampled.           |
-| blast                      |         | Path to the ncbi-blast installation                                                                     |
-| blast_db                   |         | Path to the ncbi-blast database                                                                         |
-| primer_csv                 |         | Path to csv file containing primers                                                                     |
-| primer_mismatch_max        | 0       | Maximum number of mismatch bases for matching primer sequence                                           |
+| Argument                   | Default          | Description                                                                                             |
+|----------------------------|------------------|---------------------------------------------------------------------------------------------------------|
+| write_cider_bam            | Off              | If specified, write a small bam file of all the extracted reads.                                        |
+| threads                    | 1                | Number of threads to use, defaults to 1                                                                 |
+| max_fragment_length        | 1000             | Approximate length of the longest fragment. Defaults to 1000                                            |
+| threads                    | 1                | Number of threads to use, defaults to 1                                                                 |
+| min_base_quality           | 25               | Minimum base quality for a base to be considered a "support" base, defaults to 25                       |
+| report_match_ref_seq       | Off              | When specified, reports VDJ sequences that match reference genome                                       |
+| num_trim_bases             | 0                | Number of bases to trim on each side of reads. Defaults to 0                                            |
+| max_low_qual_base_fraction | 0.1              | Maximum fraction of bases in a read that can be low quality. Reads that exceed this limit are discarded |
+| max_reads_per_gene         | 100,000          | Maximum number of reads per gene. If number of reads exceed this limit, they are downsampled.           |
+| ref_genome                 |                  | Path to the reference genome FASTA                                                                      |
+| bwa_index_image            | {ref_genome}.img | Path to the reference genome BWA-MEM index GATK image                                                   |
+| primer_csv                 |                  | Path to csv file containing primers                                                                     |
+| primer_mismatch_max        | 0                | Maximum number of mismatch bases for matching primer sequence                                           |
 
 ## Algorithm
 
 ![Input CIDER_FLOWCHART](doc/cider_flowchart.svg)
 
-The CIDEr algorithm consist of the following steps:
+The CIDER algorithm consist of the following steps:
  1. Extract reads.
  2. Assembly and collapse V + J breakends.
  3. CDR3 identification and support.
@@ -95,67 +94,77 @@ Each V only anchored read is also checked for partial overlap with each J only a
 Each collapsed sequence is either marked as PASS or one or more of the following filters 
 - **PARTIAL** - Only has V or J
 - **NO_VDJ_ALIGNMENT** - Sequence is not aligned to any V/D/J gene
-- **NO_V_ANCHOR** - No candidate V anchor found. Only applied if BLASTN is not used. 
-- **NO_J_ANCHOR** - No candidate J anchor found. Only applied if BLASTN is not used.
-- **POOR_V_ANCHOR** - V anchor is found by BLOSUM match with negative similarity score. Only applied if BLASTN is not used.
-- **POOR_J_ANCHOR** - J anchor is found by BLOSUM match with negative similarity score. Only applied if BLASTN is not used.
+- **NO_V_ANCHOR** - No candidate V anchor found. Only applied if alignment is not used. 
+- **NO_J_ANCHOR** - No candidate J anchor found. Only applied if alignment is not used.
+- **POOR_V_ANCHOR** - V anchor is found by BLOSUM match with negative similarity score. Only applied if alignment is not used.
+- **POOR_J_ANCHOR** - J anchor is found by BLOSUM match with negative similarity score. Only applied if alignment is not used.
 - **DUPLICATE** - CDR3 nt sequence is identical to another sequence with more support (different anchors) 
 - **CDR3_DELETED** - A V and J anchor are found, but the CDR3 portion of the sequence (including conserved C,W,F) is fully deleted
 - **MAX_LENGTH** - CDR3 nt sequence must be less than 40 AA in length 
 - **MIN_LENGTH** - CDR3 nt sequence must be at least 5 AA in length (including anchor C & W/F)
-- **MATCHES_REF** - (NonSplitRead+vNonSplitReads >=2 AND either vAlignedReads or jAlignedReads=0) OR BLASTN matches to reference contig.
-- **NO_HIGH_QUAL_SUPPORT** - Some base in the CDR3 is not supported by any high base quality base in any read. 
+- **MATCHES_REF** - (NonSplitRead+vNonSplitReads >=2 AND either vAlignedReads or jAlignedReads=0), OR alignment matches to reference contig, OR the sequences matches known list (see below).
+- **NO_HIGH_QUAL_SUPPORT** - Some base in the CDR3 is not supported by any high base quality base in any read.
+- **V_J_OVERLAP** - V and J genes were aligned and annotated, but the V and J aligned regions are in the wrong order.
+
+Note that CIDER has a small list of CDR3 sequences known to match the reference genome, which are not found by alignment. These will always be marked as `MATCHES_REF`.  The list of amino acid sequences is:
+- CTXGPKXELRT
 
 Note that sequences with "no anchor" may represent partial rearrangements.
 
 CIDER hard filters variants with filter='MATCHES_REF' or if filter contains both MIN_LENGTH and either NO_V_ANCHOR or NO_J_ANCHOR.
- 
+
 The full set of fields output are:
 
-| Field                                 | Explanation                                                                                                                                         | 
-|---------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
-| cdr3Seq                               | CDR3 nucleotide sequence. If either the V or J anchor is missing only the first 63 bases of sequence are shown                                      | 
-| cdr3AA                                | CDR3 aa sequence. If either the V or J anchor is missing only the first 63 bases of sequence are shown                                              | 
-| locus                                 | Ig/TCR locus of the sequence                                                                                                                        |
-| Filter                                | PASS if viable CDR3 sequence or one or more filter reasons  (see above)                                                                             |
-| blastnStatus                          | SKIPPED_BLASTN, V_D_J, V_J, V_D, D_J, V_ONLY, D_ONLY, J_ONLY, NO_REARRANGEMENT, NO_VDJ_ALIGNMENT                                                    |
-| minHighQualBaseReads                  | number of reads in the least supported base in the CDR3 region or for the first 63 bases of the candidate CDR3 sequence if only one anchor is found |
-| assignedReads                         | Total reads assigned to candidate sequence.                                                                                                         | 
-| vAlignedReads                         | # of reads initially aligned to V gene                                                                                                              | 
-| jAlignedReads                         | # of reads initially aligned to J gene                                                                                                              | 
-| inFrame                               | CDR3 sequence is inframe {T/F}                                                                                                                      | 
-| containsStop                          | CDR3 contains stop codon {T/F}                                                                                                                      | 
-| vType                                 | {IGKV;IGLV;IGHV;TRAV;TRBV;TRDV;TRGV}                                                                                                                | 
-| vAnchorStart                          | Position of V anchor start in nt sequence                                                                                                           |
-| vAnchorEnd                            | Position of V anchor end in nt sequence                                                                                                             | 
-| vAnchorSeq                            | V anchor sequence in nt                                                                                                                             | 
-| vAnchorTemplateSeq                    | Best scoring V template anchor in nt (or null if read aligned to V anchor)                                                                          | 
-| vAnchorAA                             | V anchor sequence in AA                                                                                                                             | 
-| vAnchorTemplateAA                     | Best scoring V template Anchor in AA (or null if read aligned to V anchor)                                                                          | 
-| vSimilarityScore                      | Blosum similarity score for template anchor (or null if read aligned to V anchor)                                                                   | 
-| vNonSplitReads                        | Count of reads supporting sequence with at least 30 aligned bases either side of last base of conserved C                                           | 
-| jType                                 | {IGHJ;IGKJ;IGK-KDE,IGLJ;TRAJ;TRBJ;TRDJ;TRGJ}                                                                                                        | 
-| jAnchorStart                          | Position of J anchor start in nt sequence                                                                                                           |
-| jAnchorEnd                            | Position of J anchor end in nt sequence                                                                                                             | 
-| jAnchorSeq                            | J anchor sequence in nt                                                                                                                             | 
-| jAnchorTemplateSeq                    | Best scoring J template anchor in nt (or null if read aligned to J anchor)                                                                          | 
-| jAnchorAA                             | J anchor sequence in AA                                                                                                                             | 
-| jAnchorTemplateAA                     | Best scoring J template Anchor in AA (or null if read aligned to J anchor)                                                                          | 
-| jSimilarityScore                      | Blosum62 similarity score for template anchor (or null if read aligned to J anchor)                                                                 | 
-| jNonSplitReads                        | Count of reads supporting sequence with at least 30 aligned bases either side of first base of conserved W/F                                        | 
-| vGene, dGene, jGene                   | The V, D or J gene alleles that this sequence is aligned to                                                                                         | 
-| vPIdent, dPIdent, jPIdent             | The align sequence % identity with the V, D or J gene                                                                                               | 
-| vAlignStart, dAlignStart, jAlignStart | Start of the alignment with the V, D or J gene                                                                                                      | 
-| vAlignEnd, dAlignEnd, jAlignEnd       | End of the alignment with the V, D or J gene                                                                                                        |
-| fullSeq                               | Full consensus sequence in nucleotides                                                                                                              | 
-| support                               | Counts of high quality base support at each nucleotide (radix-36 ASCII encoded)                                                                     |
+| Field                                                      | Explanation                                                                                                                                                  | 
+|------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| cdr3Seq                                                    | CDR3 nucleotide sequence. If either the V or J anchor is missing only the first 63 bases of sequence are shown                                               | 
+| cdr3AA                                                     | CDR3 aa sequence. If either the V or J anchor is missing only the first 63 bases of sequence are shown                                                       | 
+| locus                                                      | Ig/TCR locus of the sequence                                                                                                                                 |
+| Filter                                                     | PASS if viable CDR3 sequence or one or more filter reasons  (see above)                                                                                      |
+| alignmentStatus                                            | SKIPPED_ALIGN, V_D_J, V_J, V_D, D_J, V_ONLY, D_ONLY, J_ONLY, NO_REARRANGEMENT, NO_VDJ_ALIGNMENT                                                              |
+| minHighQualBaseReads                                       | number of reads in the least supported base in the CDR3 region or for the first 63 bases of the candidate CDR3 sequence if only one anchor is found          |
+| assignedReads                                              | Total reads assigned to candidate sequence.                                                                                                                  | 
+| vAlignedReads                                              | # of reads initially aligned to V gene                                                                                                                       | 
+| jAlignedReads                                              | # of reads initially aligned to J gene                                                                                                                       | 
+| inFrame                                                    | CDR3 sequence is inframe {T/F}                                                                                                                               | 
+| containsStop                                               | CDR3 contains stop codon {T/F}                                                                                                                               | 
+| vType                                                      | {IGKV;IGLV;IGHV;TRAV;TRBV;TRDV;TRGV}                                                                                                                         | 
+| vAnchorStart                                               | Position of V anchor start in nt sequence                                                                                                                    |
+| vAnchorEnd                                                 | Position of V anchor end in nt sequence                                                                                                                      | 
+| vAnchorSeq                                                 | V anchor sequence in nt                                                                                                                                      | 
+| vAnchorTemplateSeq                                         | Best scoring V template anchor in nt (or null if read aligned to V anchor)                                                                                   | 
+| vAnchorAA                                                  | V anchor sequence in AA                                                                                                                                      | 
+| vAnchorTemplateAA                                          | Best scoring V template Anchor in AA (or null if read aligned to V anchor)                                                                                   | 
+| vSimilarityScore                                           | Blosum similarity score for template anchor (or null if read aligned to V anchor)                                                                            | 
+| vNonSplitReads                                             | Count of reads supporting sequence with at least 30 aligned bases either side of last base of conserved C                                                    | 
+| jType                                                      | {IGHJ;IGKJ;IGK-KDE,IGLJ;TRAJ;TRBJ;TRDJ;TRGJ}                                                                                                                 | 
+| jAnchorStart                                               | Position of J anchor start in nt sequence                                                                                                                    |
+| jAnchorEnd                                                 | Position of J anchor end in nt sequence                                                                                                                      | 
+| jAnchorSeq                                                 | J anchor sequence in nt                                                                                                                                      | 
+| jAnchorTemplateSeq                                         | Best scoring J template anchor in nt (or null if read aligned to J anchor)                                                                                   | 
+| jAnchorAA                                                  | J anchor sequence in AA                                                                                                                                      | 
+| jAnchorTemplateAA                                          | Best scoring J template Anchor in AA (or null if read aligned to J anchor)                                                                                   | 
+| jSimilarityScore                                           | Blosum62 similarity score for template anchor (or null if read aligned to J anchor)                                                                          | 
+| jNonSplitReads                                             | Count of reads supporting sequence with at least 30 aligned bases either side of first base of conserved W/F                                                 | 
+| vGene, dGene, jGene                                        | The V, D or J gene alleles that this sequence is aligned to                                                                                                  | 
+| vGeneSupplementary, dGeneSupplementary, jGeneSupplementary | If the sequence aligns equally well to multiple genes, these fields contain the additional genes                                                             |
+| vPIdent, jPIdent                                           | The % identity of the V or J gene with the annotated gene's IMGT sequence, in accordance to the somatic hypermutation status determination rules (see below) | 
+| vPIdentLen, jPIdentLen                                     | The length of sequence used to determine vPIdent/jPIdent                                                                                                     |
+| vPIdentIndelBases, jPIdentIndelBases                       | Number of insertion or deletion bases in the alignment used to calculate vPIdent/jPIdent                                                                     |
+| vPIdentClipBases, jPIdentClipBases                         | Number of clipped bases on the alignment to the IMGT sequence. This indicates the number of bases which strongly diverged from the IMGT sequence.            |
+| vImgtRefUnaligned, jImgtRefUnaligned                       | Number of IMGT reference bases on the extension side that the alignment did not reach. Includes possible unassembled sequence and alignment clip bases.      |
+| SHMStatus                                                  | Somatic hypermutation status as calculated from the V gene annotation. See the section below.                                                                |
+| vAlignStart, dAlignStart, jAlignStart                      | Start of the alignment with the V, D or J gene                                                                                                               | 
+| vAlignEnd, dAlignEnd, jAlignEnd                            | End of the alignment with the V, D or J gene                                                                                                                 |
+| fullSeq                                                    | Full consensus sequence in nucleotides                                                                                                                       | 
+| support                                                    | Counts of high quality base support at each nucleotide (radix-36 ASCII encoded)                                                                              |
 
-blastnStatus are
-- **SKIPPED_BLASTN** - cider did not query this sequence through BLASTN, it could be blastn is not configured to run, or this sequence matches reference.
+alignmentStatus are
+- **SKIPPED_ALIGN** - cider did not query this sequence through alignment, it could be alignment is not configured to run, or this sequence matches reference.
 - **V_D_J, V_J** - fully rearranged sequence
 - **V_D, D_J, V_ONLY, D_ONLY, J_ONLY** - partially rearranged sequence
 - **NO_REARRANGEMENT** - no rearrangement. This sequence matches a sequence in the reference genome.
-- **NO_VDJ_ALIGNMENT** - blastn cannot align this sequence to any V/D/J gene.
+- **NO_VDJ_ALIGNMENT** - cannot align this sequence to any V/D/J gene.
 
 ### Locus summary output
 In addition, CIDER writes a locus summary output file `<sample_id>.cider.locus_stats.tsv` with the following columns
@@ -169,40 +178,55 @@ In addition, CIDER writes a locus summary output file `<sample_id>.cider.locus_s
 | sequences     | Number of sequences found.                                                                                        | 
 | passSequences | Number of PASS sequences found.                                                                                   | 
 
-### BLASTN annotation logic
+### Alignment annotation logic
 
-When the command line arguments `-blast` and `-blast_db` are supplied, CIDER uses [BLAST+](https://www.ncbi.nlm.nih.gov/books/NBK62051/def-item/blast/)
-to query each sequence found against the human genome (GCF_000001405.39_top_level). It uses this information to assign V, D, J alleles and also
-weed out false positives. This requires BLASTN to be set up. See [Setting up BLASTN](#setting-up-blastn)
+When the `-ref_genome` command line argument is supplied, CIDER uses BWA-MEM to query each sequence found against the human reference genome and IMGT gene sequences.
+It uses this information to assign V, D, J alleles and also weed out false positives.
+Using the v38 genome for gene annotation is recommended for completeness.
 
 Following briefly describe the annotation logic:
-1. CIDER would run blastn locally and query the sequences against the human genome database. We use match/mismatch/gapopen/gapextend scores of
-   1/-4/-5/-2 and word size of 9.
-2. For each VDJ sequence, filter alignments to find the V, D, J gene matches. The rules to choose the alignment is follows:
-   + If there is one alignment with >= 95% identity that can encompass the whole sequence we will select it
-     as it indicates that this sequence matches the reference genome.
-   + Then for each aligned section we choose the one that is aligned V, D, J, IGK-Intron or IGK-Del
-     genes. If there are more than one, we choose the highest scoring alignment. V and J alignments must have at least 90%
-     sequence identity.
-3. If there is a V gene, the D, and J gene loci must match the V locus, otherwise the D and J alignments are filtered out. One
+1. CIDER would run alignment and query the sequences against the human genome and IMGT V/D/J gene sequences. We use match/mismatch/gapopen/gapextend scores of
+   1/-4/-5/-2 and word size of 8.
+2. If there is one alignment against the reference genome which covers the whole sequence with >= 95% identity, select it and indicate that the sequence matches the reference genome.
+3. Otherwise, filter alignments to find the V, D, J gene matches. The rules to choose the alignment is follows:
+   - If the gene is V or J, the alignment must have >= 90% identity to the sequence.
+   - If the gene is V or J, the alignment must overlap the corresponding anchor by >= 5 bases, if the anchor is present.
+   - The alignment with the highest alignment score is selected.
+   - In the case of multiple tied best alignments, the functional gene is preferred. The other genes are output as "supplementary" matches.
+4. If there is a V gene, the D, and J gene loci must match the V locus, otherwise the D and J alignments are filtered out. One
     exception is we allow TRA and TRD to match each other.
-4. If there is a V or J gene, the D gene locus must match either the V or the J locus. Otherwise the D alignment is removed. We also
+5. If there is a V or J gene, the D gene locus must match either the V or the J locus. Otherwise the D alignment is removed. We also
   allow TRA and TRD to match one another.
-5. Finally the V, D, J gene alignment information are combined and added as annotation into the output file.
+6. Finally the V, D, J gene alignment information are combined and added as annotation into the output file.
 
-## Setting up BLASTN
-To set up BLASTN, do the following:
-1. Follow the instruction in https://www.ncbi.nlm.nih.gov/books/NBK1762/ to install BLAST+
-2. Set up the `human_genome` blast DB:
-    ```
-    $ cd $BLASTDB
-    $ perl $BLAST_INSTALL/bin/update_blastdb.pl --passive --decompress human_genome
-    ```
-   Make sure the `BLASTDB` environment variable is defined.
+## Somatic Hypermutation Status Determination
+
+After determining which V/D/J genes best match the sequence, CIDER calculates the "somatic hypermutation status" (SHM status) - a marker for the prognosis of chronic lymphocytic leukemia (reference [1]).
+
+The SHM status is determined from the % identity of the sample's V-region to the IMGT reference sequence for the matched V gene allele. The calculation is defined as follows:
+ - The V-region extends from the last amino acid of the V anchor (usually Cys104) leftwards to the start of the exon.
+ - That sequence in the sample is compared to the corresponding aligned portion of the IMGT gene sequence, and the percentage of equal bases is counted, output in `vPIdent`.
+ - The length of the compared sequence is limited by the lengths of the sample assembled sequence and the alignment - output in `vPIdentLen` and `vPIdentClipBases`.
+ - Insertions or deletions, which are usually rare, are not counted in the calculation. They are output in `vPIdentIndelBases`.
+
+Finally, the SHM status is decided on the value of `vPIdent`:
+
+- If >= 98%, **UNMUTATED**
+- Else if >= 97%, **MUTATED_BORDERLINE**
+- Else if < 97%, **MUTATED**
+
+Please note the caveats of the SHM status calculation, where manual inspection is recommended:
+
+- `vPIdentLen` is low. Indicates only a partial match to the IMGT sequence.
+- `vPIdentClipBases` > 5-10b. Indicates only a partial match to the IMGT sequence.
+- `vImgtRefUnaligned` > 5-10b. Indicates possible failure to assemble the full V/J gene sequence, or a poor match to the IMGT sequence.
+- Discretion is particularly recommended when `vPIdent` is near to 97-98%, where small error could change the SHM status.
+
+The % identity calculation logic is performed similarly for the J side, for completeness.
 
 ## Ig/TCR gene reference data curation
 To create reference data, following steps:
-1. queried from IMGT (https://www.imgt.org/genedb/)[[1]][1] to get all sequences for species Homo Sapiens and (separately) for Molecular Component: IG 
+1. queried from IMGT (https://www.imgt.org/genedb/) [2] to get all sequences for species Homo Sapiens and (separately) for Molecular Component: IG 
 and TR. Then we select all query results choosing “F+ORF+in-frame P nucleotide sequences with IMGT gaps”.
 2. Use both blast and ensembl to determine the V38 genomic location of each gene.
 3. For V and J genes, find their anchor regions.
@@ -215,37 +239,35 @@ Clonal IG/TCR rearrangements may be useful biomarkers to monitor tumor presence 
 ## Known issues and future improvements
 
 ### Bam extraction:
-- **Reads mapped to other locations** - We only use reads where the alignment overlaps a known V/D/J/C gene coordinate which means the program is fast. We could also look for more reads with sequences that precisely or partially match known anchors but which have not been mapped to the expected locations.    
-- **Mate overlap** - Where fragment lengths are short the reads may overlap (particularly relevant for RNA). For each extracted read pair test for overlap by searching for an exact match for the innermost 10 bases of each read (allowing for differences if base quality < 25). If a match is found then check that the full overlapped region is identical (again allowing for base quality trimming). Create a consensus sequence for the 2 reads, using the highest base quality where the sequences differ.  
+- **Reads mapped to other locations** - We only use reads where the alignment overlaps a known V/D/J/C gene coordinate as aligned with Blastn, which means the program is fast. We could also look for more reads with sequences that precisely or partially match known anchors but which have not been mapped to the expected locations.    
+- **GRCh37 genome incompleteness** - Some genes have locations which do not lift over from GRCh38 to GRCh37. Gene curation should align directly to the GRCh37 genome.
 - **Fragments with both reads unmapped reads** - these are not queried and extracted.
-- **Extrapolation of anchor location inside soft clipped part of read** - needs more thought.
 
 ### CDR3 calling:
-- **Full receptor sequence** - We could assemble outwards from the CDR3 to predict the full receptor sequence.  We should also search for rearrangements that delete both anchor sequeneces 
 - **Error tolerance in collapsing** - We collapse sequences with up to 1 high quality sequencing difference across the anchors + CDR3 sequence. We still see a small number of artefacts from very highly supported sequences which could be cleaned up further.  
-- **Multiple CDR3s in consensus sequence** - A single consensus sequence may have 2 anchor locations that lead to plausible high scoring CDR3 sequences. Currently we choose the highest scoring, but both could be functional.
+- **Multiple CDR3s in consensus sequence** - A single consensus sequence may have multiple plausible anchor locations that lead to multiple CDR3 sequences. Currently, it is arbitrary which anchor is chosen. Anchors could be refined at the gene annotation step with precise alignment.
 - **Longer CDR3 sequences artefacts with indels sometimes reported where indel sequencing errors occur in anchor** - we observe this when we have >>100 reads support for a CDR3 sequence, we sometimes get a handful of reads with a longer CDR3 sequence containing the main sequence, but cannot find the anchror due to indel in the base sequence.
+
+### Gene annotation:
+- Sequences have been observed which only partially match any IMGT gene sequence (i.e. high `vPIdentClipBases`/`jPIdentClipBases`), and the cause is unknown. Further investigation is required.
+- Alignment annotation for D gene requires more lenient alignment parameters.
+- Some genes are known to have very similar sequences, which may reduce the accuracy of gene annotation.
 
 ### Other:
 - Downsampling may cause bias between locus.
-- Support AIRR format output.
-- BLASTN annotation would ideally point to IMGT instead of the 38 reference genome as there is a more complete set of alleles / alts
-- BLASTN annotation for D gene requires more lenient BLAST parameters.
-
-## Performance Characteristics
-These are indicative performance characteristics on a 12 core machines running with 4 threads.
-Running with `-xmx32G`.
-
-| Max reads per gene | Elapsed time (minutes) |
-|--------------------|------------------------|
-| 200k               | 81                     |
-| 400k               | 192                    |
-| 600k               | 292                    |
-| 800k               | 518                    |
-
-"Max reads per gene" is the maximum number of reads we found in each of the IG/TCR gene segment, i.e. IGHV, TRBJ etc.
 
 # Version History and Download Links
+- 1.2
+  - Align to IMGT sequences to produce more accurate gene annotation.
+  - Output somatic hypermutation status
+- 1.1.1
+  - Require reads to overlap CDR3 sequence to assemble consensus sequence.
+  - Trim adapter sequence from reads.
+- 1.1
+  - Replace Blastn with BWA-MEM (large performance increase).
+  - Output additional gene annotation in the `*GeneSupplementary` fields.
+  - Make the output more consistent between identical runs.
+  - Improve the performance of VDJ merging.
 - [1.0.4](https://github.com/hartwigmedical/hmftools/releases/tag/cider-v1.0.4)
   - Fix blastn performance issue when an assembly maps to a problematic region.   
 - [1.0.3](https://github.com/hartwigmedical/hmftools/releases/tag/cider-v1.0.3)
@@ -298,6 +320,7 @@ Running with `-xmx32G`.
   - First public release 
 
 # References
-[1]: Giudicelli V., Chaume D. and Lefranc M.-P.
+[1]: Gupta SK, Viswanatha DS, Patel KP. Evaluation of Somatic Hypermutation Status in Chronic Lymphocytic Leukemia (CLL) in the Era of Next Generation Sequencing. Front Cell Dev Biol. 2020 May 19;8:357. doi: 10.3389/fcell.2020.00357. PMID: 32509784; PMCID: PMC7248390.
+[2]: Giudicelli V., Chaume D. and Lefranc M.-P.
     IMGT/GENE-DB: a comprehensive database for human and mouse immunoglobulin and T cell receptor genes
     Nucl. Acids Res., 33(S1):D256-D261 (2005). DOI:10.1093/nar/gki010. PMID:15608191. pdf.

@@ -1,17 +1,17 @@
 package com.hartwig.hmftools.esvee.prep;
 
-import static java.lang.Math.min;
-
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_EXTENSION;
-import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_VARIANT_LENGTH;
+import static com.hartwig.hmftools.esvee.common.SvConstants.MAX_JUNC_POSITION_DIFF;
+import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_VARIANT_LENGTH_LOWER;
 
+import com.hartwig.hmftools.common.sv.EsveeDiscordantStats;
 import com.hartwig.hmftools.common.sv.LineElements;
 
 public final class PrepConstants
 {
     public static final String PREP_JUNCTION_FILE_ID = "junction" + TSV_EXTENSION;
     public static final String PREP_FRAG_LENGTH_FILE_ID = "fragment_length" + TSV_EXTENSION;
-    public static final String PREP_DISC_STATS_FILE_ID = "disc_stats" + TSV_EXTENSION;
+    public static final String PREP_DISC_STATS_FILE_ID = EsveeDiscordantStats.PREP_DISC_STATS_FILE_ID;
 
     // common fields
     public static final String FLD_JUNCTION_FRAGS = "JunctionFrags";
@@ -19,7 +19,9 @@ public final class PrepConstants
     public static final String FLD_EXACT_SUPPORT_FRAGS = "ExactSupportFrags";
     public static final String FLD_OTHER_SUPPORT_FRAGS = "OtherSupportFrags";
     public static final String FLD_HOTSPOT_JUNCTION = "Hotspot";
-    public static final String FLD_EXTRA_INFO = "ExtraInfo";
+    public static final String FLD_EXTRA_INFO = "ExtraInfo"; // deprecated
+    public static final String FLD_REMOTE_FRAGS = "RemoteFrags"; // currently only used for discordant junctions
+    public static final String FLD_MAX_VALID_SC = "MaxValidSoftClip";
 
     // region processing
     public static final int DEFAULT_CHR_PARTITION_SIZE = 1_000_000;
@@ -29,31 +31,34 @@ public final class PrepConstants
     // candidate junction fragments
     public static final int MIN_ALIGNMENT_BASES = 50;
     public static final int MIN_CALC_ALIGNMENT_SCORE = 40;
+    public static final int MIN_SUPP_CALC_ALIGNMENT_SCORE = 10;
     public static final int MIN_CALC_ALIGNMENT_LOWER_SCORE = 35;
     public static final int MIN_ALIGNMENT_SCORE_DIFF = 15;
     public static final int MIN_INSERT_ALIGNMENT_OVERLAP = 5;
-    public static final int MIN_SOFT_CLIP_LENGTH = MIN_VARIANT_LENGTH;
+    public static final int MIN_SOFT_CLIP_LENGTH = MIN_VARIANT_LENGTH_LOWER;    // note: perhaps conditionally use lower requirement only for SAGA matched junctions.
     public static final int MIN_LINE_SOFT_CLIP_LENGTH = LineElements.LINE_POLY_AT_TEST_LEN;
     public static final double MIN_SOFT_CLIP_HIGH_QUAL_PERC = 0.75;
     public static final int MAX_SOFT_CLIP_LOW_QUAL_COUNT = 5;
-    public static final int MIN_INSERT_LENGTH_SUPPORT = 10;
+    public static final int MIN_INDEL_ANCHOR_LENGTH = 10;
+    public static final int SUPP_SHORT_ALIGNMENT_MIN_MAP_QUAL = 10;
 
     public static final int REPEAT_BREAK_CHECK_LENGTH = 9;
     public static final int REPEAT_BREAK_MIN_MAP_QUAL = 40;
     public static final int REPEAT_BREAK_MIN_SC_LENGTH = 50;
 
     // supporting reads
-    public static final int MIN_SUPPORTING_READ_DISTANCE = 50;
+    public static final int MIN_SUPPORTING_READ_DISTANCE = MAX_JUNC_POSITION_DIFF;
     public static final int UNPAIRED_READ_JUNCTION_DISTANCE = 5;
     public static final int MAX_SUPPORT_FRAGMENT_DISTANCE = 1000;
     public static final int MAX_HIGH_QUAL_BASE_MISMATCHES = 1;
-    public static final double MIN_EXACT_BASE_PERC = 0.25;
+    public static final double MIN_EXACT_BASE_PERC = 0.75;
 
     // depth tracking and filter
-    public static final int DEPTH_WINDOW_SIZE = 1000;
+    public static final int DEPTH_WINDOW_SIZE = 200;
     public static final double DEPTH_MIN_SUPPORT_RATIO = 0.005;
+    public static final double NON_ILLUMINA_X_DEPTH_MIN_SUPPORT_RATIO = 0.02;
     public static final double DEPTH_MIN_SUPPORT_RATIO_DISCORDANT = 0.01;
-    public static final double DEPTH_MIN_CHECK = 2 / DEPTH_MIN_SUPPORT_RATIO_DISCORDANT;
+    public static final int DEPTH_MIN_CHECK = 100;
 
     // discordant groups
     public static final int DISCORDANT_GROUP_MIN_FRAGMENTS = 3;
@@ -69,12 +74,9 @@ public final class PrepConstants
     // fragment length distribution and filtering
     public static final int FRAG_LENGTH_DIST_SAMPLE_SIZE = 100000;
     public static final int FRAG_LENGTH_DIST_MIN_QUAL = 60;
-    public static final int DISCORDANT_FRAGMENT_LENGTH_MIN = 1100;
     public static final int FRAG_LENGTH_DIST_MAX_LENGTH = 1500;
     public static final double FRAG_LENGTH_DIST_PERCENTILE = 0.9975;
     public static final double FRAG_LENGTH_1_STD_DEV_PERCENTILE = 0.16;
-
-    public static final int DEFAULT_MAX_FRAGMENT_LENGTH = DISCORDANT_FRAGMENT_LENGTH_MIN;
 
     public static final String BAM_RECORD_SAMPLE_ID_TAG = "SI";
 }

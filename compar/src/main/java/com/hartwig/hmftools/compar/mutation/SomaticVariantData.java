@@ -1,26 +1,26 @@
 package com.hartwig.hmftools.compar.mutation;
 
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_AF;
+import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_BIALLELIC_PROB;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_VARIANT_CN;
 import static com.hartwig.hmftools.compar.common.CommonUtils.createMismatchFromDiffs;
 
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.common.variant.CodingEffect.UNDEFINED;
-import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS_FILTER;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_BIALLELIC_FLAG;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.SUBCLONAL_LIKELIHOOD_FLAG;
 import static com.hartwig.hmftools.common.variant.SageVcfTags.LOCAL_PHASE_SET;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.REPORTED_FLAG;
 import static com.hartwig.hmftools.common.variant.impact.VariantImpactSerialiser.VAR_IMPACT;
-import static com.hartwig.hmftools.compar.common.Category.SOMATIC_VARIANT;
+import static com.hartwig.hmftools.compar.common.CategoryType.SOMATIC_VARIANT;
 import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_QUAL;
 import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_REPORTED;
 import static com.hartwig.hmftools.compar.common.CommonUtils.determineComparisonGenomePosition;
 import static com.hartwig.hmftools.compar.common.DiffFunctions.FILTER_DIFF;
 import static com.hartwig.hmftools.compar.common.DiffFunctions.checkDiff;
 import static com.hartwig.hmftools.compar.common.DiffFunctions.checkFilterDiffs;
-import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_BIALLELIC;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_CANON_EFFECT;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_CODING_EFFECT;
 import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_GENE;
@@ -44,17 +44,18 @@ import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.region.BasePosition;
 import com.hartwig.hmftools.common.variant.AllelicDepth;
 import com.hartwig.hmftools.common.variant.CodingEffect;
-import com.hartwig.hmftools.common.variant.Hotspot;
+import com.hartwig.hmftools.common.variant.HotspotType;
 import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.common.variant.VariantType;
 import com.hartwig.hmftools.common.variant.impact.VariantImpact;
 import com.hartwig.hmftools.common.variant.impact.VariantImpactSerialiser;
 import com.hartwig.hmftools.compar.ComparConfig;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.ComparableItem;
 import com.hartwig.hmftools.compar.common.DiffThresholds;
 import com.hartwig.hmftools.compar.common.MatchLevel;
 import com.hartwig.hmftools.compar.common.Mismatch;
+import com.hartwig.hmftools.compar.common.SourceType;
 import com.hartwig.hmftools.patientdb.database.hmfpatients.Tables;
 
 import org.jooq.Record;
@@ -72,9 +73,10 @@ public class SomaticVariantData implements ComparableItem
     public final String Gene;
 
     public final boolean Reported;
-    public final Hotspot HotspotStatus;
+    public final HotspotType HotspotStatus;
     public final VariantTier Tier;
     public final boolean Biallelic;
+    public final double BiallelicProbability;
     public final String CanonicalEffect;
     public final String CanonicalCodingEffect;
     public final String CanonicalHgvsCodingImpact;
@@ -95,12 +97,13 @@ public class SomaticVariantData implements ComparableItem
 
     protected static final String FLD_SUBCLONAL_LIKELIHOOD = "SubclonalLikelihood";
     protected static final String FLD_LPS = "HasLPS";
-
+    protected static final String FLD_BIALLELIC = "Biallelic";
+    protected static final String FLD_BIALLELIC_PROB = "BiallelicProb";
     protected static final double NO_QUAL_PRESENT = -10;
 
     public SomaticVariantData(
-            final String chromosome, final int position, final String ref, final String alt, final VariantType type,
-            final String gene, final boolean reported, final Hotspot hotspotStatus, final VariantTier tier, final boolean biallelic,
+            final String chromosome, final int position, final String ref, final String alt, final VariantType type, final String gene,
+            final boolean reported, final HotspotType hotspotStatus, final VariantTier tier, boolean biallelic, double biallelicProb,
             final String canonicalEffect, final String canonicalCodingEffect, final String canonicalHgvsCodingImpact,
             final String canonicalHgvsProteinImpact, final String otherReportedEffects, final boolean hasLPS, final int qual,
             final double subclonalLikelihood, final Set<String> filters, final double variantCopyNumber, final double purityAdjustedVaf,
@@ -116,6 +119,7 @@ public class SomaticVariantData implements ComparableItem
         Reported = reported;
         HotspotStatus = hotspotStatus;
         Tier = tier;
+        BiallelicProbability = biallelicProb;
         Biallelic = biallelic;
         CanonicalEffect = canonicalEffect;
         CanonicalCodingEffect = canonicalCodingEffect;
@@ -137,7 +141,7 @@ public class SomaticVariantData implements ComparableItem
     }
 
     @Override
-    public Category category() { return SOMATIC_VARIANT; }
+    public CategoryType category() { return SOMATIC_VARIANT; }
 
     @Override
     public String key()
@@ -155,7 +159,6 @@ public class SomaticVariantData implements ComparableItem
         values.add(format("%s", Reported));
         values.add(format("%s", HotspotStatus));
         values.add(format("%s", Tier));
-        values.add(format("%s", Biallelic));
         values.add(format("%s", Gene));
         values.add(format("%s", CanonicalEffect));
         values.add(format("%s", CanonicalCodingEffect));
@@ -168,6 +171,8 @@ public class SomaticVariantData implements ComparableItem
         values.add(String.format("%d", TumorSupportingReadCount));
         values.add(String.format("%d", TumorTotalReadCount));
 
+        values.add(format("%s", Biallelic));
+        values.add(format("%.2f", BiallelicProbability));
         values.add(format("%.2f", SubclonalLikelihood));
         values.add(format("%s", HasLPS));
 
@@ -180,10 +185,14 @@ public class SomaticVariantData implements ComparableItem
     }
 
     @Override
-    public boolean isPass() {
+    public boolean isPass()
+    {
         // A reportable variant not in a gene should be impossible, but if it happens we want to see it
         return !IsFromUnfilteredVcf && (Reported || !Gene.isEmpty());
     }
+
+    @Override
+    public String geneName() { return Gene; }
 
     @Override
     public boolean matches(final ComparableItem other)
@@ -240,6 +249,7 @@ public class SomaticVariantData implements ComparableItem
         {
             checkDiff(diffs, FLD_HOTSPOT, HotspotStatus.toString(), otherVar.HotspotStatus.toString());
             checkDiff(diffs, FLD_BIALLELIC, Biallelic, otherVar.Biallelic);
+            checkDiff(diffs, FLD_BIALLELIC_PROB, BiallelicProbability, otherVar.BiallelicProbability, thresholds);
             checkDiff(diffs, FLD_OTHER_REPORTED, OtherReportedEffects, otherVar.OtherReportedEffects);
             checkDiff(diffs, FLD_SUBCLONAL_LIKELIHOOD, SubclonalLikelihood, otherVar.SubclonalLikelihood, thresholds);
             checkDiff(diffs, FLD_VARIANT_COPY_NUMBER, VariantCopyNumber, otherVar.VariantCopyNumber, thresholds);
@@ -255,9 +265,9 @@ public class SomaticVariantData implements ComparableItem
         {
             // if ones side is filtered, suggests was filtered downstream of Sage (eg Pave or Purple) so indicate this
             if(IsFromUnfilteredVcf && !otherVar.IsFromUnfilteredVcf)
-                diffs.add(format("%s(%s/%s)", FILTER_DIFF, "FILTERED", PASS));
+                diffs.add(format("%s(%s/%s)", FILTER_DIFF, "FILTERED", PASS_FILTER));
             else if(!IsFromUnfilteredVcf && otherVar.IsFromUnfilteredVcf)
-                diffs.add(format("%s(%s/%s)", FILTER_DIFF, PASS, "FILTERED"));
+                diffs.add(format("%s(%s/%s)", FILTER_DIFF, PASS_FILTER, "FILTERED"));
         }
         return diffs;
     }
@@ -272,8 +282,9 @@ public class SomaticVariantData implements ComparableItem
         return HasPurpleAnnotation && otherVar.HasPurpleAnnotation;
     }
 
-    public static SomaticVariantData fromContext(final VariantContext context, final String sampleId, final boolean fromUnfilteredFile,
-            final boolean hasPurpleAnnotation, String sourceName, ComparConfig config)
+    public static SomaticVariantData fromContext(
+            final VariantContext context, final String sampleId, final boolean fromUnfilteredFile,
+            final boolean hasPurpleAnnotation, final SourceType sourceType, ComparConfig config)
     {
         int position = context.getStart();
         String chromosome = context.getContig();
@@ -287,16 +298,18 @@ public class SomaticVariantData implements ComparableItem
             variantImpact = fromSnpEffAttributes(context);
 
         BasePosition comparisonPosition = determineComparisonGenomePosition(
-                chromosome, position, sourceName, config.RequiresLiftover, config.LiftoverCache);
+                chromosome, position, sourceType, config.RequiresLiftover, config.LiftoverCache);
 
         var tumorAllelicDepth = AllelicDepth.fromGenotype(context.getGenotype(sampleId));
+
         return new SomaticVariantData(
                 chromosome, position, ref, alt, VariantType.type(context),
                 variantImpact.GeneName,
                 context.getAttributeAsBoolean(REPORTED_FLAG, false),
-                Hotspot.fromVariant(context),
+                HotspotType.fromVariant(context),
                 VariantTier.fromContext(context),
                 context.getAttributeAsBoolean(PURPLE_BIALLELIC_FLAG, false),
+                context.getAttributeAsDouble(PURPLE_BIALLELIC_PROB, 0),
                 variantImpact.CanonicalEffect,
                 variantImpact.CanonicalCodingEffect.toString(),
                 variantImpact.CanonicalHgvsCoding,
@@ -317,7 +330,7 @@ public class SomaticVariantData implements ComparableItem
         );
     }
 
-    public static SomaticVariantData fromRecord(final Record record, final String sourceName, final ComparConfig config)
+    public static SomaticVariantData fromRecord(final Record record, final SourceType sourceType, final ComparConfig config)
     {
         Set<String> filters = Arrays.stream(record.getValue(SOMATICVARIANT.FILTER).split(";", -1)).collect(Collectors.toSet());
         String localPhaseSets = record.get(SOMATICVARIANT.LOCALPHASESET);
@@ -327,7 +340,7 @@ public class SomaticVariantData implements ComparableItem
         var position = record.getValue(SOMATICVARIANT.POSITION);
 
         BasePosition comparisonPosition = determineComparisonGenomePosition(
-                chromosome, position, sourceName, config.RequiresLiftover, config.LiftoverCache);
+                chromosome, position, sourceType, config.RequiresLiftover, config.LiftoverCache);
 
         return new SomaticVariantData(
                 chromosome,
@@ -337,9 +350,10 @@ public class SomaticVariantData implements ComparableItem
                 VariantType.valueOf(record.getValue(SOMATICVARIANT.TYPE)),
                 record.getValue(Tables.SOMATICVARIANT.GENE),
                 record.getValue(SOMATICVARIANT.REPORTED).intValue() == 1,
-                Hotspot.valueOf(record.getValue(SOMATICVARIANT.HOTSPOT)),
+                HotspotType.valueOf(record.getValue(SOMATICVARIANT.HOTSPOT)),
                 VariantTier.fromString(record.get(SOMATICVARIANT.TIER)),
                 record.getValue(SOMATICVARIANT.BIALLELIC).intValue() == 1,
+                record.getValue(SOMATICVARIANT.BIALLELIC).intValue() == 1 ? 1.0 : 0,
                 record.getValue(SOMATICVARIANT.CANONICALEFFECT),
                 record.getValue(SOMATICVARIANT.CANONICALCODINGEFFECT),
                 record.getValue(SOMATICVARIANT.CANONICALHGVSCODINGIMPACT),

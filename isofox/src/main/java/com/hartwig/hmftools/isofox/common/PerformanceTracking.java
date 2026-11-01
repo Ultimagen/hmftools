@@ -29,7 +29,6 @@ public class PerformanceTracking
 
     public boolean enabled() { return mConfig.RunPerfChecks; }
 
-
     public final static PerformanceCounter[] createPerfCounters()
     {
         PerformanceCounter[] perfCounters = new PerformanceCounter[PERF_MAX];
@@ -74,7 +73,7 @@ public class PerformanceTracking
 
             if(fitTimes.size() >= 10 && fitGenes.size() == fitTimes.size())
             {
-                for (int i = fitTimes.size() - 1; i >= fitTimes.size() - 10; --i)
+                for(int i = fitTimes.size() - 1; i >= fitTimes.size() - 10; --i)
                 {
                     ISF_LOGGER.info(String.format("fit times: geneSet(%s) time(%.3f)", fitGenes.get(i), fitTimes.get(i)));
                 }

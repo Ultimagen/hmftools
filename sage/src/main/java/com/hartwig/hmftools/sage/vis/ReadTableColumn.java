@@ -2,23 +2,26 @@ package com.hartwig.hmftools.sage.vis;
 
 import static java.lang.Math.abs;
 
-import static com.hartwig.hmftools.common.bam.SamRecordUtils.getMateAlignmentEnd;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_POSITION;
-import static com.hartwig.hmftools.sage.vis.ColorUtil.DARK_GREEN;
-import static com.hartwig.hmftools.sage.vis.ColorUtil.PURPLE;
-import static com.hartwig.hmftools.sage.vis.ColorUtil.interpolateColors;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.getMateAlignmentEnd;
+import static com.hartwig.hmftools.common.vis.ColorUtil.DARK_GREEN;
+import static com.hartwig.hmftools.common.vis.ColorUtil.PURPLE;
+import static com.hartwig.hmftools.common.vis.ColorUtil.interpolateColors;
+import static com.hartwig.hmftools.common.vis.SvgRender.FORWARD_STRAND_COLOR;
+import static com.hartwig.hmftools.common.vis.SvgRender.OVERLAPPING_FRAGMENT_BORDER_COLOR;
+import static com.hartwig.hmftools.common.vis.SvgRender.REVERSE_STRAND_COLOR;
+import static com.hartwig.hmftools.common.vis.SvgRender.renderColoredBox;
 import static com.hartwig.hmftools.sage.vis.SageVisConstants.MAX_MAPQ_SHADING_CUTTOFF;
 import static com.hartwig.hmftools.sage.vis.SageVisConstants.READ_HEIGHT_PX;
-import static com.hartwig.hmftools.sage.vis.SvgRender.FORWARD_STRAND_COLOR;
-import static com.hartwig.hmftools.sage.vis.SvgRender.OVERLAPPING_FRAGMENT_BORDER_COLOR;
-import static com.hartwig.hmftools.sage.vis.SvgRender.REVERSE_STRAND_COLOR;
-import static com.hartwig.hmftools.sage.vis.SvgRender.renderColoredBox;
 
 import static j2html.TagCreator.rawHtml;
 import static j2html.TagCreator.td;
 
 import java.awt.Color;
 import java.util.function.Function;
+
+import com.hartwig.hmftools.common.vis.CssBuilder;
+import com.hartwig.hmftools.common.vis.CssSize;
 
 import htsjdk.samtools.SAMRecord;
 import j2html.tags.specialized.TdTag;
@@ -28,6 +31,10 @@ public class ReadTableColumn
     public static final ReadTableColumn MATE_TYPE_COL = new ReadTableColumn("Mate", (final ReadEvidenceRecord record) ->
     {
         SAMRecord read = record.Fragment == null ? record.Read : record.Fragment.First;
+        if(!read.getReadPairedFlag())
+        {
+            return new ContentAndStyle(td(), CssBuilder.EMPTY);
+        }
         if(read.getMateUnmappedFlag())
         {
             return new ContentAndStyle(td("UN"), CssBuilder.EMPTY);
@@ -74,21 +81,21 @@ public class ReadTableColumn
         Color color = interpolateColors(Color.RED, Color.GREEN, s);
         return new ContentAndStyle(td(rawHtml(renderColoredBox(READ_HEIGHT_PX, color).getSVGElement())), CssBuilder.EMPTY);
     });
-    public static final ReadTableColumn FINAL_QUAL_COL = intValueColumn("FinalQ", (final ReadEvidenceRecord record) ->
+    public static final ReadTableColumn FINAL_QUAL_COL = intValueColumn("combinedQ", (final ReadEvidenceRecord record) ->
     {
-        return record.Qualities == null ? null : (int) Math.round(record.Qualities.ModifiedQuality);
+        return record.Qualities == null ? null : (int) Math.round(record.Qualities.CombinedQuality);
     });
-    public static final ReadTableColumn MOD_BASE_QUAL_COL = intValueColumn("modBQ", (final ReadEvidenceRecord record) ->
+    public static final ReadTableColumn FINAL_BASE_QUAL_COL = intValueColumn("finalBQ", (final ReadEvidenceRecord record) ->
     {
-        return record.Qualities == null ? null : (int) Math.round(record.Qualities.ModifiedBaseQuality);
+        return record.Qualities == null ? null : (int) Math.round(record.Qualities.FinalBaseQuality);
     });
-    public static final ReadTableColumn MOD_MAP_QUAL_COL = intValueColumn("modMQ", (final ReadEvidenceRecord record) ->
+    public static final ReadTableColumn FINAL_MAP_QUAL_COL = intValueColumn("finalMQ", (final ReadEvidenceRecord record) ->
     {
-        return record.Qualities == null ? null : record.Qualities.ModifiedMapQuality;
+        return record.Qualities == null ? null : record.Qualities.FinalMapQuality;
     });
-    public static final ReadTableColumn RAW_BASE_QUAL_COL = intValueColumn("rawBQ", (final ReadEvidenceRecord record) ->
+    public static final ReadTableColumn SEQ_TECH_BASE_QUAL_COL = intValueColumn("seqTechBQ", (final ReadEvidenceRecord record) ->
     {
-        return record.Qualities == null ? null : (int) Math.round(record.Qualities.CalcBaseQuality);
+        return record.Qualities == null ? null : (int) Math.round(record.Qualities.SeqTechBaseQuality);
     });
     public static final ReadTableColumn ORIENTATION_COL = new ReadTableColumn("Orientation", (final ReadEvidenceRecord record) ->
     {

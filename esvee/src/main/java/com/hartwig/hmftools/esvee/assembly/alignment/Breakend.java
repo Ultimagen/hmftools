@@ -2,6 +2,7 @@ package com.hartwig.hmftools.esvee.assembly.alignment;
 
 import static java.lang.Math.abs;
 import static java.lang.Math.max;
+import static java.lang.Math.min;
 import static java.lang.Math.round;
 import static java.lang.String.format;
 
@@ -10,6 +11,7 @@ import static com.hartwig.hmftools.common.sv.StructuralVariantType.DUP;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.SGL;
 import static com.hartwig.hmftools.common.sv.SvUtils.formSvType;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.ALIGNMENT_LOW_MOD_MQ_QUAL_BOOST;
+import static com.hartwig.hmftools.esvee.assembly.alignment.AlignmentFragments.readAlignmentSpansJunction;
 import static com.hartwig.hmftools.esvee.assembly.alignment.HomologyData.NO_HOMOLOGY;
 import static com.hartwig.hmftools.esvee.common.CommonUtils.compareJunctions;
 import static com.hartwig.hmftools.esvee.common.SvConstants.QUAL_CALC_FRAG_SUPPORT_FACTOR;
@@ -23,7 +25,8 @@ import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.genome.region.Orientation;
 import com.hartwig.hmftools.common.sv.StructuralVariantType;
 import com.hartwig.hmftools.common.sv.SvUtils;
-import com.hartwig.hmftools.esvee.common.CommonUtils;
+import com.hartwig.hmftools.esvee.assembly.types.SupportRead;
+import com.hartwig.hmftools.esvee.assembly.types.SupportType;
 
 public class Breakend implements Comparable<Breakend>
 {
@@ -50,7 +53,13 @@ public class Breakend implements Comparable<Breakend>
     private int mNonPrimaryAssemblyFragmentCount;
 
     private Set<Integer> mFragmentPositions;
+    private int mFivePrimeRangeStart;
+    private int mFivePrimeRangeEnd;
+    private int mThreePrimeRangeStart;
+    private int mThreePrimeRangeEnd;
     private int mMaxLocalRepeat;
+
+    private boolean mSagaInferred;
 
     public Breakend(
             final AssemblyAlignment assembly, final String chromosome, final int position, final Orientation orientation,
@@ -80,7 +89,13 @@ public class Breakend implements Comparable<Breakend>
         mNonPrimaryAssemblyFragmentCount = 0;
 
         mFragmentPositions = null;
+        mFivePrimeRangeStart = 0;
+        mFivePrimeRangeEnd = 0;
+        mThreePrimeRangeStart = 0;
+        mThreePrimeRangeEnd = 0;
         mMaxLocalRepeat = 0;
+
+        mSagaInferred = false;
     }
 
     public int id() { return mId; }
@@ -107,6 +122,33 @@ public class Breakend implements Comparable<Breakend>
 
     public int uniqueFragmentPositionCount() { return mFragmentPositions != null ? mFragmentPositions.size() : 0; }
 
+    public void addOrientationPositions(final Orientation readOrientation, int readStart, int readEnd)
+    {
+        int fivePrimePosition = readOrientation.isForward() ? readStart : readEnd;
+        int threePrimePosition = readOrientation.isForward() ? readEnd : readStart;
+
+        if(mFivePrimeRangeStart == 0)
+            mFivePrimeRangeStart = fivePrimePosition;
+        else
+            mFivePrimeRangeStart = min(mFivePrimeRangeStart, fivePrimePosition);
+
+        mFivePrimeRangeEnd = max(mFivePrimeRangeEnd, fivePrimePosition);
+
+        if(mThreePrimeRangeStart == 0)
+            mThreePrimeRangeStart = threePrimePosition;
+        else
+            mThreePrimeRangeStart = min(mThreePrimeRangeStart, threePrimePosition);
+
+        mThreePrimeRangeEnd = max(mThreePrimeRangeEnd, threePrimePosition);
+    }
+
+    public int[] readOrientationRange()
+    {
+        return new int[] {
+                mFivePrimeRangeStart > 0 ? mFivePrimeRangeEnd - mFivePrimeRangeStart : -1,
+                mThreePrimeRangeStart > 0 ? mThreePrimeRangeEnd - mThreePrimeRangeStart : -1 };
+    }
+
     public void setMaxLocalRepeat(int maxLocalRepeat) { mMaxLocalRepeat = maxLocalRepeat; }
     public int maxLocalRepeat() { return mMaxLocalRepeat; }
 
@@ -127,7 +169,7 @@ public class Breakend implements Comparable<Breakend>
 
     public List<BreakendSupport> sampleSupport() { return mBreakendSupport; }
 
-    public void updateBreakendSupport(int sampleIndex, boolean isSplitFragment, int forwardReads, int reverseReads)
+    public void updateBreakendSupport(int sampleIndex, boolean isSplitFragment)
     {
         if(sampleIndex < mBreakendSupport.size())
         {
@@ -137,9 +179,22 @@ public class Breakend implements Comparable<Breakend>
                 ++breakendSupport.SplitFragments;
             else
                 ++breakendSupport.DiscordantFragments;
+        }
+    }
 
-            breakendSupport.ForwardReads += forwardReads;
-            breakendSupport.ReverseReads += reverseReads;
+    public void updateBreakendReadStrand(int sampleIndex, final SupportRead read)
+    {
+        if(read.type() != SupportType.JUNCTION || !readAlignmentSpansJunction(this, read))
+            return;
+
+        if(sampleIndex < mBreakendSupport.size())
+        {
+            BreakendSupport breakendSupport = mBreakendSupport.get(sampleIndex);
+
+            if(read.orientation().isForward())
+                ++breakendSupport.ForwardReads;
+            else
+                ++breakendSupport.ReverseReads;
         }
     }
 
@@ -240,6 +295,10 @@ public class Breakend implements Comparable<Breakend>
         else
             return Position == position;
     }
+
+    public boolean isSagaInferred() { return mSagaInferred; }
+
+    public void setSagaInferred() { mSagaInferred = true; }
 
     public String toString()
     {

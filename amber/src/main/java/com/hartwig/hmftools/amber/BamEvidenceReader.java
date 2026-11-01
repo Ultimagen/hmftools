@@ -6,6 +6,7 @@ import static java.lang.String.format;
 import static com.hartwig.hmftools.amber.AmberConfig.AMB_LOGGER;
 import static com.hartwig.hmftools.amber.AmberConstants.BAM_MIN_GAP_START;
 import static com.hartwig.hmftools.amber.AmberConstants.CRAM_MIN_GAP_START;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.runThreadTasks;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,6 +17,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.perf.PerformanceCounter;
+import com.hartwig.hmftools.common.perf.TaskQueue;
 
 import htsjdk.samtools.SamReaderFactory;
 
@@ -27,50 +29,33 @@ public class BamEvidenceReader
     public BamEvidenceReader(final AmberConfig config)
     {
         mConfig = config;
-        mEvidenceChecker = new PositionEvidenceChecker(mConfig.MinBaseQuality);
+        mEvidenceChecker = new PositionEvidenceChecker(mConfig.MinMappingQuality, mConfig.MinBaseQuality);
     }
 
     public void processBam(
             final String bamFile, final SamReaderFactory samReaderFactory, final Map<Chromosome,List<PositionEvidence>> chrPositionEvidence)
-            throws InterruptedException
     {
-        AMB_LOGGER.trace("processing bam({})", bamFile);
+        Queue<RegionTask> regionTaskQueue = new ConcurrentLinkedQueue<>();
 
-        final Queue<RegionTask> taskQueue = new ConcurrentLinkedQueue<>();
+        boolean limitSliceRegions = bamFile.endsWith(".cram");
+        populateTaskQueue(chrPositionEvidence, regionTaskQueue, limitSliceRegions);
 
-        // create genome regions from the loci
-        boolean limitRegions = bamFile.endsWith(".cram");
-        populateTaskQueue(chrPositionEvidence, taskQueue, limitRegions);
+        TaskQueue taskQueue = new TaskQueue(regionTaskQueue, "regions", 1000);
 
-        // we create the consumer and producer
         List<BamReaderThread> bamReaders = new ArrayList<BamReaderThread>();
 
         for(int i = 0; i < max(mConfig.Threads, 1); ++i)
         {
-            BamReaderThread thread = new BamReaderThread(bamFile, samReaderFactory, taskQueue, mConfig.MinMappingQuality);
+            BamReaderThread thread = new BamReaderThread(bamFile, samReaderFactory, taskQueue);
             thread.setName(format("worker-%d", i));
             thread.start();
             bamReaders.add(thread);
         }
 
-        AMB_LOGGER.trace("{} bam reader threads started", bamReaders.size());
+        if(!runThreadTasks(bamReaders))
+            System.exit(1);
 
-        ProgressTracker taskCompletion = new ProgressTracker(taskQueue.size());
-        for(BamReaderThread thread : bamReaders)
-        {
-            while(thread.isAlive())
-            {
-                // check status every 30 seconds
-                thread.join(30_000);
-
-                // check status
-                taskCompletion.progress(taskQueue.size());
-            }
-        }
-
-        AMB_LOGGER.trace("{} bam reader threads finished", bamReaders.size());
-
-        if(AMB_LOGGER.isDebugEnabled())
+        if(mConfig.PerfDebug)
         {
             PerformanceCounter combinedPc = new PerformanceCounter("Read");
             bamReaders.forEach(x -> combinedPc.merge(x.perfCounter()));
@@ -79,23 +64,17 @@ public class BamEvidenceReader
     }
 
     private void populateTaskQueue(
-            final Map<Chromosome,List<PositionEvidence>> chrBaseDepth, final Queue<RegionTask> taskQueue, boolean limitRegions)
+            final Map<Chromosome,List<PositionEvidence>> chrBaseDepth, final Queue<RegionTask> taskQueue, boolean limitSliceRegions)
     {
         int positionCount = chrBaseDepth.values().stream().mapToInt(x -> x.size()).sum();
 
-        int minGap = mConfig.PositionGap > 0 ? mConfig.PositionGap : (limitRegions ? CRAM_MIN_GAP_START : BAM_MIN_GAP_START);
-
-        // int maxPositionsPerRegion = limitRegions ? CRAM_REGION_GROUP_MAX : BAM_REGION_GROUP_MAX;
-        // int gapIncrement = limitRegions ? CRAM_MIN_GAP_INCREMENT : BAM_MIN_GAP_INCREMENT;
+        int minGap = mConfig.PositionGap > 0 ? mConfig.PositionGap : (limitSliceRegions ? CRAM_MIN_GAP_START : BAM_MIN_GAP_START);
 
         List<RegionTask> tasks = Lists.newArrayList();
 
         for(Map.Entry<Chromosome,List<PositionEvidence>> entry : chrBaseDepth.entrySet())
         {
             String chromosome = mConfig.RefGenVersion.versionedChromosome(entry.getKey().toString());
-
-            if(!mConfig.SpecificChromosomes.isEmpty() && !mConfig.SpecificChromosomes.contains(chromosome))
-                continue;
 
             List<PositionEvidence> positions = entry.getValue();
 
@@ -109,7 +88,7 @@ public class BamEvidenceReader
             {
                 PositionEvidence posEvidence = positions.get(i);
 
-                if(currentTask.Region.end() + minGap < posEvidence.Position) // or  || tasks.size() >= maxPositionsPerRegion
+                if(currentTask.Region.end() + minGap < posEvidence.Position)
                 {
                     // start a new region
                     currentTask = new RegionTask(mEvidenceChecker, chromosome, posEvidence);

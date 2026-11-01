@@ -13,19 +13,24 @@ import static com.hartwig.hmftools.common.sv.StructuralVariantType.SGL;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_1;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_2;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_3;
-import static com.hartwig.hmftools.esvee.TestUtils.TEST_CONFIG;
-import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.SSX2_GENE_ORIENT;
-import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.SSX2_MAX_MAP_QUAL;
-import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.SSX2_REGIONS_V37;
 import static com.hartwig.hmftools.esvee.TestUtils.DEFAULT_NM;
 import static com.hartwig.hmftools.esvee.TestUtils.READ_ID_GENERATOR;
 import static com.hartwig.hmftools.esvee.TestUtils.REF_BASES_200;
 import static com.hartwig.hmftools.esvee.TestUtils.REF_BASES_400;
 import static com.hartwig.hmftools.esvee.TestUtils.REF_BASES_RANDOM_100;
+import static com.hartwig.hmftools.esvee.TestUtils.TEST_CONFIG;
 import static com.hartwig.hmftools.esvee.TestUtils.createRead;
-import static com.hartwig.hmftools.esvee.assembly.alignment.AlignmentFilters.filterAlignments;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.SSX2_GENE_ORIENT;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.SSX2_MAX_MAP_QUAL;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.SSX2_REGIONS_V37;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.WEAK_ASSEMBLY_DISC_RATE;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.WEAK_ASSEMBLY_MIN_INS_LENGTH;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.WEAK_ASSEMBLY_MIN_REF_REPEAT;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyTestUtils.createAlignment;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyTestUtils.createAssembly;
+import static com.hartwig.hmftools.esvee.assembly.alignment.AlignmentFilters.filterAlignments;
+import static com.hartwig.hmftools.esvee.assembly.alignment.AssemblyAligner.hasLongerMinorityExtensions;
+import static com.hartwig.hmftools.esvee.assembly.alignment.AssemblyAligner.hasSuspectExtension;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -38,21 +43,25 @@ import java.util.List;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.codon.Nucleotides;
+import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.genome.region.Orientation;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.common.test.MockRefGenome;
-import com.hartwig.hmftools.esvee.MockAligner;
+import com.hartwig.hmftools.esvee.MockBwaMemAligner;
 import com.hartwig.hmftools.esvee.assembly.alignment.AlignData;
 import com.hartwig.hmftools.esvee.assembly.alignment.AlternativeAlignment;
 import com.hartwig.hmftools.esvee.assembly.alignment.AssemblyAligner;
 import com.hartwig.hmftools.esvee.assembly.alignment.AssemblyAlignment;
 import com.hartwig.hmftools.esvee.assembly.alignment.Breakend;
 import com.hartwig.hmftools.esvee.assembly.alignment.BreakendBuilder;
+import com.hartwig.hmftools.esvee.assembly.alignment.HomologyData;
 import com.hartwig.hmftools.esvee.assembly.output.AlignmentWriter;
 import com.hartwig.hmftools.esvee.assembly.read.Read;
 import com.hartwig.hmftools.esvee.assembly.types.AssemblyLink;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 import com.hartwig.hmftools.esvee.assembly.types.LinkType;
+import com.hartwig.hmftools.esvee.assembly.types.SupportRead;
+import com.hartwig.hmftools.esvee.assembly.types.SupportType;
 
 import org.broadinstitute.hellbender.utils.bwa.BwaMemAlignment;
 import org.junit.Test;
@@ -271,7 +280,6 @@ public class AlignmentTest
         assertEquals(FORWARD, second.Orient);
         // assertEquals(5, second.alternativeAlignments().size());
 
-
         // test outer singles also with alt alignments
         assemblyAlignment = createAssemblyAlignment(
                 CHR_1, 200, FORWARD, CHR_1, 250, REVERSE, "");
@@ -351,7 +359,6 @@ public class AlignmentTest
         Breakend second = assemblyAlignment.breakends().get(1);
         assertEquals(251, second.Position);
         assertEquals(REVERSE, second.Orient);
-
 
         // a DEL with homology
         assemblyAlignment = createAssemblyAlignment(
@@ -540,9 +547,9 @@ public class AlignmentTest
         // 0 = {AlignData@3222} "7:125745443-125746123:1 681M1314S seq(0-681 adj=0-680) score(681) flags(0) mapQual(60 adj=50) aligned(681 adj=621)"
         //1 = {AlignData@3223} "7:126166901-126167444:1 544M seq(0-544 adj=682-1225) score(544) flags(0) mapQual(60 adj=52) aligned(544 adj=506)"
         //2 = {AlignData@3224} "7:143939546-143939814:-1 269M seq(0-269 adj=1231-1499) score(269) flags(16) mapQual(0 adj=0) aligned(269 adj=245)"
-            // 7,+144005351,269M,0;
+        // 7,+144005351,269M,0;
         //3 = {AlignData@3225} "7:143936039-143936532:-1 494M seq(0-494 adj=1501-1994) score(494) flags(16) mapQual(0 adj=0) aligned(494 adj=478)"
-            // 7,+144008633,494M,0;
+        // 7,+144008633,494M,0;
 
         alignment1 = new AlignData(
                 new ChrBaseRegion(CHR_1, 101, 200), 0, 100,
@@ -583,7 +590,7 @@ public class AlignmentTest
         assertEquals(1, alignment4.unselectedAltAlignments().size());
         assertTrue(alignment3.hasLowMapQualShortSvLink());
         assertTrue(alignment4.hasLowMapQualShortSvLink());
-   }
+    }
 
     @Test
     public void testKeepAdjacentLocalShortAdjustedAlignments()
@@ -732,7 +739,6 @@ public class AlignmentTest
         assertEquals(0, lowQualAlignments.size());
         assertEquals(2, validAlignments.size());
 
-
         AlignData specificAlignment = validAlignments.stream().filter(x -> x.refLocation().overlaps(ssx2Region)).findFirst().orElse(null);
         assertNull(specificAlignment);
 
@@ -745,8 +751,8 @@ public class AlignmentTest
     @Test
     public void testAlignmentRequery()
     {
-        MockAligner aligner = new MockAligner();
-        AssemblyAligner assemblyAligner = new AssemblyAligner(TEST_CONFIG, aligner, new AlignmentWriter(TEST_CONFIG), null);
+        MockBwaMemAligner aligner = new MockBwaMemAligner();
+        AssemblyAligner assemblyAligner = new AssemblyAligner(TEST_CONFIG, aligner, null, new AlignmentWriter(TEST_CONFIG), null);
 
         // need to ensure the full assembly sequence length matches the alignments returned
         AssemblyAlignment assemblyAlignment = AssemblyTestUtils.createAssemblyAlignment(
@@ -760,15 +766,96 @@ public class AlignmentTest
                 createBwaAlignment(CHR_2, 200, 299, 0, 100, 199, "100S100M50S",
                         "", "", 60, 0, 100));
 
-        aligner.PendingAlignments.add(initialAlignments);
+        aligner.Alignments.put("", initialAlignments);
 
         List<BwaMemAlignment> requeryAlignments = List.of(
                 createBwaAlignment(CHR_1, 210, 259, 0, 0, 49, "50M",
                         "", "", 60, 0, 50));
 
-        aligner.PendingAlignments.add(requeryAlignments);
+        aligner.Alignments.put("", requeryAlignments);
 
         assemblyAligner.processAssembly(assemblyAlignment);
+    }
+
+    @Test
+    public void testLongerMinorityExtensions()
+    {
+        List<SupportRead> reads = Lists.newArrayList();
+
+        Read read = createRead(READ_ID_GENERATOR.nextId(), 100, "", "");
+
+        reads.add(new SupportRead(read, SupportType.JUNCTION, 10, 0, 10));
+        reads.add(new SupportRead(read, SupportType.JUNCTION, 10, 0, 10));
+        reads.add(new SupportRead(read, SupportType.JUNCTION, 10, 0, 10));
+        reads.add(new SupportRead(read, SupportType.JUNCTION, 24, 0, 10));
+
+        assertFalse(hasLongerMinorityExtensions(reads, REVERSE, false)); // ratio too low
+
+        reads.clear();
+
+        reads.add(new SupportRead(read, SupportType.JUNCTION, 10, 0, 10));
+        reads.add(new SupportRead(read, SupportType.JUNCTION, 10, 0, 10));
+        reads.add(new SupportRead(read, SupportType.JUNCTION, 10, 0, 10));
+        reads.add(new SupportRead(read, SupportType.JUNCTION, 35, 0, 10));
+
+        assertTrue(hasLongerMinorityExtensions(reads, REVERSE, false));
+
+        reads.add(new SupportRead(read, SupportType.JUNCTION, 35, 0, 10));
+
+        assertFalse(hasLongerMinorityExtensions(reads, REVERSE, false)); // too many longer extending reads
+
+        for(int i = 0; i < 20; ++i)
+        {
+            reads.add(new SupportRead(read, SupportType.JUNCTION, 10, 0, 10));
+        }
+
+        assertTrue(hasLongerMinorityExtensions(reads, REVERSE, false));
+
+        assertTrue(hasLongerMinorityExtensions(reads, REVERSE, true));
+    }
+
+    @Test
+    public void testSuspectExtensions()
+    {
+        String refBases1 = REF_BASES_400.substring(100, 150) + "AT".repeat(WEAK_ASSEMBLY_MIN_REF_REPEAT);
+        String extBases1 = REF_BASES_400.substring(300, 350);
+        String assemblyBases1 = refBases1 + extBases1;
+        JunctionAssembly assembly = createAssembly(CHR_1, 200, FORWARD, assemblyBases1, refBases1.length() - 1);
+
+        AssemblyAlignment assemblyAlignment = new AssemblyAlignment(assembly);
+
+        int positionStart = 10;
+        int positionEnd = 100;
+        String insertedBases = "A".repeat(WEAK_ASSEMBLY_MIN_INS_LENGTH);
+
+        HomologyData homologyData = new HomologyData("", 0, 0, 5, 2);
+
+        Breakend breakendStart = new Breakend(assemblyAlignment, CHR_1, positionStart, FORWARD, insertedBases, homologyData);
+        Breakend breakendEnd = new Breakend(assemblyAlignment, CHR_2, positionEnd, FORWARD, insertedBases, homologyData);
+        breakendStart.setOtherBreakend(breakendEnd);
+        breakendEnd.setOtherBreakend(breakendStart);
+
+        assemblyAlignment.addBreakend(breakendStart);
+        assemblyAlignment.addBreakend(breakendEnd);
+
+        // condition 1 - homology and discordant rate
+        AssemblyApplication.SampleDiscordantRate = WEAK_ASSEMBLY_DISC_RATE + 0.01;
+        assertTrue(hasSuspectExtension(assemblyAlignment));
+
+        // condition 2 - insert length
+        AssemblyApplication.SampleDiscordantRate = 0;
+        assertTrue(hasSuspectExtension(assemblyAlignment));
+
+        // condition 3 - ref repeat
+        breakendStart = new Breakend(assemblyAlignment, CHR_1, positionStart, FORWARD, "", homologyData);
+        breakendEnd = new Breakend(assemblyAlignment, CHR_2, positionEnd, FORWARD, "", homologyData);
+        breakendStart.setOtherBreakend(breakendEnd);
+        breakendEnd.setOtherBreakend(breakendStart);
+
+        assemblyAlignment.breakends().clear();
+        assemblyAlignment.addBreakend(breakendStart);
+        assemblyAlignment.addBreakend(breakendEnd);
+        assertTrue(hasSuspectExtension(assemblyAlignment));
     }
 
     private BwaMemAlignment createBwaAlignment(
@@ -776,7 +863,8 @@ public class AlignmentTest
             final String mdTag, final String xaTag,
             int mapQual, int nMismatches, int alignerScore)
     {
-        return new BwaMemAlignment(flags, 0, refPosStart - 1, refPosEnd, seqStart, seqEnd, mapQual, nMismatches, alignerScore,
+        int chrRefId = HumanChromosome.chromosomeRank(chromosome) - 1;
+        return new BwaMemAlignment(flags, chrRefId, refPosStart - 1, refPosEnd, seqStart, seqEnd, mapQual, nMismatches, alignerScore,
                 0, cigar, mdTag, xaTag, 0, 0, 0);
     }
 

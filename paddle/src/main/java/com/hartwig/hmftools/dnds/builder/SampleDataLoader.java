@@ -1,6 +1,6 @@
 package com.hartwig.hmftools.dnds.builder;
 
-import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS_FILTER;
 import static com.hartwig.hmftools.dnds.DndsCommon.DN_LOGGER;
 import static com.hartwig.hmftools.dnds.DndsCommon.MAX_REPEAT_COUNT;
 import static com.hartwig.hmftools.patientdb.dao.DatabaseUtil.byteToBoolean;
@@ -14,7 +14,7 @@ import java.util.List;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.purple.PurityContext;
 import com.hartwig.hmftools.common.variant.CodingEffect;
-import com.hartwig.hmftools.common.variant.Hotspot;
+import com.hartwig.hmftools.common.variant.HotspotType;
 import com.hartwig.hmftools.common.variant.VariantType;
 import com.hartwig.hmftools.dnds.SampleMutationalLoad;
 import com.hartwig.hmftools.dnds.SomaticVariant;
@@ -127,7 +127,7 @@ public class SampleDataLoader
                         SOMATICVARIANT.CANONICALCODINGEFFECT, SOMATICVARIANT.REPEATCOUNT)
                 .from(SOMATICVARIANT)
                 .where(SOMATICVARIANT.SAMPLEID.eq(sample))
-                .and(SOMATICVARIANT.FILTER.eq(PASS))
+                .and(SOMATICVARIANT.FILTER.eq(PASS_FILTER))
                 .and(SOMATICVARIANT.GENE.ne(""))
                 .and(SOMATICVARIANT.REPEATCOUNT.lessOrEqual(maxRepeatCount))
                 .and(SOMATICVARIANT.TYPE.in(VariantType.INDEL.toString(), VariantType.SNP.toString()))
@@ -142,7 +142,7 @@ public class SampleDataLoader
                     record.getValue(SOMATICVARIANT.ALT),
                     record.getValue(SOMATICVARIANT.GENE),
                     byteToBoolean(record.getValue(SOMATICVARIANT.BIALLELIC)),
-                    Hotspot.valueOf(record.getValue(SOMATICVARIANT.HOTSPOT)).equals(Hotspot.HOTSPOT),
+                    HotspotType.valueOf(record.getValue(SOMATICVARIANT.HOTSPOT)).equals(HotspotType.HOTSPOT),
                     record.getValue(SOMATICVARIANT.WORSTCODINGEFFECT).isEmpty()
                             ? CodingEffect.UNDEFINED
                             : CodingEffect.valueOf(record.getValue(SOMATICVARIANT.WORSTCODINGEFFECT)),

@@ -19,9 +19,9 @@ public class GeneCopyNumberRegion
     public GeneCopyNumberRegion(final GeneCopyNumber geneCN)
     {
         GeneName = geneCN.geneName();
-        TransName = geneCN.transName();
-        RegionStart = (int)geneCN.minRegionStart();
-        RegionEnd = (int)geneCN.minRegionEnd();
+        TransName = geneCN.TransName;
+        RegionStart = geneCN.MinRegionStart;
+        RegionEnd = geneCN.MinRegionEnd;
         MinCopyNumber = geneCN.minCopyNumber();
         IsGermline = false; // TODO: check new logic geneCN.germlineHet2HomRegions() > 0 || geneCN.germlineHomRegions() > 0;
     }
@@ -40,7 +40,7 @@ public class GeneCopyNumberRegion
     {
         SvCNData minRegion = null;
 
-        for(final ExonData exon : transData.exons())
+        for(ExonData exon : transData.exons())
         {
             for(SvCNData cnData : copyNumberData)
             {

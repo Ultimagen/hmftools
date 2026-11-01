@@ -15,6 +15,7 @@ import static com.hartwig.hmftools.common.utils.config.CommonConfig.LOG_READ_IDS
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.LOG_READ_IDS_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.PERF_DEBUG;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.PERF_DEBUG_DESC;
+import static com.hartwig.hmftools.common.utils.config.CommonConfig.PURPLE_DIR_CFG;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.REFERENCE;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.REFERENCE_BAM;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.REFERENCE_BAMS_DESC;
@@ -24,7 +25,6 @@ import static com.hartwig.hmftools.common.utils.config.CommonConfig.TUMOR_BAM;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.TUMOR_BAMS_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.TUMOR_IDS_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.parseLogReadIds;
-import static com.hartwig.hmftools.common.utils.config.ConfigItem.enumValueSelectionAsStr;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.addLoggingOptions;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.OUTPUT_DIR;
@@ -36,26 +36,30 @@ import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.pathFromFil
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.DEFAULT_ASSEMBLY_MAP_QUAL_THRESHOLD;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.DEFAULT_ASSEMBLY_REF_BASE_WRITE_MAX;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.DEFAULT_DISC_RATE_INCREMENT;
+import static com.hartwig.hmftools.esvee.assembly.SeqTechUtils.setSeqTechSpecifics;
 import static com.hartwig.hmftools.esvee.common.FileCommon.JUNCTION_FILE;
 import static com.hartwig.hmftools.esvee.common.FileCommon.JUNCTION_FILE_DESC;
 import static com.hartwig.hmftools.esvee.common.FileCommon.PREP_DIR;
 import static com.hartwig.hmftools.esvee.common.FileCommon.PREP_DIR_DESC;
 import static com.hartwig.hmftools.esvee.common.FileCommon.REF_GENOME_IMAGE_EXTENSION;
-import static com.hartwig.hmftools.esvee.assembly.output.WriteType.ASSEMBLY_READ;
+import static com.hartwig.hmftools.esvee.common.FileCommon.SAGA_FASTA;
+import static com.hartwig.hmftools.esvee.common.FileCommon.SAGA_FASTA_DESC;
 import static com.hartwig.hmftools.esvee.common.FileCommon.formEsveeInputFilename;
 import static com.hartwig.hmftools.esvee.common.FileCommon.formPrepBamFilenames;
 import static com.hartwig.hmftools.esvee.common.FileCommon.formPrepInputFilename;
 import static com.hartwig.hmftools.esvee.common.FileCommon.parseSampleBamLists;
 import static com.hartwig.hmftools.esvee.common.FileCommon.registerCommonConfig;
-import static com.hartwig.hmftools.esvee.common.FileCommon.setLowBaseQualThreshold;
 import static com.hartwig.hmftools.esvee.common.FileCommon.setSequencingType;
+import static com.hartwig.hmftools.esvee.common.WriteType.ASSEMBLY_READ;
+import static com.hartwig.hmftools.esvee.common.WriteType.WRITE_TYPES;
+import static com.hartwig.hmftools.esvee.common.WriteType.registerWriteTypes;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.PREP_JUNCTION_FILE_ID;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.sql.Ref;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
@@ -66,13 +70,12 @@ import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.region.SpecificRegions;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.esvee.assembly.types.Junction;
-import com.hartwig.hmftools.esvee.assembly.output.WriteType;
 import com.hartwig.hmftools.esvee.common.ReadIdTrimmer;
+import com.hartwig.hmftools.esvee.common.WriteType;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import htsjdk.samtools.SAMRecord;
+import org.jetbrains.annotations.Nullable;
 
 public class AssemblyConfig
 {
@@ -82,7 +85,7 @@ public class AssemblyConfig
     public final List<String> TumorBams;
     public final List<String> ReferenceBams;
 
-    public final List<String> JunctionFiles;
+    public final String JunctionFile;
     public final String PrepDir;
 
     public final RefGenomeVersion RefGenVersion;
@@ -91,14 +94,19 @@ public class AssemblyConfig
     public final RefGenomeInterface RefGenome;
     public final String RefGenomeImageFile;
     public final String DecoyGenome;
+    @Nullable
+    public final String SagaFastaFile;
 
-    public final List<WriteType> WriteTypes;
+    public final Set<WriteType> WriteTypes;
 
     public final String OutputDir;
     public final String OutputId;
     public final String BamToolPath;
 
     public final int Threads;
+
+    public final String PurpleDir;
+    public final boolean RunVisualiser;
 
     // default value overrides
     public static int PhaseProcessingLimit;
@@ -111,22 +119,24 @@ public class AssemblyConfig
     public final List<Junction> SpecificJunctions;
 
     private final List<String> mLogReadIds;
-    private final boolean mCheckLogReadIds;
 
     public final int AssemblyRefBaseWriteMax;
     public final boolean AssemblyDetailedTsv;
 
     public static boolean WriteCandidateReads;
     public static boolean AssemblyBuildDebug = false;
+    public static boolean AssemblyLogAllReads = false;
     public static boolean DevDebug = false;
     public static boolean PerfDebug;
     public static double PerfLogTime;
 
     public final boolean ApplyRemotePhasingReadCheckThreshold;
 
+    private static final String RUN_ASSEMBLY_VIS = "run_assembly_vis";
+    public static boolean CLEAR_CACHED_READ = true;
+
     private static final String DECOY_GENOME = "decoy_genome";
 
-    private static final String WRITE_TYPES = "write_types";
     private static final String PERF_LOG_TIME = "perf_log_time";
 
     private static final String PHASE_PROCESSING_LIMIT = "phase_process_limit";
@@ -135,6 +145,7 @@ public class AssemblyConfig
     private static final String ASSEMBLY_MAP_QUAL_THRESHOLD = "asm_map_qual_threshold";
     private static final String ASSEMBLY_REF_BASE_WRITE_MAX = "asm_ref_base_write_max";
     private static final String ASSEMBLY_BUILD_DEBUG = "asm_build_debug";
+    private static final String ASSEMBLY_LOG_ALL_READS = "asm_log_all_reads";
     private static final String DISC_ONLY_DISABLED = "disc_only_disabled";
     private static final String WRITE_CANDIDATE_READS = "write_candidate_reads";
     private static final String ASSEMBLY_TSV_DETAILED = "assembly_detailed_tsv";
@@ -152,19 +163,39 @@ public class AssemblyConfig
 
     public AssemblyConfig(final ConfigBuilder configBuilder, boolean asSubRoutine)
     {
-        if(!configBuilder.hasValue(OUTPUT_DIR) && configBuilder.hasValue(TUMOR_BAM))
+        String prepBamDir = null;
+
+        if(!asSubRoutine)
         {
-            List<String> tumorBams = parseSampleBamLists(configBuilder, TUMOR_BAM);
-            OutputDir = pathFromFile(tumorBams.get(0));
+            if(configBuilder.hasValue(TUMOR_BAM))
+            {
+                List<String> tumorBams = parseSampleBamLists(configBuilder, TUMOR_BAM);
+                prepBamDir = pathFromFile(tumorBams.get(0));
+            }
+            else if(configBuilder.hasValue(REFERENCE_BAM))
+            {
+                List<String> refBams = parseSampleBamLists(configBuilder, REFERENCE_BAM);
+                prepBamDir = pathFromFile(refBams.get(0));
+            }
+        }
+
+        if(!configBuilder.hasValue(OUTPUT_DIR) && prepBamDir != null)
+        {
+            OutputDir = prepBamDir;
         }
         else
         {
             OutputDir = parseOutputDir(configBuilder);
         }
 
-        OutputId = configBuilder.getValue(OUTPUT_ID);
+        if(configBuilder.hasValue(PREP_DIR))
+            PrepDir = checkAddDirSeparator(configBuilder.getValue(PREP_DIR));
+        else if(prepBamDir != null)
+            PrepDir = prepBamDir;
+        else
+            PrepDir = OutputDir;
 
-        PrepDir = configBuilder.hasValue(PREP_DIR) ? checkAddDirSeparator(configBuilder.getValue(PREP_DIR)) : OutputDir;
+        OutputId = configBuilder.getValue(OUTPUT_ID);
 
         TumorIds = parseSampleBamLists(configBuilder, TUMOR);
 
@@ -193,7 +224,7 @@ public class AssemblyConfig
 
         if(TumorIds.isEmpty() && ReferenceIds.isEmpty())
         {
-            SV_LOGGER.error("no tumor oe reference IDs provided");
+            SV_LOGGER.error("no tumor or reference IDs provided");
             System.exit(1);
         }
 
@@ -201,6 +232,15 @@ public class AssemblyConfig
         {
             SV_LOGGER.error("tumor and reference IDs must match BAM files");
             System.exit(1);
+        }
+
+        if(asSubRoutine)
+        {
+            if(!TumorBams.isEmpty())
+                SV_LOGGER.debug("processing tumor prep bam(s): {}", TumorBams);
+
+            if(!ReferenceBams.isEmpty())
+                SV_LOGGER.debug("processing reference prep bam(s): {}", ReferenceBams);
         }
 
         // in germline mode, transfer to reference values to the tumor ones
@@ -213,20 +253,22 @@ public class AssemblyConfig
             ReferenceBams.clear();
         }
 
-        JunctionFiles = Lists.newArrayList();
+        String junctionFile = null;
 
         if(configBuilder.hasValue(JUNCTION_FILE))
         {
-            JunctionFiles.add(configBuilder.getValue(JUNCTION_FILE));
+            junctionFile = configBuilder.getValue(JUNCTION_FILE);
         }
         else
         {
             // since Prep now reads multiple BAMs, only the tumor-labelled junctions file needs to be loaded
-            String junctionFile = formPrepInputFilename(PrepDir, TumorIds.get(0), PREP_JUNCTION_FILE_ID, OutputId);
+            String prepJunctionFile = formPrepInputFilename(PrepDir, TumorIds.get(0), PREP_JUNCTION_FILE_ID, OutputId);
 
-            if(Files.exists(Paths.get(junctionFile)))
-                JunctionFiles.add(junctionFile);
+            if(Files.exists(Paths.get(prepJunctionFile)))
+                junctionFile = prepJunctionFile;
         }
+
+        JunctionFile = junctionFile;
 
         BamToolPath = configBuilder.getValue(BAMTOOL_PATH);
 
@@ -238,12 +280,16 @@ public class AssemblyConfig
 
         DecoyGenome = configBuilder.getValue(DECOY_GENOME);
 
-        WriteTypes = WriteType.parseConfigStr(configBuilder.getValue(WRITE_TYPES));
+        SagaFastaFile = configBuilder.getValue(SAGA_FASTA);
+
+        WriteTypes = WriteType.parseAssemblyTypes(configBuilder.getValue(WRITE_TYPES));
 
         loadAlignerLibrary(configBuilder.getValue(BWA_LIB_PATH));
 
         setSequencingType(configBuilder);
-        setLowBaseQualThreshold(configBuilder);
+        setSeqTechSpecifics();
+
+        PurpleDir = configBuilder.getValue(PURPLE_DIR_CFG);
 
         RefGenomeCoords = RefGenVersion == V37 ? RefGenomeCoordinates.COORDS_37 : RefGenomeCoordinates.COORDS_38;
 
@@ -270,6 +316,11 @@ public class AssemblyConfig
             Collections.sort(SpecificJunctions);
         }
 
+        RunVisualiser = configBuilder.hasFlag(RUN_ASSEMBLY_VIS) && !SpecificJunctions.isEmpty();
+
+        if(RunVisualiser || PurpleDir != null)
+            CLEAR_CACHED_READ = false;
+
         boolean hasFilters = SpecificChrRegions.hasFilters() || !SpecificJunctions.isEmpty();
 
         if(WriteTypes.contains(ASSEMBLY_READ) && !hasFilters)
@@ -280,15 +331,14 @@ public class AssemblyConfig
         AssemblyDetailedTsv = configBuilder.hasFlag(ASSEMBLY_TSV_DETAILED) || hasFilters;
 
         mLogReadIds = parseLogReadIds(configBuilder);
-        mCheckLogReadIds = !mLogReadIds.isEmpty();
 
         DiscordantOnlyDisabled = configBuilder.hasFlag(DISC_ONLY_DISABLED);
-
         DiscordantRateIncrement = configBuilder.getDecimal(DISC_RATE_INCREMENT);
 
         PerfLogTime = configBuilder.getDecimal(PERF_LOG_TIME);
         PerfDebug = configBuilder.hasFlag(PERF_DEBUG) || PerfLogTime > 0;
         AssemblyBuildDebug = configBuilder.hasFlag(ASSEMBLY_BUILD_DEBUG);
+        AssemblyLogAllReads = configBuilder.hasFlag(ASSEMBLY_BUILD_DEBUG);
         WriteCandidateReads = configBuilder.hasFlag(WRITE_CANDIDATE_READS);
 
         PhaseProcessingLimit = configBuilder.getInteger(PHASE_PROCESSING_LIMIT);
@@ -324,12 +374,6 @@ public class AssemblyConfig
         return formEsveeInputFilename(OutputDir, sampleId(), writeType.fileId(), OutputId);
     }
 
-    public void logReadId(final SAMRecord record, final String caller)
-    {
-        if(mCheckLogReadIds)
-            logReadId(record.getReadName(), caller);
-    }
-
     private void logReadId(final String readId, final String caller)
     {
         // debugging only
@@ -349,14 +393,14 @@ public class AssemblyConfig
         configBuilder.addPaths(PREP_DIR, false, PREP_DIR_DESC);
 
         registerCommonConfig(configBuilder);
+        registerWriteTypes(configBuilder);
 
         addRefGenomeConfig(configBuilder, true);
         configBuilder.addPath(DECOY_GENOME, false, "Decoy genome image file");
 
-        configBuilder.addPath(BWA_LIB_PATH, false, BWA_LIB_PATH_DESC);
+        configBuilder.addPath(SAGA_FASTA, false, SAGA_FASTA_DESC);
 
-        if(!configBuilder.isRegistered(WRITE_TYPES))
-            configBuilder.addConfigItem(WRITE_TYPES, false, enumValueSelectionAsStr(WriteType.values(), "Write types"));
+        configBuilder.addPath(BWA_LIB_PATH, false, BWA_LIB_PATH_DESC);
 
         configBuilder.addConfigItem(LOG_READ_IDS, false, LOG_READ_IDS_DESC);
         configBuilder.addConfigItem(
@@ -383,9 +427,13 @@ public class AssemblyConfig
         configBuilder.addFlag(WRITE_CANDIDATE_READS, "Write assembly candidate reads regardless of whether used");
 
         configBuilder.addFlag(ASSEMBLY_BUILD_DEBUG, "Log assembly building working");
+        configBuilder.addFlag(ASSEMBLY_LOG_ALL_READS, "Log assembly all reads even if not used in support");
         configBuilder.addFlag(ASSEMBLY_TSV_DETAILED, "Log extra assembly info to TSV");
 
         configBuilder.addDecimal(DISC_RATE_INCREMENT, "Discordant rate increment", DEFAULT_DISC_RATE_INCREMENT);
+
+        configBuilder.addPath(PURPLE_DIR_CFG, false, "Purple data directory for event visualisation");
+        configBuilder.addFlag(RUN_ASSEMBLY_VIS, "Run visualiser on specific junctions");
 
         BamToolName.addConfig(configBuilder);
 
@@ -405,7 +453,7 @@ public class AssemblyConfig
         TumorBams = Collections.emptyList();
         ReferenceBams = Collections.emptyList();
 
-        JunctionFiles = Collections.emptyList();
+        JunctionFile = null;
         PrepDir = null;
 
         RefGenVersion = V38;
@@ -414,12 +462,15 @@ public class AssemblyConfig
         RefGenome = null;
         RefGenomeImageFile = null;
         DecoyGenome = null;
+        SagaFastaFile = null;
 
-        WriteTypes = Collections.emptyList();
+        WriteTypes = Collections.emptySet();
 
         OutputDir = null;
         OutputId = null;
         BamToolPath = null;
+        PurpleDir = null;
+        RunVisualiser = false;
 
         SpecificChrRegions = new SpecificRegions();
         SpecificJunctions = Collections.emptyList();
@@ -428,7 +479,6 @@ public class AssemblyConfig
         PerfLogTime = 0;
         AssemblyDetailedTsv = false;
         mLogReadIds = Collections.emptyList();
-        mCheckLogReadIds = false;
 
         AssemblyMapQualThreshold = -1;
         AssemblyRefBaseWriteMax = 0;

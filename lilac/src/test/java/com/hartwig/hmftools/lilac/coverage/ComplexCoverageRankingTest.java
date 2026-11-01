@@ -1,6 +1,8 @@
 package com.hartwig.hmftools.lilac.coverage;
 
 import static com.hartwig.hmftools.lilac.coverage.ComplexCoverageRanking.solutionComplexity;
+import static com.hartwig.hmftools.lilac.hla.HlaGene.HLA_A;
+import static com.hartwig.hmftools.lilac.util.GeneCacheSetup.buildGeneCache;
 
 import static org.junit.Assert.assertEquals;
 
@@ -13,14 +15,22 @@ import java.util.stream.Stream;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.lilac.hla.HlaAllele;
+import com.hartwig.hmftools.lilac.hla.HlaGene;
 import com.hartwig.hmftools.lilac.seq.HlaExonSequences;
 import com.hartwig.hmftools.lilac.seq.HlaSequenceLoci;
 
 import org.apache.commons.lang3.tuple.Pair;
+import org.junit.Before;
 import org.junit.Test;
 
 public class ComplexCoverageRankingTest
 {
+    @Before
+    public void setUp()
+    {
+        buildGeneCache();
+    }
+
     @Test
     public void testHomozygousCounts()
     {
@@ -95,8 +105,8 @@ public class ComplexCoverageRankingTest
     @Test
     public void testSolutionComplexitySingle()
     {
-        Map<String, List<Integer>> geneExonBoundaries = Maps.newHashMap();
-        geneExonBoundaries.put("HLA-A", List.of(1, 2, 100));
+        Map<HlaGene, List<Integer>> geneExonBoundaries = Maps.newHashMap();
+        geneExonBoundaries.put(HLA_A, List.of(1, 2, 100));
 
         HlaAllele allele = HlaAllele.fromString("A*01:02");
         List<String> seq = List.of("A", "A", "A", "A", "A", "A");
@@ -117,8 +127,8 @@ public class ComplexCoverageRankingTest
     @Test
     public void testSolutionComplexityThreeIdentical()
     {
-        Map<String, List<Integer>> geneExonBoundaries = Maps.newHashMap();
-        geneExonBoundaries.put("HLA-A", List.of(1, 2, 100));
+        Map<HlaGene, List<Integer>> geneExonBoundaries = Maps.newHashMap();
+        geneExonBoundaries.put(HLA_A, List.of(1, 2, 100));
 
         HlaAllele allele1 = HlaAllele.fromString("A*01:02");
         HlaAllele allele2 = HlaAllele.fromString("A*01:03");
@@ -147,8 +157,8 @@ public class ComplexCoverageRankingTest
     @Test
     public void testSolutionComplexityWithMismatches()
     {
-        Map<String, List<Integer>> geneExonBoundaries = Maps.newHashMap();
-        geneExonBoundaries.put("HLA-A", List.of(1, 2, 100));
+        Map<HlaGene, List<Integer>> geneExonBoundaries = Maps.newHashMap();
+        geneExonBoundaries.put(HLA_A, List.of(1, 2, 100));
 
         HlaAllele allele1 = HlaAllele.fromString("A*01:02");
         HlaAllele allele2 = HlaAllele.fromString("A*01:03");
@@ -176,8 +186,8 @@ public class ComplexCoverageRankingTest
     @Test
     public void testSolutionComplexityWithWildcards()
     {
-        Map<String, List<Integer>> geneExonBoundaries = Maps.newHashMap();
-        geneExonBoundaries.put("HLA-A", List.of(1, 2, 100));
+        Map<HlaGene, List<Integer>> geneExonBoundaries = Maps.newHashMap();
+        geneExonBoundaries.put(HLA_A, List.of(1, 2, 100));
 
         HlaAllele allele1 = HlaAllele.fromString("A*01:02");
         HlaAllele allele2 = HlaAllele.fromString("A*01:03");
@@ -205,8 +215,8 @@ public class ComplexCoverageRankingTest
     @Test
     public void testSolutionComplexityNonUniformLengths()
     {
-        Map<String, List<Integer>> geneExonBoundaries = Maps.newHashMap();
-        geneExonBoundaries.put("HLA-A", List.of(1, 2, 100));
+        Map<HlaGene, List<Integer>> geneExonBoundaries = Maps.newHashMap();
+        geneExonBoundaries.put(HLA_A, List.of(1, 2, 100));
 
         HlaAllele allele1 = HlaAllele.fromString("A*01:02");
         HlaAllele allele2 = HlaAllele.fromString("A*01:03");

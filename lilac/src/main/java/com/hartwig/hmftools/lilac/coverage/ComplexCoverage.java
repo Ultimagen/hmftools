@@ -4,13 +4,14 @@ import static java.lang.Math.round;
 
 import static com.hartwig.hmftools.lilac.ReferenceData.GENE_CACHE;
 
-import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.lilac.hla.HlaAllele;
+import com.hartwig.hmftools.lilac.hla.HlaGene;
 
 public final class ComplexCoverage implements Comparable<ComplexCoverage>
 {
@@ -26,7 +27,7 @@ public final class ComplexCoverage implements Comparable<ComplexCoverage>
     private double mCohortFrequencyTotal;
     private double mScore;
     private double mComplexityPenalty;
-    private int mComplexity;
+    private double mComplexity;
     private final int mHomozygousCount;
     private int mRecoveredCount;
     private int mWildcardCount;
@@ -72,24 +73,20 @@ public final class ComplexCoverage implements Comparable<ComplexCoverage>
 
     private int calcHomozygousCount()
     {
-        // for unit tests
-        if(GENE_CACHE == null)
-            return 0;
-
         return GENE_CACHE.ExpectAlleleCount - getAlleles().size();
     }
 
     public boolean isHomozygous(final HlaAllele allele)
     {
-        return getAlleles().stream().filter(x -> x.Gene.equals(allele.Gene)).count() == 1;
+        return getAlleles().stream().filter(x -> x.Gene == allele.Gene).count() == 1;
     }
 
     public void setScore(double score) { mScore = score; }
     public double getScore() { return mScore; }
     public void setComplexityPenalty(double complexityPenalty) { mComplexityPenalty = complexityPenalty; }
     public double getComplexityPenalty() { return mComplexityPenalty; }
-    public void setComplexity(int complexity) { mComplexity = complexity; }
-    public int getComplexity() { return mComplexity; }
+    public void setComplexity(double complexity) { mComplexity = complexity; }
+    public double getComplexity() { return mComplexity; }
     public void setCohortFrequencyPenalty(double cohortFrequencyPenalty) { mCohortFrequencyPenalty = cohortFrequencyPenalty; }
     public double getCohortFrequencyPenalty() { return mCohortFrequencyPenalty; }
 
@@ -103,10 +100,10 @@ public final class ComplexCoverage implements Comparable<ComplexCoverage>
         List<AlleleCoverage> existingCoverage = mAlleleCoverage.stream().toList();
         mAlleleCoverage.clear();
 
-        for(String gene : GENE_CACHE.GeneIds)
+        for(HlaGene gene : GENE_CACHE.GeneNames)
         {
             List<AlleleCoverage> geneCoverage = existingCoverage.stream()
-                    .filter(x -> x.Allele.Gene.equals(gene))
+                    .filter(x -> x.Allele.Gene == gene)
                     .collect(Collectors.toList());
 
             if(geneCoverage.size() == 2)
@@ -141,7 +138,7 @@ public final class ComplexCoverage implements Comparable<ComplexCoverage>
         return newCoverage;
     }
 
-    public void populateMissingCoverage(final Iterable<HlaAllele> alleles)
+    public void populateMissingCoverage(final LinkedHashSet<HlaAllele> alleles)
     {
         if(mAlleleCoverage.size() == GENE_CACHE.ExpectAlleleCount)
             return;
@@ -201,6 +198,7 @@ public final class ComplexCoverage implements Comparable<ComplexCoverage>
         return new ComplexCoverage(unique, (int) round(shared), (int) round(wild), sortedAlleles);
     }
 
+    @Override
     public String toString()
     {
         return String.format("alleles(%s) coverage(%d) score(%.2f) complexityPenalty(%.2f)", HlaAllele.toString(getAlleles()), TotalCoverage, mScore, mComplexityPenalty);

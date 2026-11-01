@@ -3,7 +3,7 @@ package com.hartwig.hmftools.compar.snpgenotype;
 import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_ALT;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDirSeparator;
 import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
-import static com.hartwig.hmftools.compar.common.Category.SNP_GENOTYPE;
+import static com.hartwig.hmftools.compar.common.CategoryType.SNP_GENOTYPE;
 import static com.hartwig.hmftools.compar.common.CommonUtils.determineComparisonGenomePosition;
 import static com.hartwig.hmftools.compar.snpgenotype.SnpGenotypeData.FLD_GENOTYPE;
 import static com.hartwig.hmftools.compar.snpgenotype.SnpGenotypeData.FLD_VCF_SAMPLE_ID;
@@ -16,10 +16,11 @@ import com.hartwig.hmftools.common.variant.VcfFileReader;
 import com.hartwig.hmftools.compar.ComparConfig;
 import com.hartwig.hmftools.compar.ComparableItem;
 import com.hartwig.hmftools.compar.ItemComparer;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.common.CommonUtils;
 import com.hartwig.hmftools.compar.common.FileSources;
 import com.hartwig.hmftools.compar.common.Mismatch;
+import com.hartwig.hmftools.compar.common.SourceType;
 import com.hartwig.hmftools.patientdb.dao.DatabaseAccess;
 
 import htsjdk.tribble.CloseableTribbleIterator;
@@ -37,7 +38,7 @@ public class SnpGenotypeComparer implements ItemComparer
     }
 
     @Override
-    public Category category()
+    public CategoryType category()
     {
         return SNP_GENOTYPE;
     }
@@ -55,7 +56,7 @@ public class SnpGenotypeComparer implements ItemComparer
     }
 
     @Override
-    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final String sourceName)
+    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final SourceType sourceType)
     {
         // currently unsupported
         return Lists.newArrayList();
@@ -70,7 +71,7 @@ public class SnpGenotypeComparer implements ItemComparer
 
         if(!vcfFileReader.fileValid())
         {
-            CMP_LOGGER.error("failed to read SNP genotype VCF file({})", vcfFile);
+            CMP_LOGGER.warn("failed to read SNP genotype VCF file({})", vcfFile);
             return null;
         }
 

@@ -3,16 +3,21 @@ package com.hartwig.hmftools.compar.driver;
 import static java.lang.String.format;
 
 import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_CHROMOSOME;
-import static com.hartwig.hmftools.compar.common.Category.DRIVER;
+import static com.hartwig.hmftools.compar.common.CategoryType.DRIVER;
 import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_CHROMOSOME_BAND;
 import static com.hartwig.hmftools.compar.common.CommonUtils.createMismatchFromDiffs;
 import static com.hartwig.hmftools.compar.common.DiffFunctions.checkDiff;
 
 import java.util.List;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.driver.DriverCatalog;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.common.purple.GeneCopyNumber;
+import com.hartwig.hmftools.common.purple.PurplePurity;
+import com.hartwig.hmftools.common.purple.ReportedStatus;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.ComparableItem;
 import com.hartwig.hmftools.compar.common.DiffThresholds;
 import com.hartwig.hmftools.compar.common.MatchLevel;
@@ -21,6 +26,8 @@ import com.hartwig.hmftools.compar.common.Mismatch;
 public class DriverData implements ComparableItem
 {
     public final DriverCatalog DriverCatalog;
+
+    private final PurplePurity mPurity;
     public final String mComparisonChromosome;
     private final String mKey;
     private final boolean mCheckTranscript;
@@ -30,9 +37,12 @@ public class DriverData implements ComparableItem
     protected static final String FLD_MIN_COPY_NUMBER = "MinCopyNumber";
     protected static final String FLD_MAX_COPY_NUMBER = "MaxCopyNumber";
 
-    public DriverData(final DriverCatalog driverCatalog, final String comparisonChromosome, boolean checkTranscript)
+    public DriverData(
+            final DriverCatalog driverCatalog, final PurplePurity purity, final String comparisonChromosome, boolean checkTranscript)
     {
         DriverCatalog = driverCatalog;
+
+        mPurity = purity;
         mComparisonChromosome = comparisonChromosome;
         mCheckTranscript = checkTranscript;
 
@@ -41,7 +51,7 @@ public class DriverData implements ComparableItem
     }
 
     @Override
-    public Category category() { return DRIVER; }
+    public CategoryType category() { return DRIVER; }
 
     @Override
     public String key()
@@ -61,12 +71,19 @@ public class DriverData implements ComparableItem
     }
 
     @Override
-    public boolean reportable() { return true; }
+    public List<String> extraInfoValues()
+    {
+        List<String> values = Lists.newArrayList();
+        values.add(format("Purity=%.2f", mPurity.Purity));
+        values.add(format("Ploidy=%.2f", mPurity.Ploidy));
+        return values;
+    }
 
     @Override
-    public boolean isPass() {
-        return true;
-    }
+    public boolean reportable() { return DriverCatalog.reportedStatus() == ReportedStatus.REPORTED; }
+
+    @Override
+    public String geneName() { return DriverCatalog.gene(); }
 
     @Override
     public boolean matches(final ComparableItem other)
@@ -79,7 +96,7 @@ public class DriverData implements ComparableItem
         if(DriverCatalog.driver() != otherDriver.DriverCatalog.driver())
             return false;
 
-        if(mCheckTranscript)
+        if(mCheckTranscript || otherDriver.mCheckTranscript)
         {
             if(!DriverCatalog.transcript().equals(otherDriver.DriverCatalog.transcript())
             && DriverCatalog.isCanonical() != otherDriver.DriverCatalog.isCanonical())
@@ -92,8 +109,8 @@ public class DriverData implements ComparableItem
     }
 
     @Override
-    public Mismatch findMismatch(final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds,
-            final boolean includeMatches)
+    public Mismatch findMismatch(
+            final ComparableItem other, final MatchLevel matchLevel, final DiffThresholds thresholds, final boolean includeMatches)
     {
         final DriverData otherDriver = (DriverData)other;
 

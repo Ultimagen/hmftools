@@ -18,9 +18,9 @@ import com.hartwig.hmftools.common.pathogenic.PathogenicSummary;
 import com.hartwig.hmftools.common.purple.GermlineStatus;
 import com.hartwig.hmftools.common.variant.AllelicDepth;
 import com.hartwig.hmftools.common.variant.CodingEffect;
-import com.hartwig.hmftools.common.variant.GermlineVariant;
-import com.hartwig.hmftools.common.variant.Hotspot;
-import com.hartwig.hmftools.common.variant.ImmutableGermlineVariantImpl;
+import com.hartwig.hmftools.common.variant.HotspotType;
+import com.hartwig.hmftools.common.variant.ImmutableSmallVariantImpl;
+import com.hartwig.hmftools.common.variant.SmallVariant;
 import com.hartwig.hmftools.common.variant.VariantContextDecorator;
 import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.common.variant.VariantType;
@@ -166,7 +166,7 @@ public class GermlineVariantDAO
                 decorator.minorAlleleCopyNumber(),
                 pathogenicSummary.ClinvarInfo,
                 pathogenicSummary.Status.toString(),
-                decorator.isPathogenic(),
+                decorator.isGermlinePathogenic(),
                 variantImpact.GeneName,
                 variantImpact.GenesAffected,
                 variantImpact.CanonicalEffect,
@@ -312,7 +312,7 @@ public class GermlineVariantDAO
                 SVBREAKENDGERMLINE.CANONICALTRANSCRIPT,
                 SVBREAKENDGERMLINE.GENEORIENTATION,
                 SVBREAKENDGERMLINE.DISRUPTIVE,
-                SVBREAKENDGERMLINE.REPORTEDDISRUPTION,
+                SVBREAKENDGERMLINE.REPORTEDSTATUS,
                 SVBREAKENDGERMLINE.UNDISRUPTEDCOPYNUMBER,
                 SVBREAKENDGERMLINE.REGIONTYPE,
                 SVBREAKENDGERMLINE.CODINGTYPE,
@@ -343,7 +343,7 @@ public class GermlineVariantDAO
                 germlineBreakend.canonical(),
                 germlineBreakend.geneOrientation(),
                 germlineBreakend.disruptive(),
-                germlineBreakend.reportedDisruption(),
+                germlineBreakend.reportedStatus().toString(),
                 DatabaseUtil.decimal(germlineBreakend.undisruptedCopyNumber()),
                 germlineBreakend.regionType(),
                 germlineBreakend.codingType(),
@@ -355,9 +355,9 @@ public class GermlineVariantDAO
                 germlineBreakend.totalExonCount());
     }
 
-    public List<GermlineVariant> read(final String sample)
+    public List<SmallVariant> read(final String sample)
     {
-        List<GermlineVariant> variants = Lists.newArrayList();
+        List<SmallVariant> variants = Lists.newArrayList();
 
         Result<Record> result = context.select().from(GERMLINEVARIANT).where(GERMLINEVARIANT.SAMPLEID.eq(sample)).fetch();
 
@@ -369,7 +369,7 @@ public class GermlineVariantDAO
         return variants;
     }
 
-    public static GermlineVariant buildFromRecord(final Record record)
+    public static SmallVariant buildFromRecord(final Record record)
     {
         Integer rnaAlleleReadCount = record.getValue(GERMLINEVARIANT.RNAALLELEREADCOUNT);
         Integer rnaTotalCount = record.getValue(GERMLINEVARIANT.RNATOTALREADCOUNT);
@@ -377,7 +377,7 @@ public class GermlineVariantDAO
         AllelicDepth rnaAllelicDepth = rnaAlleleReadCount != null && rnaTotalCount != null ?
                 new AllelicDepth(rnaTotalCount, rnaAlleleReadCount) : null;
 
-        return ImmutableGermlineVariantImpl.builder()
+        SmallVariant variant = ImmutableSmallVariantImpl.builder()
                 .chromosome(record.getValue(GERMLINEVARIANT.CHROMOSOME))
                 .position(record.getValue(GERMLINEVARIANT.POSITION))
                 .filter(record.getValue(GERMLINEVARIANT.FILTER))
@@ -396,6 +396,8 @@ public class GermlineVariantDAO
                         : CodingEffect.valueOf(record.getValue(GERMLINEVARIANT.CANONICALCODINGEFFECT)))
                 .canonicalHgvsCodingImpact(record.getValue(GERMLINEVARIANT.CANONICALHGVSCODINGIMPACT))
                 .canonicalHgvsProteinImpact(record.getValue(GERMLINEVARIANT.CANONICALHGVSPROTEINIMPACT))
+                .canonicalAffectedCodon(0)
+                .canonicalAffectedExon(0)
                 .spliceRegion(DatabaseUtil.byteToBoolean(record.getValue(GERMLINEVARIANT.SPLICEREGION)))
                 .otherReportedEffects(DatabaseUtil.valueNotNull(record.getValue(GERMLINEVARIANT.OTHERTRANSCRIPTEFFECTS)))
                 .allelicDepth(new AllelicDepth(
@@ -404,12 +406,13 @@ public class GermlineVariantDAO
                 .adjustedVAF(record.getValue(GERMLINEVARIANT.ADJUSTEDVAF))
                 .variantCopyNumber(record.getValue(GERMLINEVARIANT.VARIANTCOPYNUMBER))
                 .biallelic(DatabaseUtil.byteToBoolean(record.getValue(GERMLINEVARIANT.BIALLELIC)))
+                .biallelicProbability(0)
                 .reported(DatabaseUtil.byteToBoolean(record.getValue(GERMLINEVARIANT.REPORTED)))
                 .trinucleotideContext(record.getValue(GERMLINEVARIANT.TRINUCLEOTIDECONTEXT))
                 .microhomology(record.getValue(GERMLINEVARIANT.MICROHOMOLOGY))
                 .repeatSequence(record.getValue(GERMLINEVARIANT.REPEATSEQUENCE))
                 .repeatCount(record.getValue(GERMLINEVARIANT.REPEATCOUNT))
-                .hotspot(Hotspot.valueOf(record.getValue(GERMLINEVARIANT.HOTSPOT)))
+                .hotspot(HotspotType.valueOf(record.getValue(GERMLINEVARIANT.HOTSPOT)))
                 .mappability(record.getValue(GERMLINEVARIANT.MAPPABILITY))
                 .minorAlleleCopyNumber(record.getValue(GERMLINEVARIANT.MINORALLELECOPYNUMBER))
                 .tier(VariantTier.fromString(record.get(GERMLINEVARIANT.TIER)))
@@ -421,6 +424,7 @@ public class GermlineVariantDAO
                 .pathogenicity(record.get(GERMLINEVARIANT.PATHOGENICITY))
                 .pathogenic(record.get(GERMLINEVARIANT.PATHOGENIC).intValue() == 1)
                 .build();
-    }
 
+        return variant;
+    }
 }

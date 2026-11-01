@@ -1,6 +1,8 @@
 package com.hartwig.hmftools.compar.linx;
 
-import static com.hartwig.hmftools.compar.common.Category.GERMLINE_SV;
+import static java.lang.Math.round;
+
+import static com.hartwig.hmftools.compar.common.CategoryType.GERMLINE_SV;
 import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_REPORTED;
 import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
 import static com.hartwig.hmftools.compar.common.CommonUtils.determineComparisonGenomePosition;
@@ -9,14 +11,14 @@ import static com.hartwig.hmftools.compar.linx.DisruptionData.FLD_BREAKEND_INFO;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.linx.LinxBreakend;
 import com.hartwig.hmftools.common.linx.LinxGermlineDisruption;
+import com.hartwig.hmftools.common.purple.ReportedStatus;
 import com.hartwig.hmftools.common.region.BasePosition;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.common.CommonUtils;
 import com.hartwig.hmftools.compar.ComparConfig;
 import com.hartwig.hmftools.compar.ComparableItem;
@@ -25,6 +27,7 @@ import com.hartwig.hmftools.compar.common.FileSources;
 import com.hartwig.hmftools.compar.ItemComparer;
 import com.hartwig.hmftools.compar.common.MatchLevel;
 import com.hartwig.hmftools.compar.common.Mismatch;
+import com.hartwig.hmftools.compar.common.SourceType;
 import com.hartwig.hmftools.patientdb.dao.DatabaseAccess;
 
 public class GermlineSvComparer implements ItemComparer
@@ -37,7 +40,7 @@ public class GermlineSvComparer implements ItemComparer
     }
 
     @Override
-    public Category category() { return GERMLINE_SV; }
+    public CategoryType category() { return GERMLINE_SV; }
 
     @Override
     public void registerThresholds(final DiffThresholds thresholds) {}
@@ -55,7 +58,7 @@ public class GermlineSvComparer implements ItemComparer
     }
 
     @Override
-    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final String sourceName)
+    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final SourceType sourceType)
     {
         // currently unsupported
         return Lists.newArrayList();
@@ -81,7 +84,7 @@ public class GermlineSvComparer implements ItemComparer
 
             for(LinxBreakend breakend : LinxBreakend.read(germlineBreakendFile))
             {
-                if(reportedOnly && !breakend.reportedDisruption())
+                if(reportedOnly && breakend.reportedStatus() != ReportedStatus.REPORTED)
                     continue;
 
                 if(germlineSvs == null)
@@ -113,9 +116,13 @@ public class GermlineSvComparer implements ItemComparer
                 BasePosition comparisonPosition = determineComparisonGenomePosition(
                         chromosome, position, fileSources.Source, mConfig.RequiresLiftover, mConfig.LiftoverCache);
 
+                int frags = var.GermlineFragments;
+                int depth = (usesStart ? var.GermlineReferenceFragmentsStart : var.GermlineReferenceFragmentsEnd) + frags;
+                int qual = (int)round(var.QualScore);
+
                 BreakendData breakendData = new BreakendData(
                         breakend, var.VcfId, var.Type, chromosome, position,
-                        usesStart ? var.OrientStart : var.OrientEnd, homologyOffsets,
+                        usesStart ? var.OrientStart : var.OrientEnd, homologyOffsets, depth, frags, qual,
                         comparisonPosition.Chromosome, comparisonPosition.Position);
 
                 geneBreakends.add(breakendData);

@@ -1,14 +1,20 @@
 package com.hartwig.hmftools.redux;
 
 import static java.lang.Math.max;
+import static java.lang.Math.min;
+import static java.lang.Math.round;
 
 import static com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr;
 import static com.hartwig.hmftools.common.perf.TaskExecutor.runThreadTasks;
+import static com.hartwig.hmftools.common.sequencing.SbxBamUtils.isHomopolymerLowBaseQualAtStart;
 import static com.hartwig.hmftools.redux.PartitionThread.splitRegionsIntoPartitions;
 import static com.hartwig.hmftools.redux.ReduxConfig.APP_NAME;
 import static com.hartwig.hmftools.redux.ReduxConfig.RD_LOGGER;
+import static com.hartwig.hmftools.redux.ReduxConfig.isIllumina;
+import static com.hartwig.hmftools.redux.ReduxConfig.isSbx;
+import static com.hartwig.hmftools.redux.ReduxConfig.isUltima;
 import static com.hartwig.hmftools.redux.ReduxConfig.registerConfig;
-import static com.hartwig.hmftools.redux.common.Constants.DEFAULT_READ_LENGTH;
+import static com.hartwig.hmftools.redux.ReduxConstants.DEFAULT_READ_LENGTH;
 import static com.hartwig.hmftools.redux.unmap.RegionUnmapper.createThreadTasks;
 import static com.hartwig.hmftools.redux.unmap.RegionUnmapper.processFullyUnmappedReads;
 import static com.hartwig.hmftools.redux.write.PartitionInfo.partitionInfoStr;
@@ -21,7 +27,9 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.bamops.BamSampler;
-import com.hartwig.hmftools.common.basequal.jitter.JitterAnalyser;
+import com.hartwig.hmftools.redux.bqr.BaseQualRecalibration;
+import com.hartwig.hmftools.redux.consensus.SbxBamSampler;
+import com.hartwig.hmftools.redux.jitter.MsJitterAnalyser;
 import com.hartwig.hmftools.common.perf.PerformanceCounter;
 import com.hartwig.hmftools.common.perf.TaskQueue;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
@@ -32,6 +40,8 @@ import com.hartwig.hmftools.redux.unmap.UnmapStats;
 import com.hartwig.hmftools.redux.write.FileWriterCache;
 import com.hartwig.hmftools.redux.write.FinalBamWriter;
 import com.hartwig.hmftools.redux.write.PartitionInfo;
+
+import htsjdk.samtools.SAMRecord;
 
 public class ReduxApplication
 {
@@ -47,25 +57,29 @@ public class ReduxApplication
         if(!mConfig.isValid())
             System.exit(1);
 
-        if(!mConfig.JitterMsiOnly)
-        {
-            RD_LOGGER.info("sample({}) starting duplicate marking", mConfig.SampleId);
-        }
+        mConfig.logRoutineTypes();
 
         long startTimeMs = System.currentTimeMillis();
 
         setReadLength();
 
-        JitterAnalyser jitterAnalyser = null;
+        MsJitterAnalyser msJitterAnalyser = null;
 
         if(mConfig.JitterConfig != null)
-            jitterAnalyser = new JitterAnalyser(mConfig.JitterConfig, RD_LOGGER);
+            msJitterAnalyser = new MsJitterAnalyser(mConfig.JitterConfig);
 
-        FileWriterCache fileWriterCache = new FileWriterCache(mConfig, jitterAnalyser);
+        BaseQualRecalibration baseQualRecalibration = new BaseQualRecalibration(mConfig);
+
+        FileWriterCache fileWriterCache = new FileWriterCache(mConfig, msJitterAnalyser, baseQualRecalibration);
         UnmapStats unmapStats = mConfig.UnmapRegions.stats();
 
-        if(mConfig.UnmapRegions.enabled())
+        if(mConfig.UnmapRegions.unmapPairedReads())
         {
+            if(mConfig.UnmapAltDecoys)
+            {
+                mConfig.UnmapRegions.addNonStandardContigs(mConfig.RefGenome);
+            }
+
             List<Thread> unmappingThreadTasks = Lists.newArrayList();
             List<RegionUnmapper> readUnmappers = createThreadTasks(mConfig, fileWriterCache, unmappingThreadTasks);
 
@@ -109,12 +123,12 @@ public class ReduxApplication
 
         RD_LOGGER.info("all partition tasks complete");
 
-        if(jitterAnalyser != null)
+        if(msJitterAnalyser != null)
         {
             try
             {
                 RD_LOGGER.info("analysing microsatellite jitter");
-                jitterAnalyser.writeAnalysisOutput();
+                msJitterAnalyser.writeAnalysisOutput();
             }
             catch(Exception e)
             {
@@ -123,9 +137,12 @@ public class ReduxApplication
             }
         }
 
-        if(mConfig.JitterMsiOnly)
+        if(baseQualRecalibration.enabled())
+            baseQualRecalibration.finalise();
+
+        if(mConfig.BqrAndJitterMsiOnly)
         {
-            RD_LOGGER.info("Redux jitter complete, mins({})", runTimeMinsStr(startTimeMs));
+            RD_LOGGER.info("Redux BQR and jitter complete, mins({})", runTimeMinsStr(startTimeMs));
             return;
         }
 
@@ -152,40 +169,49 @@ public class ReduxApplication
             RD_LOGGER.warn("unsorted BAM write count({}) via sorted BAM writers", sortedBamUnsortedWriteCount);
         }
 
-        combinedStats.logStats();
+        if(!mConfig.SkipDuplicateMarking)
+            combinedStats.logStats();
 
         if(mConfig.UnmapRegions.enabled())
         {
-            if(mConfig.RunChecks)
-                mConfig.readChecker().logUnmatchedUnmappedReads();
-
-            // check that the unmapping counts match the re-tested unmapped reads from the the partition readers
-            UnmapStats reunmapStats = mConfig.UnmapRegions.stats();
-
-            RD_LOGGER.debug("re-unmapped stats: {}", reunmapStats.toString());
-
-            if(reunmapStats.ReadCount.get() != unmapStats.ReadCount.get()
-            || reunmapStats.FullyUnmappedCount.get() != unmapStats.FullyUnmappedCount.get())
+            if(mConfig.UnmapRegions.unmapPairedReads())
             {
-                RD_LOGGER.warn("re-unmapped stats differ: {}", reunmapStats.toString());
-            }
-        }
+                if(mConfig.RunChecks)
+                    mConfig.readChecker().logUnmatchedUnmappedReads();
 
-        if(mConfig.WriteStats)
-        {
-            combinedStats.writeDuplicateStats(mConfig);
+                // check that the unmapping counts match the re-tested unmapped reads from the the partition readers
+                UnmapStats reunmapStats = mConfig.UnmapRegions.stats();
 
-            if(mConfig.UMIs.Enabled)
-            {
-                combinedStats.UmiStats.writePositionFragmentsData(mConfig);
+                RD_LOGGER.debug("re-unmapped stats: {}", reunmapStats.toString());
 
-                if(mConfig.UMIs.BaseStats)
+                if(reunmapStats.ReadCount.get() != unmapStats.ReadCount.get()
+                        || reunmapStats.FullyUnmappedCount.get() != unmapStats.FullyUnmappedCount.get())
                 {
-                    combinedStats.UmiStats.writeUmiBaseDiffStats(mConfig);
-                    combinedStats.UmiStats.writeUmiBaseFrequencyStats(mConfig);
+                    RD_LOGGER.warn("re-unmapped stats differ: {}", reunmapStats.toString());
                 }
             }
+            else
+            {
+                RD_LOGGER.debug("unmapped stats: {}", mConfig.UnmapRegions.stats().unpairedStats());
+            }
         }
+
+        if(!mConfig.SkipDuplicateMarking)
+            combinedStats.writeDuplicateStats(mConfig);
+
+        if(mConfig.UMIs.Enabled)
+        {
+            combinedStats.UmiStats.writePositionFragmentsData(mConfig);
+
+            if(mConfig.UMIs.BaseStats)
+            {
+                combinedStats.UmiStats.writeUmiBaseDiffStats(mConfig);
+                combinedStats.UmiStats.writeUmiBaseFrequencyStats(mConfig);
+            }
+        }
+
+        if(isUltima())
+            combinedStats.Ultima.writeStats(mConfig);
 
         if(finalBamWriter != null)
             finalBamWriter.logTimes();
@@ -197,15 +223,27 @@ public class ReduxApplication
 
     private List<PartitionThread> createPartitionThreads(final FileWriterCache fileWriterCache)
     {
-        int partitionThreadCount = mConfig.WriteBam & mConfig.ParallelConcatenation ? max(mConfig.Threads - 1, 1) : mConfig.Threads;
+        int threadCount = mConfig.Threads;
+        int partitionThreadCount = mConfig.WriteBam & mConfig.ParallelConcatenation ? max(threadCount - 1, 1) : threadCount;
         int partitionCount = mConfig.PartitionThreadRatio * partitionThreadCount;
+
+        if(threadCount > 1 && !mConfig.SpecificChrRegions.Regions.isEmpty())
+        {
+            // limited threads if running over small specific regions
+            int specificRegionBases = mConfig.SpecificChrRegions.Regions.stream().mapToInt(x -> x.baseLength()).sum();
+            threadCount = max(min(threadCount, (int)round(specificRegionBases / (double)10_000)), 1);
+
+            partitionThreadCount = threadCount;
+            partitionCount = partitionThreadCount;
+        }
 
         RD_LOGGER.debug("splitting {} partition regions across {} threads", partitionCount, partitionThreadCount);
 
         List<PartitionThread> partitionThreads = Lists.newArrayListWithCapacity(partitionThreadCount);
 
         List<List<ChrBaseRegion>> partitionRegions = splitRegionsIntoPartitions(
-                mConfig.SpecificChrRegions, partitionCount, mConfig.RefGenVersion, mConfig.RefGenome);
+                mConfig.SpecificChrRegions, partitionCount, mConfig.RefGenVersion,
+                mConfig.StandardChromosomes ? null : mConfig.RefGenome); // by not passing the ref genome its sequences will be ignored
 
         if(partitionRegions.isEmpty())
             return Collections.emptyList();
@@ -229,7 +267,7 @@ public class ReduxApplication
 
         List<String> inputBamFiles = Lists.newArrayList(mConfig.BamFiles);
 
-        if(mConfig.UnmapRegions.enabled() && mConfig.WriteBam)
+        if(mConfig.UnmapRegions.unmapPairedReads() && mConfig.WriteBam)
             inputBamFiles.add(fileWriterCache.unmappedSortedBamFilename());
 
         for(int i = 0; i < partitionThreadCount; ++i)
@@ -248,6 +286,12 @@ public class ReduxApplication
 
         // sample the BAM to determine read length
         BamSampler bamSampler = new BamSampler(mConfig.RefGenomeFile);
+
+        if(isSbx())
+        {
+            SbxBamSampler sbxBamSampler = new SbxBamSampler();
+            bamSampler.setConsumer(sbxBamSampler::processSampleRecord);
+        }
 
         ChrBaseRegion sampleRegion = !mConfig.SpecificChrRegions.Regions.isEmpty() ?
                 mConfig.SpecificChrRegions.Regions.get(0) : bamSampler.defaultRegion();

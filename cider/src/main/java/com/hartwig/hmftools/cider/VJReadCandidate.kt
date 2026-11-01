@@ -1,6 +1,7 @@
 package com.hartwig.hmftools.cider
 
-import com.google.common.collect.ImmutableCollection
+import com.hartwig.hmftools.cider.genes.VJAnchorTemplate
+import com.hartwig.hmftools.cider.genes.VJGeneType
 import com.hartwig.hmftools.common.codon.Codons
 import htsjdk.samtools.SAMRecord
 import htsjdk.samtools.util.SequenceUtil
@@ -9,7 +10,7 @@ import htsjdk.samtools.util.SequenceUtil
 // match perfectly. We just match by anchor
 data class VJReadCandidate(
     val read: SAMRecord,
-    val vjAnchorTemplates: ImmutableCollection<VJAnchorTemplate>,
+    val vjAnchorTemplates: List<VJAnchorTemplate>,
     val vjGeneType: VJGeneType,
     val templateAnchorSequence: String,
     val matchMethod: MatchMethod,
@@ -22,7 +23,7 @@ data class VJReadCandidate(
 {
     enum class MatchMethod
     {
-        ALIGN, EXACT, BLOSUM
+        ALIGN, BLOSUM
     }
 
     var similarityScore: Int = Int.MIN_VALUE
@@ -40,23 +41,6 @@ data class VJReadCandidate(
         if (useReverseComplement)
             readSeq = SequenceUtil.reverseComplement(readSeq)
         return readSeq
-    }
-
-    // base qualities in the order that the gene is transcribed
-    val baseQualities: ByteArray get()
-    {
-        var bq = read.baseQualities
-        if (useReverseComplement)
-            bq = bq.reversedArray()
-        return bq
-    }
-
-    val baseQualityString: String get()
-    {
-        val bq = read.baseQualityString
-        return if (useReverseComplement)
-            bq.reversed()
-        else bq
     }
 
     val anchorSequence: String get()

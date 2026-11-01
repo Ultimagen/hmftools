@@ -10,21 +10,26 @@ import java.util.stream.Collectors;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.esvee.common.FragmentLengthBounds;
+import com.hartwig.hmftools.esvee.common.saga.SagaMatcherFactory;
 import com.hartwig.hmftools.esvee.prep.types.CombinedStats;
 
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 public class PrepApplication
 {
     private final PrepConfig mConfig;
     private final ResultsWriter mWriter;
     private final SpanningReadCache mSpanningReadCache;
+    @Nullable
+    private final SagaMatcherFactory mSagaMatcherFactory;
 
     public PrepApplication(final ConfigBuilder configBuilder)
     {
         mConfig = new PrepConfig(configBuilder);
         mWriter = new ResultsWriter(mConfig);
         mSpanningReadCache = new SpanningReadCache(mConfig);
+        mSagaMatcherFactory = mConfig.SagaFastaFile == null ? null : new SagaMatcherFactory(mConfig.SagaFastaFile);
     }
 
     public void run()
@@ -50,7 +55,7 @@ public class PrepApplication
 
             SV_LOGGER.info("processing chromosome({})", chromosomeStr);
 
-            ChromosomeTask chromosomeTask = new ChromosomeTask(chromosomeStr, mConfig, mSpanningReadCache, mWriter);
+            ChromosomeTask chromosomeTask = new ChromosomeTask(chromosomeStr, mConfig, mSpanningReadCache, mSagaMatcherFactory, mWriter);
             chromosomeTask.process();
             combinedStats.addPartitionStats(chromosomeTask.combinedStats().ReadStats);
             combinedStats.addDiscordantStats(chromosomeTask.combinedStats().Discordants);
@@ -103,8 +108,8 @@ public class PrepApplication
 
         FragmentLengthBounds fragmentLengthBounds = fragSizeDistribution.calculateFragmentLengthBounds();
 
-        SV_LOGGER.info("fragment length distribution bounds(min={} max={})",
-                fragmentLengthBounds.LowerBound, fragmentLengthBounds.UpperBound);
+        SV_LOGGER.info("fragment length distribution bounds(min={} max={} median={})",
+                fragmentLengthBounds.LowerBound, fragmentLengthBounds.UpperBound, fragmentLengthBounds.Median);
 
         if(fragmentLengthBounds.isValid())
         {
@@ -112,12 +117,6 @@ public class PrepApplication
                     fragmentLengthBounds.LowerBound,
                     mConfig.MaxFragmentLengthOverride > 0 ? mConfig.MaxFragmentLengthOverride : fragmentLengthBounds.UpperBound);
         }
-
-        if(fragSizeDistribution.maxReadLength() > 0)
-            mConfig.setReadLength(fragSizeDistribution.maxReadLength());
-
-        if(!fragSizeDistribution.hasPairedReads())
-            mConfig.setUnpairedReads(true);
     }
 
     public static void main(@NotNull final String[] args)

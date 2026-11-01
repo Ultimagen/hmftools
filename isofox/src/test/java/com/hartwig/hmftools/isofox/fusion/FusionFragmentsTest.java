@@ -23,6 +23,7 @@ import static com.hartwig.hmftools.isofox.TestUtils.createCigar;
 import static com.hartwig.hmftools.isofox.TestUtils.createMappedRead;
 import static com.hartwig.hmftools.isofox.TestUtils.createSupplementaryReadPair;
 import static com.hartwig.hmftools.isofox.common.TransExonRef.hasMatchWithinRange;
+import static com.hartwig.hmftools.isofox.fusion.FusionDataTest.suppDataFromRead;
 import static com.hartwig.hmftools.isofox.fusion.FusionFragmentType.DISCORDANT_JUNCTION;
 import static com.hartwig.hmftools.isofox.fusion.FusionFragmentType.MATCHED_JUNCTION;
 import static com.hartwig.hmftools.isofox.fusion.FusionTestUtils.fromReads;
@@ -32,6 +33,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import static htsjdk.samtools.SAMFlag.FIRST_OF_PAIR;
+import static htsjdk.samtools.SAMFlag.SECOND_OF_PAIR;
 import static junit.framework.TestCase.assertFalse;
 
 import java.util.List;
@@ -39,7 +41,7 @@ import java.util.List;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
 import com.hartwig.hmftools.isofox.common.GeneCollection;
-import com.hartwig.hmftools.isofox.common.ReadRecord;
+import com.hartwig.hmftools.isofox.common.Read;
 import com.hartwig.hmftools.isofox.common.TransExonRef;
 
 import org.junit.Test;
@@ -63,15 +65,15 @@ public class FusionFragmentsTest
 
         // a simple DEL
         int readId = 0;
-        ReadRecord read1 = createMappedRead(readId, gc1, 1050, 1089, createCigar(0, 40, 0));
+        Read read1 = createMappedRead(readId, gc1, 1050, 1089, createCigar(0, 40, 0));
         read1.setFlag(FIRST_OF_PAIR, true);
 
-        ReadRecord[] readPair = createSupplementaryReadPair(readId, gc1, gc2, 1081, 1100, 10200, 10219,
+        Read[] readPair = createSupplementaryReadPair(readId, gc1, gc2, 1081, 1100, 10200, 10219,
                 createCigar(0, 20, 20), createCigar(20, 20, 0), false);
 
         readPair[1].setStrand(true, false);
 
-        List<ReadRecord> reads = Lists.newArrayList(read1, readPair[0], readPair[1]);
+        List<Read> reads = Lists.newArrayList(read1, readPair[0], readPair[1]);
         FusionFragment fragment = fromReads(reads);
 
         assertEquals(MATCHED_JUNCTION, fragment.type());
@@ -129,7 +131,7 @@ public class FusionFragmentsTest
 
         // short DEL without supplementary data
         read1 = createMappedRead(++readId, gc1, 1081, 1100, createCigar(0, 20, 20));
-        ReadRecord read2 = createMappedRead(readId, gc2, 10200, 10219, createCigar(20, 20, 0));
+        Read read2 = createMappedRead(readId, gc2, 10200, 10219, createCigar(20, 20, 0));
 
         read2.setStrand(true, false);
 
@@ -206,15 +208,15 @@ public class FusionFragmentsTest
         int readId = 0;
 
         // DUP between genes
-        ReadRecord[] readPair = createSupplementaryReadPair(readId, gc2, gc1, 10281, 10300, 1200, 1219,
+        Read[] readPair = createSupplementaryReadPair(readId, gc2, gc1, 10281, 10300, 1200, 1219,
                 createCigar(0, 20, 20), createCigar(20, 20, 0), true);
 
-        ReadRecord read1 = createMappedRead(++readId, gc2, 10220, 10259, createCigar(0, 40, 0));
+        Read read1 = createMappedRead(++readId, gc2, 10220, 10259, createCigar(0, 40, 0));
 
         readPair[0].setStrand(true, false);
         readPair[1].setStrand(true, false);
 
-        List<ReadRecord> reads = Lists.newArrayList(read1, readPair[0], readPair[1]);
+        List<Read> reads = Lists.newArrayList(read1, readPair[0], readPair[1]);
         FusionFragment fragment = fromReads(reads);
 
         assertEquals(MATCHED_JUNCTION, fragment.type());
@@ -257,37 +259,36 @@ public class FusionFragmentsTest
     @Test
     public void testInvFragment()
     {
-        final EnsemblDataCache geneTransCache = createGeneDataCache();
+        EnsemblDataCache geneTransCache = createGeneDataCache();
 
         addTestGenes(geneTransCache);
         addTestTranscripts(geneTransCache);
 
         int gcId = 0;
 
-        final GeneCollection gc1 =
-                createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_1)));
+        GeneCollection gc1 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_1)));
 
         // INV being +1/+1
-        final GeneCollection gc3 =
-                createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_3)));
+        GeneCollection gc3 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_3)));
 
         int readId = 0;
 
         String readBases = "AGAGAGAGAGAGAGAGAGAG";
         readBases += readBases;
-        ReadRecord read1 = createMappedRead(++readId, gc1, 1081, 1100, createCigar(0, 20, 20), readBases);
-        ReadRecord read2 = createMappedRead(readId, gc3, 20281, 20300, createCigar(0, 20, 20), readBases);
-        ReadRecord read3 = createMappedRead(readId, gc3, 20220, 20259, createCigar(20, 20, 0));
+        Read read1 = createMappedRead(++readId, gc1, 1081, 1100, createCigar(0, 20, 20), readBases);
+        Read read2 = createMappedRead(readId, gc3, 20281, 20300, createCigar(0, 20, 20), readBases);
+        Read read3 = createMappedRead(readId, gc3, 20220, 20259, createCigar(20, 20, 0));
 
         read1.setFlag(FIRST_OF_PAIR, true);
         read2.setFlag(FIRST_OF_PAIR, true);
-        read1.setSuppAlignment("supp");
-        read2.setSuppAlignment("supp");
+        read3.setFlag(SECOND_OF_PAIR, true);
+        read1.setSuppAlignment(suppDataFromRead(read2).asSamTag());
+        read2.setSuppAlignment(suppDataFromRead(read1).asSamTag());
         read1.setStrand(false, false);
         read1.setStrand(false, false);
         read3.setStrand(false, false);
 
-        List<ReadRecord> reads = Lists.newArrayList(read1, read2, read3);
+        List<Read> reads = Lists.newArrayList(read1, read2, read3);
         FusionFragment fragment = fromReads(reads);
 
         assertEquals(MATCHED_JUNCTION, fragment.type());
@@ -308,7 +309,7 @@ public class FusionFragmentsTest
 
 
         // INV being -1/-1
-        ReadRecord[] readPair = createSupplementaryReadPair(readId, gc1, gc3, 1100, 1119, 20100, 20119,
+        Read[] readPair = createSupplementaryReadPair(readId, gc1, gc3, 1100, 1119, 20100, 20119,
                 createCigar(20, 20, 0), createCigar(20, 20, 0), false);
 
         read3 = createMappedRead(readId, gc3, 20110, 20149, createCigar(0, 40, 0));
@@ -349,15 +350,15 @@ public class FusionFragmentsTest
         int readId = 0;
 
         // BND being -1/-1
-        ReadRecord[] readPair = createSupplementaryReadPair(readId, gc5, gc3, 10200, 10219, 20281, 20300,
+        Read[] readPair = createSupplementaryReadPair(readId, gc5, gc3, 10200, 10219, 20281, 20300,
                 createCigar(20, 20, 0), createCigar(0, 20, 20), true);
 
-        ReadRecord read3 = createMappedRead(readId, gc3, 20220, 20259, createCigar(0, 40, 0));
+        Read read3 = createMappedRead(readId, gc3, 20220, 20259, createCigar(0, 40, 0));
         readPair[0].setStrand(true, false);
         readPair[1].setStrand(false, true);
         read3.setStrand(false, true);
 
-        List<ReadRecord> reads = Lists.newArrayList(readPair[0], readPair[1], read3);
+        List<Read> reads = Lists.newArrayList(readPair[0], readPair[1], read3);
         FusionFragment fragment = fromReads(reads);
 
         assertEquals(MATCHED_JUNCTION, fragment.type());
@@ -393,12 +394,12 @@ public class FusionFragmentsTest
 
         // a simple DEL
         int readId = 0;
-        ReadRecord read1 = createMappedRead(readId, gc1, 1081, 1100, createCigar(0, 20, 20));
-        ReadRecord read2 = createMappedRead(readId, gc2, 10200, 10219, createCigar(20, 20, 0));
+        Read read1 = createMappedRead(readId, gc1, 1081, 1100, createCigar(0, 20, 20));
+        Read read2 = createMappedRead(readId, gc2, 10200, 10219, createCigar(20, 20, 0));
 
         read2.setStrand(true, false);
 
-        List<ReadRecord> reads = Lists.newArrayList(read1, read2);
+        List<Read> reads = Lists.newArrayList(read1, read2);
         FusionFragment fragment = fromReads(reads);
 
         assertEquals(DISCORDANT_JUNCTION, fragment.type());

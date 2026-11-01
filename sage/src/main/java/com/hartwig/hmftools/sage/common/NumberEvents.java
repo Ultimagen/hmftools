@@ -13,9 +13,9 @@ import htsjdk.samtools.util.SequenceUtil;
 
 public final class NumberEvents
 {
-    public static int calc(final SAMRecord record, final RefSequence refSequence)
+    public static int calcAdjustedNumMutations(final SAMRecord record, final RefSequence refSequence)
     {
-        int nm = rawNM(record, refSequence);
+        int nm = getOrCalcNm(record, refSequence);
 
         int additionalIndels = 0;
 
@@ -33,6 +33,17 @@ public final class NumberEvents
         return nm - additionalIndels;
     }
 
+    private static int getOrCalcNm(final SAMRecord record, final RefSequence refSequence)
+    {
+        Object nm = record.getAttribute(NUM_MUTATONS_ATTRIBUTE);
+
+        if(nm != null && nm instanceof Integer)
+            return (int)nm;
+
+        int offset = refSequence.Start - 1;
+        return SequenceUtil.calculateSamNmTag(record, refSequence.Bases, offset);
+    }
+
     public static double calcSoftClipAdjustment(final SAMRecord record)
     {
         return calcSoftClipAdjustment(leftSoftClipLength(record) + rightSoftClipLength(record));
@@ -43,21 +54,9 @@ public final class NumberEvents
         return softClipLength > 0 ? max(1, softClipLength / SC_READ_EVENTS_FACTOR) : 0;
     }
 
-    public static int rawNM(final SAMRecord record, final RefSequence refGenome)
-    {
-        Object nm = record.getAttribute(NUM_MUTATONS_ATTRIBUTE);
-        if(nm instanceof Integer)
-        {
-            return (int) nm;
-        }
-
-        int offset = refGenome.Start - 1;
-        return SequenceUtil.calculateSamNmTag(record, refGenome.Bases, offset);
-    }
-
     public static int calcWithMnvRaw(int numberOfEvents, final String ref, final String alt)
     {
-        // Number of events includes each SNV as an additional event. This unfairly penalises MNVs.
+        // number of events includes each SNV as an additional event - this unfairly penalises MNVs
         int differentBases = 0;
         for(int i = 0; i < alt.length(); i++)
         {

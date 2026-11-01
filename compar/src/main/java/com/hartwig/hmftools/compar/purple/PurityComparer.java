@@ -1,6 +1,6 @@
 package com.hartwig.hmftools.compar.purple;
 
-import static com.hartwig.hmftools.compar.common.Category.PURITY;
+import static com.hartwig.hmftools.compar.common.CategoryType.PURITY;
 import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
 import static com.hartwig.hmftools.compar.purple.PurityData.FLD_CN_SEGS;
 import static com.hartwig.hmftools.compar.purple.PurityData.FLD_CONTAMINATION;
@@ -26,7 +26,7 @@ import java.util.List;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.purple.PurityContext;
 import com.hartwig.hmftools.common.purple.PurityContextFile;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.common.CommonUtils;
 import com.hartwig.hmftools.compar.ComparConfig;
 import com.hartwig.hmftools.compar.ComparableItem;
@@ -34,6 +34,7 @@ import com.hartwig.hmftools.compar.common.DiffThresholds;
 import com.hartwig.hmftools.compar.common.FileSources;
 import com.hartwig.hmftools.compar.ItemComparer;
 import com.hartwig.hmftools.compar.common.Mismatch;
+import com.hartwig.hmftools.compar.common.SourceType;
 import com.hartwig.hmftools.patientdb.dao.DatabaseAccess;
 
 public class PurityComparer implements ItemComparer
@@ -46,12 +47,12 @@ public class PurityComparer implements ItemComparer
     }
 
     @Override
-    public Category category() { return PURITY; }
+    public CategoryType category() { return PURITY; }
 
     @Override
     public void registerThresholds(final DiffThresholds thresholds)
     {
-        thresholds.addFieldThreshold(FLD_PURITY, 0.02, 0);
+        thresholds.addFieldThreshold(FLD_PURITY, 0.04, 0);
         thresholds.addFieldThreshold(FLD_PLOIDY, 0.1, 0);
         thresholds.addFieldThreshold(FLD_CONTAMINATION, 0.005, 0);
         thresholds.addFieldThreshold(FLD_TMB, 0.1, 0.05);
@@ -59,7 +60,7 @@ public class PurityComparer implements ItemComparer
         thresholds.addFieldThreshold(FLD_TML, 1, 0.05);
         thresholds.addFieldThreshold(FLD_CN_SEGS, 5, 0.2);
         thresholds.addFieldThreshold(FLD_UNS_CN_SEGS, 5, 0.2);
-        thresholds.addFieldThreshold(FLD_SV_TMB, 2, 0.05);
+        thresholds.addFieldThreshold(FLD_SV_TMB, 5, 0.05);
         thresholds.addFieldThreshold(FLD_TINC_LEVEL, 0.1, 0);
     }
 
@@ -78,9 +79,9 @@ public class PurityComparer implements ItemComparer
     }
 
     @Override
-    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final String sourceName)
+    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final SourceType sourceType)
     {
-        final PurityContext purityContext = dbAccess.readPurityContext(sampleId);
+        PurityContext purityContext = dbAccess.readPurityContext(sampleId);
 
         List<ComparableItem> items = Lists.newArrayList();
         items.add(new PurityData(purityContext));
@@ -90,7 +91,7 @@ public class PurityComparer implements ItemComparer
     @Override
     public List<ComparableItem> loadFromFile(final String sampleId, final String germlineSampleId, final FileSources fileSources)
     {
-        final List<ComparableItem> comparableItems = Lists.newArrayList();
+        List<ComparableItem> comparableItems = Lists.newArrayList();
 
         try
         {

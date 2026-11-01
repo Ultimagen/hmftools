@@ -5,12 +5,16 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.sqrt;
 
+import static com.hartwig.hmftools.common.sv.StructuralVariantType.BND;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DEL;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DUP;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.INS;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.INV;
 import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
 import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.PROX_JUNC_READ_RATIO;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SPLIT_FRAGS;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SUPP_REMOTE_REGION_RATIO;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.getGenotypeAttributeAsDouble;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.assembly.types.RepeatInfo.calcTrimmedBaseLength;
@@ -25,12 +29,18 @@ import static com.hartwig.hmftools.esvee.caller.FilterConstants.INV_SHORT_FRAGME
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.INV_SHORT_FRAGMENT_LENGTH;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.INV_SHORT_FRAGMENT_MIN_AF;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.INV_SHORT_LENGTH;
-import static com.hartwig.hmftools.esvee.caller.FilterConstants.INV_SHORT_MAX_HOMOLOGY_HIGHER;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.INV_SHORT_MAX_HOMOLOGY_LOWER;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.INV_SHORT_MIN_AF_HIGHER;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.INV_SHORT_MIN_AF_LOWER;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.INV_SHORT_RATE_HIGHER;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.INV_SHORT_RATE_LOWER;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.MIN_AF_WEAK_JUNCTION_DISC_RATE_FACTOR_LONG;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.MIN_AF_WEAK_JUNCTION_DISC_RATE_FACTOR_OTHER;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.MIN_AF_WEAK_JUNCTION_DISC_RATE_FACTOR_SGL;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.MIN_AF_WEAK_JUNCTION_DISC_RATE_MIN;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.MIN_AF_WEAK_JUNCTION_PROX_JUNC_READ_THRESHOLD;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.MIN_AF_WEAK_JUNCTION_STRAND_BIAS_MIN;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.MIN_AF_WEAK_JUNCTION_SUPP_REMOTE_THRESHOLD;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.MIN_AVG_FRAG_FACTOR;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.MIN_AVG_FRAG_STD_DEV_FACTOR;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.MIN_TRIMMED_ANCHOR_LENGTH;
@@ -38,25 +48,43 @@ import static com.hartwig.hmftools.esvee.caller.FilterConstants.PON_INS_SEQ_FWD_
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.PON_INS_SEQ_FWD_STRAND_2;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.PON_INS_SEQ_REV_STRAND_1;
 import static com.hartwig.hmftools.esvee.caller.FilterConstants.PON_INS_SEQ_REV_STRAND_2;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.PRIME_MAX_BASE_FACTOR;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.PRIME_MAX_PERMITTED_RANGE;
+import static com.hartwig.hmftools.esvee.caller.FilterConstants.PRIME_MAX_SGL_FACTOR;
+import static com.hartwig.hmftools.esvee.caller.SeqTechUtils.isSbxStrandBias;
+import static com.hartwig.hmftools.esvee.caller.SeqTechUtils.isSbxArtefact;
+import static com.hartwig.hmftools.esvee.caller.SeqTechUtils.isSbxZeroLengthInversion;
 import static com.hartwig.hmftools.esvee.common.FilterType.DUPLICATE;
 import static com.hartwig.hmftools.esvee.common.FilterType.INV_SHORT_ISOLATED;
+import static com.hartwig.hmftools.esvee.common.FilterType.LINE_SOURCE;
+import static com.hartwig.hmftools.esvee.common.FilterType.WEAK_JUNC_MIN_AF;
 import static com.hartwig.hmftools.esvee.common.FilterType.MIN_ANCHOR_LENGTH;
 import static com.hartwig.hmftools.esvee.common.FilterType.MIN_LENGTH;
 import static com.hartwig.hmftools.esvee.common.FilterType.MIN_QUALITY;
 import static com.hartwig.hmftools.esvee.common.FilterType.MIN_AF;
 import static com.hartwig.hmftools.esvee.common.FilterType.MIN_SUPPORT;
+import static com.hartwig.hmftools.esvee.common.FilterType.SBX_ARTEFACT;
+import static com.hartwig.hmftools.esvee.common.FilterType.SBX_INV_ZERO_MOTIF;
+import static com.hartwig.hmftools.esvee.common.FilterType.SBX_STRAND_BIAS;
 import static com.hartwig.hmftools.esvee.common.FilterType.SGL;
 import static com.hartwig.hmftools.esvee.common.FilterType.INV_SHORT_FRAG_LOW_VAF;
 import static com.hartwig.hmftools.esvee.common.FilterType.DEL_SHORT_LOW_VAF;
 import static com.hartwig.hmftools.esvee.common.FilterType.SHORT_FRAG_LENGTH;
 import static com.hartwig.hmftools.esvee.common.FilterType.INV_SHORT_LOW_VAF_HOM;
 import static com.hartwig.hmftools.esvee.common.FilterType.STRAND_BIAS;
+import static com.hartwig.hmftools.esvee.common.FilterType.UNPAIRED_THREE_PRIME_RANGE;
+import static com.hartwig.hmftools.esvee.common.SvConstants.INV_SHORT_MAX_HOMOLOGY_HIGHER;
+import static com.hartwig.hmftools.esvee.common.SvConstants.WEAK_ASSEMBLY_LONG_LENGTH;
+import static com.hartwig.hmftools.esvee.common.SvConstants.hasPairedReads;
 
 import java.util.List;
 import java.util.Map;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Maps;
+import com.hartwig.hmftools.common.sv.StructuralVariantType;
 import com.hartwig.hmftools.common.sv.SvVcfTags;
+import com.hartwig.hmftools.esvee.assembly.types.Junction;
 import com.hartwig.hmftools.esvee.assembly.types.RepeatInfo;
 import com.hartwig.hmftools.esvee.common.FilterType;
 import com.hartwig.hmftools.esvee.common.FragmentLengthBounds;
@@ -98,6 +126,9 @@ public class VariantFilters
         if(belowMinAf(var))
             var.addFilter(MIN_AF);
 
+        if(belowWeakJunctionMinAf(var))
+            var.addFilter(WEAK_JUNC_MIN_AF);
+
         if(belowMinSupport(var))
             var.addFilter(MIN_SUPPORT);
 
@@ -124,6 +155,21 @@ public class VariantFilters
 
         if(failsStrandBias(var))
             var.addFilter(STRAND_BIAS);
+
+        if(lowThreePrimePositionRange(var))
+            var.addFilter(UNPAIRED_THREE_PRIME_RANGE);
+
+        if(isSbxStrandBias(var))
+            var.addFilter(SBX_STRAND_BIAS);
+
+        if(isSbxArtefact(var))
+            var.addFilter(SBX_ARTEFACT);
+
+        if(isSbxZeroLengthInversion(var))
+            var.addFilter(SBX_INV_ZERO_MOTIF);
+
+        if(isRemoteLineSource(var))
+            var.addFilter(LINE_SOURCE);
     }
 
     private void applyExistingFilters(final Breakend breakend)
@@ -143,6 +189,11 @@ public class VariantFilters
 
     private boolean belowMinSupport(final Variant var)
     {
+        if(var.isSagaMatched())
+        {
+            return false;
+        }
+
         double supportThreshold;
 
         if(var.isHotspot())
@@ -176,6 +227,11 @@ public class VariantFilters
 
     private boolean belowMinAf(final Variant var)
     {
+        if(var.isSagaMatched())
+        {
+            return false;
+        }
+
         double afThreshold;
 
         if(var.isHotspot())
@@ -192,6 +248,85 @@ public class VariantFilters
         }
 
         return !anySamplesAboveAfThreshold(var, afThreshold);
+    }
+
+    private boolean belowWeakJunctionMinAf(final Variant var)
+    {
+        double discordantRate = mDiscordantStats.discordantRate();
+
+        if(discordantRate < MIN_AF_WEAK_JUNCTION_DISC_RATE_MIN)
+            return false;
+
+        if(!applyWeakJunctionMinAfFilter(var))
+            return false;
+
+        // adjust the standard min AF as follows:
+        // - Remote incomplete variants (BNDs or events >100kb length, with only 1 initial junction from prep): 0.001 + (discRate - 0.005) * 1.25
+        // - SGLs: 0.05 + (discRate - 0.005) * 1
+        // - Other variants: 0.001 + (discRate - 0.005) * 0.75
+
+        double afThreshold = var.isSgl() && !var.isLineSite() ? mFilterConstants.MinAfSgl : mFilterConstants.MinAfJunction;
+        double discRateThreshold = MIN_AF_WEAK_JUNCTION_DISC_RATE_MIN;
+
+        if(discordantRate > discRateThreshold)
+        {
+            if(var.type() == StructuralVariantType.SGL)
+            {
+                afThreshold += (discordantRate - discRateThreshold) * MIN_AF_WEAK_JUNCTION_DISC_RATE_FACTOR_SGL;
+            }
+            else if((var.type() == BND || var.svLength() >= WEAK_ASSEMBLY_LONG_LENGTH) && var.originalJunctions().size() == 1)
+            {
+                afThreshold += (discordantRate - discRateThreshold) * MIN_AF_WEAK_JUNCTION_DISC_RATE_FACTOR_LONG;
+            }
+            else
+            {
+                afThreshold += (discordantRate - discRateThreshold) * MIN_AF_WEAK_JUNCTION_DISC_RATE_FACTOR_OTHER;
+            }
+        }
+
+        return !anySamplesAboveAfThreshold(var, afThreshold);
+    }
+
+    @VisibleForTesting
+    public static boolean applyWeakJunctionMinAfFilter(final Variant var)
+    {
+        // this additional AF filter is conditionally applied if:
+        // - not hotspot or indel-based
+        // - SB > 0.9 or SB < 0.1, and variant is SGL or INV, OR
+        // - IHOMLEN >= 6, OR
+        // - majority_supp_ratio <= 0.5, OR
+        // - local_ratio_near_same < 0.1, OR
+
+        if(var.isSagaMatched() || var.isHotspot())
+            return false;
+
+        boolean hasSplitJunctions = var.originalJunctions().stream().anyMatch(x -> x.softClipBased());
+
+        if(!hasSplitJunctions)
+            return false;
+
+        Breakend breakend = var.breakendStart();
+
+        if(var.type() == StructuralVariantType.SGL || var.type() == INV)
+        {
+            double strandBias = breakend.strandBias();
+
+            if(strandBias < MIN_AF_WEAK_JUNCTION_STRAND_BIAS_MIN || strandBias > (1 - MIN_AF_WEAK_JUNCTION_STRAND_BIAS_MIN))
+                return true;
+        }
+
+        if(breakend.InexactHomology.length() >= INV_SHORT_MAX_HOMOLOGY_HIGHER)
+            return true;
+
+        double proximateJuncRatio = breakend.Context.getAttributeAsDouble(PROX_JUNC_READ_RATIO, -1);
+        if(proximateJuncRatio >= 0 && proximateJuncRatio <= MIN_AF_WEAK_JUNCTION_PROX_JUNC_READ_THRESHOLD)
+            return true;
+
+        double suppRemoteRegionRatio = breakend.Context.getAttributeAsDouble(SUPP_REMOTE_REGION_RATIO, -1);
+        if(suppRemoteRegionRatio >= 0 && suppRemoteRegionRatio <= MIN_AF_WEAK_JUNCTION_SUPP_REMOTE_THRESHOLD)
+            return true;
+
+        return false;
     }
 
     private static boolean anySamplesAboveAfThreshold(final Variant var, final double afThreshold)
@@ -225,6 +360,11 @@ public class VariantFilters
 
     private boolean belowMinQuality(final Variant var)
     {
+        if(var.isSagaMatched())
+        {
+            return false;
+        }
+
         double qualThreshold = var.isHotspot() ? mFilterConstants.MinQualHotspot : mFilterConstants.MinQual;
 
         Breakend breakend = var.breakendStart();
@@ -253,6 +393,11 @@ public class VariantFilters
 
     private boolean belowMinAnchorLength(final Variant var)
     {
+        if(var.isSagaMatched())
+        {
+            return false;
+        }
+
         if(var.isLineSite())
             return false;
 
@@ -284,6 +429,14 @@ public class VariantFilters
 
     private boolean belowMinFragmentLength(final Variant var)
     {
+        if(var.isSagaMatched())
+        {
+            return false;
+        }
+
+        if(!hasPairedReads())
+            return false;
+
         if(var.isSgl())
             return false;
 
@@ -309,6 +462,11 @@ public class VariantFilters
 
     private boolean isInversionShortLowVafHomology(final Variant var)
     {
+        if(var.isSagaMatched())
+        {
+            return false;
+        }
+
         // filter INVs if adjusted AF is low and length < 3K
         if(var.type() != INV)
             return false;
@@ -337,6 +495,11 @@ public class VariantFilters
 
     private boolean isInversionShortFragmentLowVaf(final Variant var)
     {
+        if(var.isSagaMatched())
+        {
+            return false;
+        }
+
         // Filter for short inv (vaf < 0.05; length < 300; vaf/shortInvRate < 50)
         if(var.type() != INV)
             return false;
@@ -351,6 +514,11 @@ public class VariantFilters
 
     private boolean isDeletionShortLowVaf(final Variant var)
     {
+        if(var.isSagaMatched())
+        {
+            return false;
+        }
+
         // filter DELs if AF is < 0.05> and length < 3K
         if(var.type() != DEL)
             return false;
@@ -371,6 +539,56 @@ public class VariantFilters
             return false;
 
         return !anySamplesAboveAfThreshold(var, DEL_ARTEFACT_MIN_AF);
+    }
+
+    private boolean lowThreePrimePositionRange(final Variant var)
+    {
+        if(hasPairedReads())
+            return false;
+
+        List<Junction> originalAssemblies = var.originalJunctions();
+
+        int splitFragmentFactor = originalAssemblies.size() == 1 ? PRIME_MAX_SGL_FACTOR : 1;
+
+        for(int se = SE_START; se <= SE_END; ++se)
+        {
+            if(var.breakends()[se] == null)
+                continue;
+
+            Breakend breakend = var.breakends()[se];
+
+            int minPositionRange = breakend.minOrientationPositionRange();
+
+            if(minPositionRange < 0)
+                continue;
+
+            int splitFragments = 0;
+            double maxStrandBias = 0;
+
+            for(Genotype genotype : breakend.Context.getGenotypes())
+            {
+                splitFragments += breakend.fragmentCount(genotype, SPLIT_FRAGS);
+
+                double strandBias = getGenotypeAttributeAsDouble(genotype, SvVcfTags.STRAND_BIAS, 0.5);
+                double adjStrandBias = strandBias > 0.5 ? 1 - strandBias : strandBias;
+                maxStrandBias = max(adjStrandBias, maxStrandBias);
+            }
+
+            if(maxStrandBias > 0)
+                continue;
+
+            double maxPermittedRange = min(PRIME_MAX_BASE_FACTOR + splitFragments * splitFragmentFactor, PRIME_MAX_PERMITTED_RANGE);
+
+            if(minPositionRange < maxPermittedRange)
+                return true;
+        }
+
+        return false;
+    }
+
+    private boolean isRemoteLineSource(final Variant var)
+    {
+        return var.breakendStart().isLineRemoteSourceSite() || (var.breakendEnd() != null && var.breakendEnd().isLineRemoteSourceSite());
     }
 
     private boolean failsStrandBias(final Variant var)
@@ -407,7 +625,7 @@ public class VariantFilters
 
     public void applyAdjacentFilters(final Map<String,List<Breakend>> chromosomeBreakends)
     {
-        // filter INVs which are short, unchained and isolated from other variants (exlcuding other similar INVs)
+        // filter INVs which are short, unchained and isolated from other variants (excluding other similar INVs)
         for(List<Breakend> breakends : chromosomeBreakends.values())
         {
             for(int i = 0; i < breakends.size(); ++i)

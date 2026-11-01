@@ -1,7 +1,7 @@
 package com.hartwig.hmftools.compar.teal;
 
 import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
-import static com.hartwig.hmftools.compar.common.Category.TELOMERE_LENGTH;
+import static com.hartwig.hmftools.compar.common.CategoryType.TELOMERE_LENGTH;
 import static com.hartwig.hmftools.compar.teal.TealData.FLD_TELOMERE_LENGTH;
 
 import java.io.UncheckedIOException;
@@ -14,11 +14,12 @@ import com.hartwig.hmftools.common.teal.TelomereLengthFile;
 import com.hartwig.hmftools.compar.ComparConfig;
 import com.hartwig.hmftools.compar.ComparableItem;
 import com.hartwig.hmftools.compar.ItemComparer;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.common.CommonUtils;
 import com.hartwig.hmftools.compar.common.DiffThresholds;
 import com.hartwig.hmftools.compar.common.FileSources;
 import com.hartwig.hmftools.compar.common.Mismatch;
+import com.hartwig.hmftools.compar.common.SourceType;
 import com.hartwig.hmftools.patientdb.dao.DatabaseAccess;
 
 public class TealComparer implements ItemComparer
@@ -31,7 +32,7 @@ public class TealComparer implements ItemComparer
     }
 
     @Override
-    public Category category() { return TELOMERE_LENGTH; }
+    public CategoryType category() { return TELOMERE_LENGTH; }
 
     @Override
     public void registerThresholds(final DiffThresholds thresholds)
@@ -52,7 +53,7 @@ public class TealComparer implements ItemComparer
     }
 
     @Override
-    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final String sourceName)
+    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final SourceType sourceType)
     {
         // currently unsupported
         return Collections.emptyList();

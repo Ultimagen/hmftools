@@ -13,44 +13,11 @@ import org.jetbrains.annotations.Nullable;
 public interface LinxRecord
 {
     @NotNull
-    List<LinxDriver> somaticDrivers();
+    List<LinxFusion> fusions();
 
     @NotNull
-    List<LinxSvAnnotation> allSomaticStructuralVariants();
+    List<LinxBreakend> somaticBreakends();
 
     @Nullable
-    List<LinxSvAnnotation> allGermlineStructuralVariants();
-
-    @NotNull
-    List<LinxFusion> allSomaticFusions();
-
-    @NotNull
-    List<LinxFusion> reportableSomaticFusions();
-
-    @NotNull
-    List<LinxFusion> additionalSuspectSomaticFusions();
-
-    @NotNull
-    List<LinxFusion> additionalViableSomaticFusions();
-
-    @NotNull
-    List<LinxBreakend> allSomaticBreakends();
-
-    @Nullable
-    List<LinxBreakend> allGermlineBreakends();
-
-    @NotNull
-    List<LinxBreakend> reportableSomaticBreakends();
-
-    @Nullable
-    List<LinxBreakend> reportableGermlineBreakends();
-
-    @NotNull
-    List<LinxBreakend> additionalSuspectSomaticBreakends();
-
-    @NotNull
-    List<LinxHomozygousDisruption> somaticHomozygousDisruptions();
-
-    @Nullable
-    List<LinxHomozygousDisruption> germlineHomozygousDisruptions();
+    List<LinxBreakend> germlineBreakends();
 }

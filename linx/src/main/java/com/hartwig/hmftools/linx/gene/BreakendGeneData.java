@@ -4,10 +4,12 @@ import static com.hartwig.hmftools.common.fusion.FusionCommon.POS_STRAND;
 
 import java.util.List;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.gene.GeneData;
 import com.hartwig.hmftools.common.sv.StructuralVariantData;
 import com.hartwig.hmftools.common.sv.StructuralVariantType;
+import com.hartwig.hmftools.linx.types.SvVarData;
 
 import org.jetbrains.annotations.Nullable;
 
@@ -16,7 +18,8 @@ public class BreakendGeneData
 {
     public final GeneData GeneData;
 
-    private final int mVarId;
+    private final int mSvId;
+    private String mSvVcfId;
     private final boolean mIsStart;
     private boolean mUpstream;
 
@@ -29,13 +32,14 @@ public class BreakendGeneData
     private double mJunctionCopyNumber;
     private String mInsertSequence;
 
-    public BreakendGeneData(int varId, final boolean isStart, final GeneData geneData)
+    public BreakendGeneData(final int svId, final boolean isStart, final GeneData geneData)
     {
         GeneData = geneData;
 
         mTranscripts = Lists.newArrayList();
 
-        mVarId = varId;
+        mSvId = svId;
+        mSvVcfId = "";
         mIsStart = isStart;
 
         mChromosome = "";
@@ -59,6 +63,7 @@ public class BreakendGeneData
 
     public void setSvData(final StructuralVariantData var, double jcn)
     {
+        mSvVcfId = mIsStart ? var.vcfIdStart() : var.vcfIdEnd();
         mOrientation = mIsStart ? var.startOrientation() : var.endOrientation();
         mJunctionCopyNumber = jcn;
         mPosition = mIsStart ? var.startPosition() : var.endPosition();
@@ -70,10 +75,11 @@ public class BreakendGeneData
 
     public void setType(StructuralVariantType type) { mSvType = type; }
 
-    public int id() { return mVarId; }
+    public int varId() { return mSvId; }
+    public String vcfId() { return mSvVcfId; }
     public byte orientation() { return mOrientation; }
     public int position() { return mPosition; }
-    public StructuralVariantType type() { return mSvType; }
+    public StructuralVariantType svType() { return mSvType; }
     public String chromosome() { return mChromosome; }
     public double jcn() { return mJunctionCopyNumber; }
     public String insertSequence() { return mInsertSequence; }
@@ -116,7 +122,7 @@ public class BreakendGeneData
             return false;
 
         // return true if the gene has a transcript such that the breakend falls into its pre-gene region
-        for(final BreakendTransData trans : mTranscripts)
+        for(BreakendTransData trans : mTranscripts)
         {
             // exclude if the position is interrupted by another splice acceptor
             if(!trans.isUpstream() && trans.hasNegativePrevSpliceAcceptorDistance())
@@ -131,10 +137,11 @@ public class BreakendGeneData
         return false;
     }
 
+    public String coordsStr() { return SvVarData.coordsStr(mChromosome, mPosition, mOrientation); }
+
     public String toString()
     {
-        return String.format("gene(%s:%s strand=%d) breakend(sv=%d pos=%s:%d:%d) trans(%d)",
-                GeneData.GeneId, GeneData.GeneName, GeneData.Strand, mVarId, mChromosome, mPosition, mOrientation, mTranscripts.size());
+        return String.format("gene(%s:%s strand=%d) breakend(sv=%d coords=%s) trans(%d)",
+                GeneData.GeneId, GeneData.GeneName, GeneData.Strand, varId(), coordsStr(), mTranscripts.size());
     }
-
 }

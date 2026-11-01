@@ -1,5 +1,8 @@
 package com.hartwig.hmftools.purple;
 
+import java.util.List;
+
+import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 
 public class PurpleConstants
@@ -11,9 +14,9 @@ public class PurpleConstants
     public static final double BAF_PNT_5 = 0.5;
 
     // TMB calcs
-    public static final double MB_PER_GENOME = 2859;
     public static final double CODING_BASES_PER_GENOME = 3.188e7; // calculated from GRCh38 canonical transcripts (overlaps ignored)
     public static final double TUMOR_MSI_LOAD_MIN_VAF = 0.02;
+    public static final double TUMOR_MUT_LOAD_MIN_VAF = 0.05;
 
     // no-tumor
     public static final int NO_TUMOR_BAF_TOTAL = 3000;
@@ -38,6 +41,7 @@ public class PurpleConstants
     public static final int GERMLINE_AMP_DEL_EXCLUSION_CHR_19 = 20_000_000;
 
     // purity calcs
+    public static final double DIPLOID_PLOIDY = 2.0;
     public static final double MIN_PURITY_DEFAULT = 0.08;
     public static final double MAX_PURITY_DEFAULT = 1.0;
     public static final double PURITY_INCREMENT_DEFAULT = 0.01;
@@ -58,8 +62,36 @@ public class PurpleConstants
 
     public static final double TARGETED_DEVIATION_PENALTY_GC_MIN_ADJUST_DEFAULT = 0.25;
     public static final double TARGETED_GC_RATIO_EXPONENT_DEFAULT = 3;
-    
-    public static final double AMBIGUOUS_BAF_THRESHOLD = 0.535;
+
+    public static final double DEFAULT_AMBIGUOUS_BAF_THRESHOLD = 0.535;
+    public static double AMBIGUOUS_BAF_THRESHOLD = DEFAULT_AMBIGUOUS_BAF_THRESHOLD;
+    public static final double DEFAULT_SIGNIFICANT_ANEUPLOIDY_BAF_THRESHOLD = 0.6;
+
+    // resegmentation
+    public static final double RESEG_RATIO_BUCKET_MIN = 0;
+    public static final double RESEG_RATIO_BUCKET_MAX = 3;
+    public static final double RESEG_RATIO_BUCKET_STEP = 0.01;
+    public static final int RESEG_ROLLING_AVG_WINDOW = 5;
+
+    public static final double RESEG_TROUGH_MIN_DIFF = 5;
+    public static final double RESEG_TROUGH_MIN_RATIO = 1.2;
+    public static final double RESEG_TROUGH_MIN_GAP = 0.1;
+    public static final double RESEG_MAX_SEGMENTATION_PENALTY_RATIO = 0.35;
+
+    public static final double RESEG_PEAK_MIN_RATIO = 1.25;
+    public static final double RESEG_PEAK_MIN_GAP = 0.1;
+    public static final double RESEG_PEAK_MIN_PROPORTION = 0.002;
+    public static final int RESEG_MAX_PEAKS = 5;
+
+    public static final double RESEG_GC_BIN_MIN = 0.33;
+    public static final double RESEG_GC_BIN_MAX = 0.57;
+    public static final double RESEG_GC_BIN_WIDTH = 0.02;
+    public static final double[] RESEG_GC_PERCENTILES = { 0.1, 0.3, 0.5, 0.7, 0.9 };
+    public static final double RESEG_GC_SPARSE_MIN_JUMP = 0.05;
+    public static final double RESEG_GC_SPARSE_MAX_PROPORTION = 0.01;
+
+    public static final int RESEG_MAX_SUPERSEGMENT_SIZE_FOR_BRUTE_FORCE = 10;
+    public static final int RESEG_BAF_WEIGHT_THRESHOLD = 50;
 
     // somatic fitting
     public static final double SNV_HOTSPOT_VAF_PROBABILITY = 0.01;
@@ -73,6 +105,7 @@ public class PurpleConstants
     public static final double SOMATIC_PENALTY_WEIGHT_DEFAULT = 1.5;
     public static final double HIGHLY_DIPLOID_PERCENTAGE_DEFAULT = 0.97;
     public static final double HOTSPOT_GNOMAD_FREQ_THRESHOLD = 0.01;
+    public static final double PANEL_GNOMAD_FREQ_THRESHOLD = 0.0001;
 
     // tumor-only somatic fitting
     public static final double SOMATIC_FIT_TUMOR_ONLY_PURITY_MIN = 0.92;
@@ -80,7 +113,16 @@ public class PurpleConstants
     public static final double SOMATIC_FIT_TUMOR_ONLY_PLOIDY_MAX = 2.2;
     public static final double SOMATIC_FIT_TUMOR_ONLY_VAF_MIN = 0.05;
     public static final double SOMATIC_FIT_TUMOR_ONLY_VAF_MAX = 0.35;
+    public static final double SOMATIC_FIT_CONTAMINATION_CUTOFF = 0.04;
     public static final double SOMATIC_FIT_TUMOR_ONLY_HOTSPOT_VAF_CUTOFF = 0.50;
+
+    public static final double SOMATIC_FIT_ANEUPLOIDIC_REGION_CUTOFF = 0.57;
+    public static final int SOMATIC_FIT_ANEUPLOIDIC_REGION_MIN_BAF_COUNT = 1;
+    public static final double SOMATIC_FIT_ANEUPLOIDIC_RATIO_CUTOFF = 0.008;
+    public static final double HIGHLY_ANEUPLOIDIC_REGION_MIN_BAF_COUNT = 5;
+    public static final double HIGHLY_ANEUPLOIDIC_RATIO_CUTOFF = 0.003;
+    public static final double HIGHLY_ANEUPLOIDIC_REGION_CUTOFF = 0.7;
+    public static final double HIGHLY_ANEUPLOIDIC_REFIT_BAF_CUTOFF = 2 * SOMATIC_FIT_TUMOR_ONLY_PURITY_MIN - 1;
 
     // somatic fitting readjustment
     public static final double SNV_READJUST_CN_MIN = 1.8;
@@ -102,18 +144,19 @@ public class PurpleConstants
 
     public static final int SV_MAX_INFERRED_COPY_NUMBER = 1000;
 
-    // SV recovery
-    public static final int DEFAULT_RECOVERY_MIN_MATE_QUAL_SCORE = 300;
-    public static final int DEFAULT_RECOVERY_MIN_SGL_QUAL_SCORE = 500;
+    public static final double GERMLINE_SV_TINC_FACTOR = 2;
+    public static final double GERMLINE_SV_TINC_MARGIN = 0.02;
+    public static final double GERMLINE_SV_TINC_HOTSPOT_MULTIPLIER = 2;
 
-    // germline deletions
-    public static final int GERMLINE_DEL_GENE_BUFFER = 500;
-    public static final int GERMLINE_DEL_REGION_MIN = 1000;
-    public static final int GERMLINE_DEL_REGION_MATCH_BUFFER = 2000;
-    public static final double GERMLINE_DEL_CN_CONSISTENCY_MIN = 0.5;
-    public static final double GERMLINE_DEL_CN_CONSISTENCY_MACN_PERC = 0.2;
-    public static final double GERMLINE_DEL_NORMAL_RATIO = 0.65;
-    public static final int GERMLINE_DEL_COHORT_FREQ = 4;
+    // germline copy number events
+    public static final int GERMLINE_AMP_DEL_GENE_BUFFER = 500;
+    public static final int GERMLINE_AMP_DEL_REGION_MIN = 1000;
+    public static final int GERMLINE_AMP_DEL_REGION_MATCH_BUFFER = 2000;
+    public static final double GERMLINE_AMP_DEL_CN_CONSISTENCY_MIN = 0.5;
+    public static final double GERMLINE_AMP_DEL_CN_CONSISTENCY_MACN_PERC = 0.2;
+    public static final double GERMLINE_AMP_DEL_NORMAL_RATIO = 0.65;
+    public static final int GERMLINE_AMP_DEL_COHORT_FREQ = 4;
+    public static final int GERMLINE_AMP_DEL_MIN_DEPTH_WINDOW_COUNT = 2;
 
     // copy number smoothing
     public static final double MIN_OBSERVED_BAF_CHANGE = 0.03;
@@ -124,7 +167,6 @@ public class PurpleConstants
     public static final double MIN_RELATIVE_COPY_NUMBER_ADDITION = 0.8;
 
     public static final ChrBaseRegion CDKN2A_DELETION_REGION = new ChrBaseRegion("9", 9000000, 12000000);
-    public static final double MAX_SOMATIC_FIT_DELETED_PERC = 0.003;
 
     // somatic subclonality peaks
     public static final int PEAK_BIN_COUNT = 10;
@@ -147,4 +189,15 @@ public class PurpleConstants
     public static final double CHIMERISM_SAMPLE_CUTOFF = 0.08;
     public static final int CHIMERISM_MIN_BAF_COUNT = 2;
     public static final double CHIMERISM_KDE_BANDWIDTH = 0.01;
+
+    // target-region TML and TMB
+    public static final int DEFAULT_CODING_BASE_FACTOR = 150000;
+    public static final double DEFAULT_TARGETED_TMB_RATIO = 0.05;
+    public static final double DEFAULT_TARGETED_TML_RATIO = 1.0;
+
+    public static final double PANEL_SOMATIC_LIKELIHOOD_DIFF_LOW = 0.08;
+    public static final double PANEL_SOMATIC_LIKELIHOOD_DIFF_HIGH = -0.05;
+
+    public static final List<String> TARGETED_TMB_GENE_EXCLUSIONS = Lists.newArrayList("HLA-A", "HLA-B", "HLA-C", "PIM1", "BCL2");
+
 }

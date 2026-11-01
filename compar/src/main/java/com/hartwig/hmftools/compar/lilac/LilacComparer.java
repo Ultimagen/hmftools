@@ -8,18 +8,19 @@ import static com.hartwig.hmftools.common.hla.LilacQcData.FLD_DISC_INDELS;
 import static com.hartwig.hmftools.common.hla.LilacQcData.FLD_FIT_FRAGS;
 import static com.hartwig.hmftools.common.hla.LilacQcData.FLD_QC_STATUS;
 import static com.hartwig.hmftools.common.hla.LilacQcData.FLD_TOTAL_FRAGS;
-import static com.hartwig.hmftools.compar.common.Category.LILAC;
+import static com.hartwig.hmftools.compar.common.CategoryType.LILAC;
 import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
 import static com.hartwig.hmftools.compar.lilac.LilacData.FLD_ALLELES;
 import static com.hartwig.hmftools.compar.lilac.LilacData.FLD_VARIANTS;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.hla.LilacAllele;
 import com.hartwig.hmftools.common.hla.LilacQcData;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.common.CommonUtils;
 import com.hartwig.hmftools.compar.ComparConfig;
 import com.hartwig.hmftools.compar.ComparableItem;
@@ -27,6 +28,7 @@ import com.hartwig.hmftools.compar.common.DiffThresholds;
 import com.hartwig.hmftools.compar.common.FileSources;
 import com.hartwig.hmftools.compar.ItemComparer;
 import com.hartwig.hmftools.compar.common.Mismatch;
+import com.hartwig.hmftools.compar.common.SourceType;
 import com.hartwig.hmftools.patientdb.dao.DatabaseAccess;
 
 public class LilacComparer implements ItemComparer
@@ -44,7 +46,7 @@ public class LilacComparer implements ItemComparer
     }
 
     @Override
-    public Category category() { return LILAC; }
+    public CategoryType category() { return LILAC; }
 
     @Override
     public void registerThresholds(final DiffThresholds thresholds)
@@ -77,7 +79,7 @@ public class LilacComparer implements ItemComparer
     }
 
     @Override
-    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final String sourceName)
+    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final SourceType sourceType)
     {
         // Not currently supported
         return Lists.newArrayList();
@@ -86,14 +88,19 @@ public class LilacComparer implements ItemComparer
     @Override
     public List<ComparableItem> loadFromFile(final String sampleId, final String germlineSampleId, final FileSources fileSources)
     {
-        final List<ComparableItem> comparableItems = Lists.newArrayList();
+        List<ComparableItem> comparableItems = Lists.newArrayList();
 
         try
         {
-            LilacQcData qcData = LilacQcData.read(LilacQcData.generateFilename(fileSources.Lilac, sampleId));
+            // add an item for each gene class
+            List<LilacQcData> qcDataList = LilacQcData.read(LilacQcData.generateFilename(fileSources.Lilac, sampleId));
             List<LilacAllele> alleles = LilacAllele.read(LilacAllele.generateFilename(fileSources.Lilac, sampleId));
 
-            comparableItems.add(new LilacData(qcData, alleles));
+            for(LilacQcData qcData : qcDataList)
+            {
+                List<LilacAllele> geneAlleles = alleles.stream().filter(x -> x.genes().equals(qcData.genes())).collect(Collectors.toList());
+                comparableItems.add(new LilacData(qcData, geneAlleles));
+            }
         }
         catch(IOException e)
         {

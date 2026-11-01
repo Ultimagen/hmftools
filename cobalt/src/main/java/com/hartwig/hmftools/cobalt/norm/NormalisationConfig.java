@@ -1,7 +1,5 @@
 package com.hartwig.hmftools.cobalt.norm;
 
-import static java.lang.Math.round;
-
 import static com.hartwig.hmftools.cobalt.CobaltConfig.CB_LOGGER;
 import static com.hartwig.hmftools.cobalt.CobaltConfig.registerCommonConfig;
 import static com.hartwig.hmftools.common.genome.gc.GCBucket.calcGcBucket;
@@ -44,15 +42,17 @@ public class NormalisationConfig
     public final String CobaltWgsDir;
     public final String CobaltPanelDir; // un-normalised files
     public final String TargetRegionsBed;
+    public final String WgsCopyNumberPercentiles;
     public final String GcProfile;
     public final String OutputFile;
     public final String DetailedFile;
     public final RefGenomeVersion RefGenVersion;
 
-    private final Map<String,String> mPanelToWgsSampleIdMappings; // if required, mapping from panel to WGS
+    private final Map<String, String> mPanelToWgsSampleIdMappings; // if required, mapping from panel to WGS
 
     private static final String COBALT_WGS_DIR = "cobalt_wgs_dir";
     private static final String OUTPUT_FILE = "output_file";
+    private static final String WGS_COPY_NUMBER_PERCENTILES = "wgs_copy_number_percentiles";
     private static final String DETAILED_OUTPUT = "detailed_file";
 
     private static final String WGS_SAMPLE_ID = "WgsSampleId";
@@ -70,6 +70,7 @@ public class NormalisationConfig
         AmberDir = configBuilder.getValue(AMBER_DIR_CFG, "");
         GcProfile = configBuilder.getValue(GC_PROFILE);
         TargetRegionsBed = configBuilder.getValue(TARGET_REGIONS_BED);
+        WgsCopyNumberPercentiles = configBuilder.getValue(WGS_COPY_NUMBER_PERCENTILES);
         RefGenVersion = RefGenomeVersion.from(configBuilder);
         OutputFile = configBuilder.getValue(OUTPUT_FILE);
         DetailedFile = configBuilder.getValue(DETAILED_OUTPUT);
@@ -81,13 +82,15 @@ public class NormalisationConfig
 
     public String getWgsSampleId(final String sampleId)
     {
-        return mPanelToWgsSampleIdMappings.containsKey(sampleId) ? mPanelToWgsSampleIdMappings.get(sampleId) : sampleId;
+        return mPanelToWgsSampleIdMappings.getOrDefault(sampleId, sampleId);
     }
 
     private void loadSampleIds(final ConfigBuilder configBuilder)
     {
         if(!configBuilder.hasValue(SAMPLE_ID_FILE))
+        {
             return;
+        }
 
         try
         {
@@ -95,7 +98,7 @@ public class NormalisationConfig
             String header = lines.get(0);
             lines.remove(0);
 
-            Map<String,Integer> fieldsIndexMap = createFieldsIndexMap(header, CSV_DELIM);
+            Map<String, Integer> fieldsIndexMap = createFieldsIndexMap(header, CSV_DELIM);
 
             int sampleIndex = fieldsIndexMap.get(FLD_SAMPLE_ID);
             Integer wgsSampleIndex = fieldsIndexMap.get(WGS_SAMPLE_ID);
@@ -106,7 +109,9 @@ public class NormalisationConfig
                 String[] values = line.split(CSV_DELIM, -1);
 
                 if(line.isEmpty() || line.startsWith(IGNORE_SAMPLE_ID))
+                {
                     continue;
+                }
 
                 String sampleId = values[sampleIndex];
 
@@ -137,6 +142,7 @@ public class NormalisationConfig
         configBuilder.addPath(AMBER_DIR_CFG, false, AMBER_DIR_DESC);
         configBuilder.addPath(COBALT_DIR_CFG, true, COBALT_DIR_DESC);
         configBuilder.addPath(COBALT_WGS_DIR, false, "Path to cobalt WGS files");
+        configBuilder.addPath(WGS_COPY_NUMBER_PERCENTILES, false, "WGS cohort copy number percentiles");
         configBuilder.addConfigItem(REF_GENOME_VERSION, true, REF_GENOME_VERSION_CFG_DESC);
         configBuilder.addPath(TARGET_REGIONS_BED, true, TARGET_REGIONS_BED_DESC);
         registerCommonConfig(configBuilder);

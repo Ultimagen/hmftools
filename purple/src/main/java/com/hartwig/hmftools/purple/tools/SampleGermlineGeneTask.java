@@ -1,5 +1,6 @@
 package com.hartwig.hmftools.purple.tools;
 
+import static com.hartwig.hmftools.common.purple.GermlineStatus.AMPLIFICATION;
 import static com.hartwig.hmftools.common.purple.GermlineStatus.HET_DELETION;
 import static com.hartwig.hmftools.common.purple.GermlineStatus.HOM_DELETION;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionsOverlap;
@@ -15,6 +16,7 @@ import java.util.StringJoiner;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
@@ -89,8 +91,12 @@ public class SampleGermlineGeneTask implements Callable<Void>
 
             for(ObservedRegion region : entry.getValue())
             {
-                if(region.germlineStatus() != HOM_DELETION && region.germlineStatus() != HET_DELETION)
+                if(region.germlineStatus() != HOM_DELETION
+                && region.germlineStatus() != HET_DELETION
+                && region.germlineStatus() != AMPLIFICATION)
+                {
                     continue;
+                }
 
                 // find the overlapping / matching copy number region
                 PurpleCopyNumber matchedCopyNumber = copyNumbers.stream()
@@ -159,7 +165,7 @@ public class SampleGermlineGeneTask implements Callable<Void>
                     PurpleCopyNumberFile.generateFilenameForReading(samplePurpleDir, sampleId));
 
             List<PurpleSegment> segments = PurpleSegment.read(PurpleSegment.generateFilename(samplePurpleDir, sampleId)).stream()
-                    .filter(x -> x.GermlineState == HET_DELETION || x.GermlineState == HOM_DELETION)
+                    .filter(x -> x.GermlineState == HET_DELETION || x.GermlineState == HOM_DELETION || x.GermlineState == AMPLIFICATION)
                     .collect(Collectors.toList());
 
             for(PurpleSegment segment : segments)
@@ -188,3 +194,4 @@ public class SampleGermlineGeneTask implements Callable<Void>
         }
     }
 }
+

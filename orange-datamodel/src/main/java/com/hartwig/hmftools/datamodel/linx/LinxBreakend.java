@@ -1,5 +1,6 @@
 package com.hartwig.hmftools.datamodel.linx;
 
+import com.hartwig.hmftools.datamodel.driver.ReportedStatus;
 import com.hartwig.hmftools.datamodel.gene.TranscriptCodingType;
 import com.hartwig.hmftools.datamodel.gene.TranscriptRegionType;
 
@@ -14,11 +15,13 @@ import org.jetbrains.annotations.Nullable;
 public interface LinxBreakend
 {
     int id();
-
     int svId();
+    int clusterId();
 
     @NotNull
     String gene();
+    int position();
+    int orientation();
 
     @NotNull
     String chromosome();
@@ -32,11 +35,11 @@ public interface LinxBreakend
     boolean isCanonical();
 
     @NotNull
-    String geneOrientation();
+    LinxGeneOrientation geneOrientation();
 
     boolean disruptive();
 
-    boolean reported();
+    ReportedStatus reportedStatus();
 
     double undisruptedCopyNumber();
 
@@ -51,11 +54,16 @@ public interface LinxBreakend
 
     int nextSpliceExonRank();
 
-    int orientation();
-
     int exonUp();
 
     int exonDown();
 
     double junctionCopyNumber();
+
+    @NotNull
+    LinxDriverType driverType();
+    double driverLikelihood();
+
+    @Nullable
+    String plotFilename();
 }

@@ -1,10 +1,8 @@
 package com.hartwig.hmftools.compar.virus;
 
-import static com.hartwig.hmftools.common.pipeline.PipelineToolDirectories.VIRUS_INTERPRETER_DIR;
 import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
-import static com.hartwig.hmftools.compar.common.Category.VIRUS;
+import static com.hartwig.hmftools.compar.common.CategoryType.VIRUS;
 import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_REPORTED;
-import static com.hartwig.hmftools.compar.common.CommonUtils.fileExists;
 import static com.hartwig.hmftools.compar.virus.VirusData.FLD_DRIVER_LIKELIHOOD;
 import static com.hartwig.hmftools.compar.virus.VirusData.FLD_INTEGRATIONS;
 import static com.hartwig.hmftools.compar.virus.VirusData.FLD_MEAN_COVERAGE;
@@ -17,14 +15,13 @@ import com.hartwig.hmftools.common.virus.AnnotatedVirusFile;
 import com.hartwig.hmftools.compar.ComparConfig;
 import com.hartwig.hmftools.compar.ComparableItem;
 import com.hartwig.hmftools.compar.ItemComparer;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.common.CommonUtils;
 import com.hartwig.hmftools.compar.common.DiffThresholds;
 import com.hartwig.hmftools.compar.common.FileSources;
 import com.hartwig.hmftools.compar.common.Mismatch;
+import com.hartwig.hmftools.compar.common.SourceType;
 import com.hartwig.hmftools.patientdb.dao.DatabaseAccess;
-
-import org.jetbrains.annotations.NotNull;
 
 public class VirusComparer implements ItemComparer
 {
@@ -36,7 +33,7 @@ public class VirusComparer implements ItemComparer
     }
 
     @Override
-    public Category category()
+    public CategoryType category()
     {
         return VIRUS;
     }
@@ -61,7 +58,7 @@ public class VirusComparer implements ItemComparer
     }
 
     @Override
-    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final String sourceName)
+    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final SourceType sourceType)
     {
         // currently unsupported
         return Lists.newArrayList();
@@ -73,7 +70,7 @@ public class VirusComparer implements ItemComparer
         final List<ComparableItem> comparableItems = Lists.newArrayList();
         try
         {
-            AnnotatedVirusFile.read(determineFileName(sampleId, fileSources))
+            AnnotatedVirusFile.read(AnnotatedVirusFile.generateFileName(fileSources.Virus, sampleId))
                     .forEach(v -> comparableItems.add(new VirusData(v)));
         }
         catch(IOException e)
@@ -84,21 +81,4 @@ public class VirusComparer implements ItemComparer
         return comparableItems;
     }
 
-    @NotNull
-    private static String determineFileName(final String sampleId, final FileSources fileSources)
-    {
-        // dirty hack to get old virus directory working automatically most of the time
-        final String currentFileName = AnnotatedVirusFile.generateFileName(fileSources.Virus, sampleId);
-        final String oldFileName =
-                AnnotatedVirusFile.generateFileName(fileSources.Virus.replaceAll(VIRUS_INTERPRETER_DIR, "virus_interpreter"), sampleId);
-
-        if(!fileExists(currentFileName) && fileExists(oldFileName))
-        {
-            return oldFileName;
-        }
-        else
-        {
-            return currentFileName;
-        }
-    }
 }

@@ -25,6 +25,7 @@ import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.genome.position.GenomePosition;
 import com.hartwig.hmftools.common.genome.position.GenomePositions;
 import com.hartwig.hmftools.common.genome.region.GenomeRegion;
+import com.hartwig.hmftools.common.purple.GermlineStatus;
 import com.hartwig.hmftools.common.purple.PurpleSegment;
 import com.hartwig.hmftools.linx.visualiser.CircosConfig;
 import com.hartwig.hmftools.linx.visualiser.data.AdjustedPosition;
@@ -190,7 +191,6 @@ public class CircosDataWriter
         return result;
     }
 
-    @NotNull
     private List<String> genes(final Map<String, String> geneColours, final List<Gene> genes)
     {
         List<String> result = Lists.newArrayList();
@@ -214,7 +214,6 @@ public class CircosDataWriter
         return result;
     }
 
-    @NotNull
     private List<String> exonRank(int totalContigLength, final List<VisGeneExon> exons)
     {
         List<String> result = Lists.newArrayList();
@@ -242,7 +241,6 @@ public class CircosDataWriter
         return result;
     }
 
-    @NotNull
     private List<String> geneName(final List<Gene> genes)
     {
         List<String> result = Lists.newArrayList();
@@ -358,6 +356,8 @@ public class CircosDataWriter
     private List<String> createCobaltPcf(List<PurpleSegment> purpleSegments)
     {
         List<String> result = Lists.newArrayList();
+
+        purpleSegments = purpleSegments.stream().filter(x -> x.GermlineState == GermlineStatus.DIPLOID).toList();
 
         for(PurpleSegment purpleSegment : purpleSegments)
         {
@@ -693,13 +693,11 @@ public class CircosDataWriter
         return result.stream().sorted().distinct().collect(toList());
     }
 
-    @NotNull
     private static String circosContig(final String chromosome)
     {
         return "hs" + HumanChromosome.fromString(chromosome);
     }
 
-    @NotNull
     private String thicknessString(double usage)
     {
         return "thickness=" + thicknessPixels(usage);
@@ -710,7 +708,6 @@ public class CircosDataWriter
         return thickness.thicknessPixels(ploidy);
     }
 
-    @NotNull
     static String shorthand(int value)
     {
         if(value < 100)

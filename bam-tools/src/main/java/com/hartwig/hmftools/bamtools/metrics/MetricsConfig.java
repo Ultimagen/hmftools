@@ -46,11 +46,13 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig;
+import com.hartwig.hmftools.common.metrics.BamMetricSummary;
+import com.hartwig.hmftools.common.metrics.BamMetricsCommon;
 import com.hartwig.hmftools.common.region.BedFileReader;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
-import com.hartwig.hmftools.common.metrics.BamMetricsSummary;
 import com.hartwig.hmftools.common.region.BaseRegion;
 import com.hartwig.hmftools.common.region.SpecificRegions;
+import com.hartwig.hmftools.common.region.TaggedRegion;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 
@@ -77,6 +79,7 @@ public class MetricsConfig
     // metrics capture config
     public final boolean ExcludeZeroCoverage;
     public final boolean WriteOffTarget;
+    public final boolean NoDuplicates;
     public final int HighFragmentOverlapThreshold;
     public final int PartitionReadCountCheck;
 
@@ -98,6 +101,7 @@ public class MetricsConfig
     private static final String MAX_COVERAGE = "max_coverage";
     private static final String EXCLUDE_ZERO_COVERAGE = "exclude_zero_coverage";
     private static final String ONLY_TARGET = "only_target";
+    private static final String NO_DUPLICATES = "no_duplicates";
 
     private static final String OFF_TARGET_FRAG_OVERLAP_THRESHOLD = "off_target_frag_overlap_threshold";
     private static final String WRITE_OFF_TARGET = "write_off_target";
@@ -106,6 +110,7 @@ public class MetricsConfig
     private static final int DEFAULT_MAP_QUAL_THRESHOLD = 20;
     private static final int DEFAULT_BASE_QUAL_THRESHOLD = 10;
     private static final int DEFAULT_MAX_COVERAGE = 250;
+    private static final int DEFAULT_PANEL_MAX_COVERAGE = 10000;
     private static final int DEFAULT_PARTITION_READ_COUNT_CHECK = 1000000;
 
     public MetricsConfig(final ConfigBuilder configBuilder)
@@ -144,13 +149,25 @@ public class MetricsConfig
 
         MapQualityThreshold = configBuilder.getInteger(MAP_QUAL_THRESHOLD);
         BaseQualityThreshold = configBuilder.getInteger(BASE_QUAL_THRESHOLD);
-        MaxCoverage = configBuilder.getInteger(MAX_COVERAGE);
-        ExcludeZeroCoverage = configBuilder.hasFlag(EXCLUDE_ZERO_COVERAGE);
-        WriteOffTarget = configBuilder.hasFlag(WRITE_OFF_TARGET);
-        HighFragmentOverlapThreshold = configBuilder.getInteger(OFF_TARGET_FRAG_OVERLAP_THRESHOLD);
 
         TargetRegions = loadChrBaseRegions(configBuilder.getValue(REGIONS_FILE));
         OnlyTargetRegions = !TargetRegions.isEmpty() && configBuilder.hasFlag(ONLY_TARGET);
+
+        if(!TargetRegions.isEmpty())
+        {
+            MaxCoverage = configBuilder.hasValue(MAX_COVERAGE) ? configBuilder.getInteger(MAX_COVERAGE) :DEFAULT_PANEL_MAX_COVERAGE;
+        }
+        else
+        {
+            MaxCoverage = configBuilder.getInteger(MAX_COVERAGE);
+        }
+
+        ExcludeZeroCoverage = configBuilder.hasFlag(EXCLUDE_ZERO_COVERAGE);
+        NoDuplicates = configBuilder.hasFlag(NO_DUPLICATES);
+
+        WriteOffTarget = configBuilder.hasFlag(WRITE_OFF_TARGET);
+        HighFragmentOverlapThreshold = configBuilder.getInteger(OFF_TARGET_FRAG_OVERLAP_THRESHOLD);
+
         PartitionReadCountCheck = configBuilder.getInteger(PARTITION_READ_COUNT_CHECK);
 
         UnmappableRegions = Lists.newArrayList();
@@ -166,6 +183,8 @@ public class MetricsConfig
 
         PerfDebug = configBuilder.hasFlag(PERF_DEBUG);
     }
+
+    public boolean expectDuplicates() { return !NoDuplicates; }
 
     public boolean isValid()
     {
@@ -196,7 +215,7 @@ public class MetricsConfig
 
     public String formFilename(final String fileType)
     {
-        String filename = OutputDir + SampleId + BamMetricsSummary.BAM_METRICS_FILE_ID;
+        String filename = OutputDir + SampleId + BamMetricsCommon.BAM_METRICS_FILE_ID;
 
         filename += "." + fileType;
 
@@ -226,6 +245,7 @@ public class MetricsConfig
         configBuilder.addInteger(PARTITION_READ_COUNT_CHECK, "Partition read count log", DEFAULT_PARTITION_READ_COUNT_CHECK);
 
         configBuilder.addFlag(ONLY_TARGET, "Only capture metrics within the specific regions file");
+        configBuilder.addFlag(NO_DUPLICATES, "Process BAM with duplicates dropped");
 
         configBuilder.addInteger(
                 OFF_TARGET_FRAG_OVERLAP_THRESHOLD,
@@ -271,6 +291,7 @@ public class MetricsConfig
         GeneRegionCoverage = new GeneCoverage(null);
         OnlyTargetRegions = false;
         PartitionReadCountCheck = 0;
+        NoDuplicates = false;
 
         Threads = 0;
         PerfDebug = false;

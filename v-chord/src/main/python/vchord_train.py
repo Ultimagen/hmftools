@@ -1,85 +1,59 @@
-import pandas as pd
-
-import numpy as np
-import math
-import os, sys, time
-
-import torch
-from torch import nn
-import torch.utils.data as data_utils
-
-import torchvision
-# use v2 as it claims to be faster
-from torchvision.transforms import v2
-from torchvision.io import read_image
-
+import argparse
+import os
+import time
+import random
 import matplotlib.pyplot as plt
-
-import logging
-
+import numpy as np
+import pandas as pd
+import torch
+import torch.utils.data as data_utils
+from sklearn.model_selection import train_test_split
+from torch import nn
+from torchvision.io import read_image
+from torchvision.transforms import v2 # use v2 as it claims to be faster
 import vchord_model
-
-logger = logging.getLogger(__name__)
-
-logging.basicConfig(stream=sys.stdout,
-                    format='%(asctime)s %(levelname)5s - %(message)s',
-                    datefmt='%Y-%m-%d %H:%M:%S',
-                    level=logging.INFO)
-
-logger.setLevel(logging.DEBUG)
+from common import LOGGER, DEVICE
 
 IMAGE_SIZE = 512
 NUM_CANCER_TYPES = 5
+RANDOM_SEED = 42
+
+# Set seeds for reproducibility
+torch.manual_seed(RANDOM_SEED)
+torch.cuda.manual_seed_all(RANDOM_SEED)
+np.random.seed(RANDOM_SEED)
+random.seed(RANDOM_SEED)
+
+# For full determinism (may impact performance)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 # select clinical.sampleId, clinical.primaryTumorLocation, chord.BRCA1, chord.BRCA2, chord.hrd, chord.hrStatus, chord.hrdType, chord.remarksHrStatus, chord.remarksHrdType from clinical, chord where clinical.sampleId = chord.sampleId and (clinical.primaryTumorLocation = 'Breast' or clinical.primaryTumorLocation = 'Ovary' or clinical.primaryTumorLocation = 'Fallopian tube' or clinical.primaryTumorLocation = "Prostate" or clinical.primaryTumorLocation = "Pancreas");
 
-# Get cpu or gpu device for training.
-device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
-# convert a df to tensor to be used in pytorch
-def df_to_tensor(df):
-    return torch.from_numpy(df.values).float().to(device)
-
-
-def filter_df(df):
+def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     # filter out stuff we do not need, we filter out anything that seem abiguous to Chord
     df = df[(df["hrStatus"] == "HR_DEFICIENT") | (df["hrStatus"] == "HR_PROFICIENT")]
     return df
 
 
-# https://stackoverflow.com/questions/44865023/how-can-i-create-a-circular-mask-for-a-numpy-array
-def create_circular_mask(h, w, center=None, radius=None):
-    if center is None:  # use the middle of the image
-        center = (int(w / 2), int(h / 2))
-    if radius is None:  # use the smallest distance between the center and image walls
-        radius = min(center[0], center[1], w - center[0], h - center[1])
-
-    Y, X = np.ogrid[:h, :w]
-    dist_from_center = np.sqrt((X - center[0]) ** 2 + (Y - center[1]) ** 2)
-
-    mask = dist_from_center >= radius
-    return torch.from_numpy(mask.astype(np.uint8))  # note we must cast to uint8
-
-
 # create a transform object to convert image to pytorch tensor
-def make_transform(image_size=IMAGE_SIZE):
+def make_transform(image_size: int = IMAGE_SIZE) -> v2.Compose:
     x = [v2.Resize(int(image_size * 1.1)),
           v2.CenterCrop(image_size),
           v2.ToDtype(torch.float32, scale=True)]
     return v2.Compose(x)
 
-def image_to_tensor(input_png_path, circos_png_path, image_size=IMAGE_SIZE, transform=None):
+
+def image_to_tensor(circos_png_path: str, image_size: int = IMAGE_SIZE, transform: v2.Compose = None) -> torch.Tensor:
     if transform is None:
         transform = make_transform(image_size)
 
-    # input png we use gray scale image
-    #input_png = transform(v2.functional.to_grayscale(read_image(input_png_path)))
-    #input_png = transform(read_image(input_png_path))
     circos_png = transform(read_image(circos_png_path))
-    #return torch.cat((input_png, circos_png), dim=0)
     return circos_png
 
-def cancer_type_to_tensor(cancer_type, purity):
+
+def cancer_type_to_tensor(cancer_type: str, purity: float) -> torch.Tensor:
     a = [0.0, 0.0, 0.0, 0.0, 0.0]
     i = -1
     if isinstance(cancer_type, str):
@@ -95,12 +69,12 @@ def cancer_type_to_tensor(cancer_type, purity):
     if i != -1:
         a[i] = 1.0
     a[4] = purity
-    #logger.info(f"cancer type: {cancer_type}, encoded: {a}")
     return torch.tensor(a, dtype=torch.float32)
+
 
 class HrdDataset(data_utils.Dataset):
 
-    def __init__(self, df, image_size, augment, hrd_sample_dup):
+    def __init__(self, df: pd.DataFrame, image_size: int, augment: bool, hrd_sample_dup: int) -> None:
         start = time.time()
 
         # duplicate all certain HRD samples to enrich the size
@@ -116,14 +90,17 @@ class HrdDataset(data_utils.Dataset):
 
         transform = make_transform(image_size)
 
-        logger.info(f"start loading images, augment={augment}")
+        LOGGER.info(f"start loading images, augment={augment}")
         # load all the images into an array
         for idx, row in df.iterrows():
-            self.image_tensors.append(image_to_tensor(row["inputPngPath"], row["circosPngPath"], image_size, transform))
+
+            if idx % 50 == 0:
+                LOGGER.debug(f"[{idx + 1}/{len(df)}] Loading: {row['circosPngPath']}")
+
+            self.image_tensors.append(image_to_tensor(row["circosPngPath"], image_size, transform))
             self.type_tensors.append(cancer_type_to_tensor(row["primaryTumorLocation"], row["purity"]))
 
-        # rotation is done when the tensor is retrieved, this provides better
-        # augmentation
+        # rotation is done when the tensor is retrieved, this provides better augmentation
         if augment:
             self.transform = v2.RandomRotation(degrees=180, fill=1.0)
         else:
@@ -131,12 +108,12 @@ class HrdDataset(data_utils.Dataset):
 
         elapsed_sec = int(time.time() - start)
         minute, second = divmod(elapsed_sec, 60)
-        logger.info(f"loading dataset of size {len(self)}, hrd={num_hrd}, took {minute:.0f}m {second:.0f}s")
+        LOGGER.info(f"loading dataset of size {len(self)}, hrd={num_hrd}, took {minute:.0f}m {second:.0f}s")
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.image_tensors)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # we do the rotation here to support augmentation of data
         image_tensor = self.image_tensors[idx]
         if self.transform:
@@ -144,7 +121,7 @@ class HrdDataset(data_utils.Dataset):
             # otherwise the CPU would struggle with the load and become the bottleneck
             # However if we are not doing transform then we keep it in GPU and move whole batch to GPU
             # in the train / test functions
-            image_tensor = image_tensor.to(device)
+            image_tensor = image_tensor.to(DEVICE)
             image_tensor = self.transform(image_tensor)
         type_tensor = self.type_tensors[idx]
         target_tensor = self.targets[idx]
@@ -152,7 +129,7 @@ class HrdDataset(data_utils.Dataset):
 
 
 class EpochStats:
-    def __init__(self):
+    def __init__(self) -> None:
         self.loss_sum = 0.0
         self.loss_count = 0
         self.true_pos = 0
@@ -161,35 +138,34 @@ class EpochStats:
         self.num_neg = 0
 
     @property
-    def loss(self):
+    def loss(self) -> float:
         return self.loss_sum / self.loss_count
 
     @property
-    def accuracy(self):
+    def accuracy(self) -> float:
         return (self.true_pos + self.true_neg) / (self.num_pos + self.num_neg)
 
     @property
-    def correct(self):
+    def correct(self) -> int:
         return self.true_pos + self.true_neg
 
     @property
-    def count(self):
+    def count(self) -> int:
         return self.num_pos + self.num_neg
 
     @property
-    def true_pos_rate(self):
+    def true_pos_rate(self) -> float:
         return self.true_pos / self.num_pos
 
     @property
-    def true_neg_rate(self):
+    def true_neg_rate(self) -> float:
         return self.true_neg / self.num_neg
 
-    def update_loss(self, loss_val, count):
+    def update_loss(self, loss_val: float, count: int) -> None:
         self.loss_sum += loss_val * count
         self.loss_count += count
 
-    def update_accuracies(self, pred: torch.Tensor, target: torch.Tensor):
-        # logger.debug(f"calc_error: pred: {pred}, target: {target}")
+    def update_accuracies(self, pred: torch.Tensor, target: torch.Tensor) -> None:
 
         # force prediction to 0 and 1, this is required after sigmoid
         pred = (pred > 0.5).int()
@@ -202,8 +178,8 @@ class EpochStats:
         # 1 - target gives the mask required to zero out all true target ones
         self.true_neg += ((1 - pred) * (1 - target)).sum().item()
 
-    def log(self, name, epoch):
-        logger.info(f"[{name} {epoch:>4d}]    loss: {self.loss:>8.5f}    "
+    def log(self, name: str, epoch: int) -> None:
+        LOGGER.info(f"[{name} {epoch:>4d}]    loss: {self.loss:>8.5f}    "
                     f"acc:{self.accuracy * 100:>6.2f}% [{self.correct:>4d}/{self.count:>4d}]    "
                     f"TP:{self.true_pos_rate * 100:>6.2f}% [{self.true_pos:>4d}/{self.num_pos:>4d}]    "
                     f"TN:{self.true_neg_rate * 100:>6.2f}% [{self.true_neg:>4d}/{self.num_neg:>4d}]")
@@ -212,18 +188,17 @@ class EpochStats:
 # from the input pandas dataframe create the train / test dataloaders requied for
 # pytorch training.
 # return (train_dataloader, test_dataloader)
-def create_dataloader(df, image_size, batch_size, augment, hrd_sample_dup, test_fraction):
+def create_dataloader(df: pd.DataFrame, image_size: int, batch_size: int, augment: bool, hrd_sample_dup: int, test_fraction: float) -> tuple[data_utils.DataLoader, data_utils.DataLoader]:
     # Using Skicit-learn to split data into training and testing sets
-    from sklearn.model_selection import train_test_split
 
     # Split the data into training and testing sets
-    train_df, test_df = train_test_split(df, test_size=test_fraction, random_state=None)
+    train_df, test_df = train_test_split(df, test_size=test_fraction, random_state=RANDOM_SEED)
 
     # write out the train and test set
     train_df[["sampleId"]].to_csv("train_set.tsv.gz", sep="\t", index=False)
     test_df[["sampleId"]].to_csv("test_set.tsv.gz", sep="\t", index=False)
 
-    logger.info(f"train size: {len(train_df)}, test size: {len(test_df)}, batch size: {batch_size}, augment: {augment}")
+    LOGGER.info(f"train size: {len(train_df)}, test size: {len(test_df)}, batch size: {batch_size}, augment: {augment}")
 
     # Create data loaders.
     train_dataset = HrdDataset(train_df, image_size, augment=augment, hrd_sample_dup=hrd_sample_dup)
@@ -232,12 +207,6 @@ def create_dataloader(df, image_size, batch_size, augment, hrd_sample_dup, test_
     # we do not augment testing data
     test_dataset = HrdDataset(test_df, image_size, augment=False, hrd_sample_dup=hrd_sample_dup)
     test_dataloader = data_utils.DataLoader(test_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
-
-    # for seq_x, linear_x, y, bq, bqr in test_dataloader:
-    #    print(f"Shape of seq x [N, C, H]: {seq_x.shape}")
-    #    print(f"Shape of linear x [N, C]: {linear_x.shape}")
-    #    print(f"Shape of y: {y.shape} {y.dtype}")
-    #    break
 
     return train_dataloader, test_dataloader
 
@@ -249,8 +218,7 @@ ADAM is very lr sensitive
 Using pretrained weights results in getting stuck often
 SGD with Nesterov momentum is worse
 '''
-def train_model(model, train_dataloader, test_dataloader, num_epochs, use_nesterov=False):
-    # loss_fn = nn.BCELoss()
+def train_model(model: nn.Module, train_dataloader: data_utils.DataLoader, test_dataloader: data_utils.DataLoader, num_epochs: int, use_nesterov: bool = False) -> bool:
 
     # use this cause the model does not have a logit
     loss_fn = nn.BCEWithLogitsLoss()
@@ -287,15 +255,15 @@ def train_model(model, train_dataloader, test_dataloader, num_epochs, use_nester
     train_stats_list = []
     test_stats_list = []
 
-    logger.info(f"start training, num epochs={num_epochs}")
+    LOGGER.info(f"start training, num epochs={num_epochs}")
 
     # print the optimizer params
     optimizer_params = {k:v for (k,v) in optimizer.param_groups[0].items() if isinstance(v, (int, float))}
-    logger.info(f"optimizer={optimizer.__class__.__name__}, params={optimizer_params}")
+    LOGGER.info(f"optimizer={optimizer.__class__.__name__}, params={optimizer_params}")
 
     # print the lr scheduler params
     try:
-        logger.info(f"lr scheduler={scheduler.__class__.__name__}, states={scheduler.state_dict()}")
+        LOGGER.info(f"lr scheduler={scheduler.__class__.__name__}, states={scheduler.state_dict()}")
     except NameError:
         pass
 
@@ -312,7 +280,7 @@ def train_model(model, train_dataloader, test_dataloader, num_epochs, use_nester
         should_log = epoch % 100 == 0
 
         # if should_log:
-        logger.info(f"-----------------------------------------"
+        LOGGER.info(f"-----------------------------------------"
                     f" Epoch {epoch:>4d}  [lr={optimizer.param_groups[0]['lr']:.6f}] "
                     f"-----------------------------------------")
 
@@ -326,7 +294,7 @@ def train_model(model, train_dataloader, test_dataloader, num_epochs, use_nester
 
     elapsed_min = (time.time() - start) / 60
     hours, minutes = divmod(elapsed_min, 60)
-    logger.info(f"training complete! time taken: {hours:.0f}h {minutes:.0f}m")
+    LOGGER.info(f"training complete! time taken: {hours:.0f}h {minutes:.0f}m")
 
     # create a df for the epoch data
     epoch_df = pd.DataFrame()
@@ -372,18 +340,16 @@ def train_model(model, train_dataloader, test_dataloader, num_epochs, use_nester
     return True
 
 
-def train(dataloader, model, loss_fn, optimizer, epoch_stats, epoch, should_log):
-    size = len(dataloader.dataset)
+def train(dataloader: data_utils.DataLoader, model: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimizer, epoch_stats: EpochStats, epoch: int, should_log: bool) -> None:
     model.train()
     for batch, (x1, x2, y) in enumerate(dataloader):
-        x1 = x1.to(device)
-        x2 = x2.to(device)
-        y = y.to(device)
+        x1 = x1.to(DEVICE)
+        x2 = x2.to(DEVICE)
+        y = y.to(DEVICE)
         # Compute prediction error
         pred = model(x1, x2)
 
         # set weight to ignore low base qual bases
-        # loss_fn.weight = float(1.0)
         loss = loss_fn(pred, y)
 
         # Backpropagation
@@ -406,34 +372,27 @@ def train(dataloader, model, loss_fn, optimizer, epoch_stats, epoch, should_log)
 
     epoch_stats.log("Train", epoch)
 
-def test(dataloader, model, loss_fn, epoch_stats, epoch, should_log):
-    # size = len(dataloader.dataset)
-    # num_batches = len(dataloader)
+def test(dataloader: data_utils.DataLoader, model: nn.Module, loss_fn: nn.Module, epoch_stats: EpochStats, epoch: int, should_log: bool) -> None:
+
     model.eval()
 
     with torch.no_grad():
         for x1, x2, y in dataloader:
-            x1 = x1.to(device)
-            x2 = x2.to(device)
-            y = y.to(device)
+            x1 = x1.to(DEVICE)
+            x2 = x2.to(DEVICE)
+            y = y.to(DEVICE)
             pred = model(x1, x2)
-            # pred = torch.full(y.shape, 1.0)
-
-            # set weight to ignore low base qual bases
-            # loss_fn.weight = float(1.0)
 
             epoch_stats.update_loss(loss_fn(pred, y).item(), y.size(dim=0))
 
             # NOTE: need to add sigmoid since we use loss with logit
             sigmoid_pred = torch.sigmoid(pred)
             epoch_stats.update_accuracies(sigmoid_pred, y)
-            # logger.debug(f"test size: x.size(0)")
-            # logger.debug(f"true error: {t_err}, false error: {f_err}")
 
     epoch_stats.log("Test ", epoch)
 
 
-def append_dropout(model, rate):
+def append_dropout(model: nn.Module, rate: float) -> None:
     for name, module in model.named_children():
         if len(list(module.children())) > 0:
             append_dropout(module, rate)
@@ -441,30 +400,48 @@ def append_dropout(model, rate):
             new = nn.Sequential(module, nn.Dropout2d(p=rate))
             setattr(model, name, new)
 
-#
-def init_model(dropout_rate):
-    # load the model
-    # 5
-    return vchord_model.HrdModel(dropout_rate, NUM_CANCER_TYPES)
 
-def train_main(sample_tsv, purple_root, epochs, batch_size, dropout_rate, hrd_sample_dup, test_fraction, use_nesterov, starting_model):
+def train_main(sample_tsv: str, purple_root: str, epochs: int, batch_size: int, dropout_rate: float, hrd_sample_dup: int, test_fraction: float, use_nesterov: bool, starting_model: str, override_purity: bool = False, ignore_missing_samples: bool = False) -> None:
     df = pd.read_csv(sample_tsv, sep="\t")
-    df["inputPngPath"] = purple_root + "/" + df["sampleId"] + "/" + df["sampleId"] + ".input.png"
-    df["circosPngPath"] = purple_root + "/" + df["sampleId"] + "/" + df["sampleId"] + ".circos.png"
+
+    df["circosPngPath"] = purple_root + "/" + df["sampleId"] + ".circos.png"
+    df["purplePurityPath"] = purple_root + "/" + df["sampleId"] + ".purple.purity.tsv"
+
+    incomplete_indices = []
+    for idx, row in df.iterrows():
+
+        circos_png_path = row["circosPngPath"]
+        purple_purity_path = row["purplePurityPath"]
+
+        if not os.path.exists(circos_png_path):
+            LOGGER.warning(f"missing file: {circos_png_path}")
+            incomplete_indices.append(idx)
+
+        if not os.path.exists(purple_purity_path):
+            LOGGER.warning(f"missing file: {purple_purity_path}")
+            incomplete_indices.append(idx)
+
+    if incomplete_indices:
+        if ignore_missing_samples:
+            LOGGER.warning(f"ignoring {len(incomplete_indices)} sample(s) with missing files")
+            df = df.drop(index=incomplete_indices)
+        else:
+            raise FileNotFoundError(f"{len(incomplete_indices)} input file(s) not found")
 
     # load the purity
-    df["purity"] = [pd.read_csv(f'{purple_root}/{s}/{s}.purple.purity.tsv', sep='\t')["purity"].iloc[0] for s in df["sampleId"]]
+    if override_purity or "purity" not in df.columns:
+        LOGGER.info("loading purity from .purple.purity.tsv files")
+        df["purity"] = [pd.read_csv(p, sep='\t')["purity"].iloc[0] for p in df["purplePurityPath"]]
 
     df = filter_df(df)
-    #df = df.head(5).reset_index(drop=True)
 
     if starting_model:
-        logger.info(f"starting model: {starting_model}")
+        LOGGER.info(f"starting model: {starting_model}")
         model = torch.jit.load(starting_model, map_location=torch.device('cpu'))
     else:
-        model = init_model(dropout_rate)
+        model = vchord_model.HrdModel(dropout_rate, NUM_CANCER_TYPES)
 
-    model = model.to(device)
+    model = model.to(DEVICE)
 
     train_dataloader, test_dataloader = create_dataloader(df, image_size=IMAGE_SIZE, batch_size=batch_size, augment=True,
                                                         hrd_sample_dup=hrd_sample_dup, test_fraction=test_fraction)
@@ -476,13 +453,11 @@ def train_main(sample_tsv, purple_root, epochs, batch_size, dropout_rate, hrd_sa
 
     # also use torch script to save it once more
     # load using
-    # model = torch.jit.load('model_scripted.pt')
     model_scripted = torch.jit.script(model)  # Export to TorchScript
     model_scripted.save('model_scripted.pt')  # Save
 
 
-def main():
-    import argparse
+def main() -> None:
     parser = argparse.ArgumentParser(description="train hrd predictor")
     parser.add_argument('--sample_tsv', help='input tsv file', required=True)
     parser.add_argument('--purple_root', help='path to purple plots', required=True)
@@ -493,14 +468,16 @@ def main():
     parser.add_argument('--test_fraction', help='amount of data used for testing', type=float, default=0.2)
     parser.add_argument('--use_nesterov', help='use SGD with nesterov instead of adamW', action='store_true')
     parser.add_argument('--starting_model', help='starting from this model instead of make a new one', default=None)
+    parser.add_argument('--override_purity', help='force load purity from purple TSV files even if column exists in sample TSV', action='store_true')
+    parser.add_argument('--ignore_missing_samples', help='skip samples with missing circos PNG or purple purity files instead of failing', action='store_true')
     args = parser.parse_args()
 
-    logger.info(f"using {device} device")
-    logger.info(f"training cnn hrd, epochs={args.epochs}, batch_size={args.batch_size}, " +
+    LOGGER.info(f"using {DEVICE} device")
+    LOGGER.info(f"training cnn hrd, epochs={args.epochs}, batch_size={args.batch_size}, " +
           f"dropout_rate={args.dropout_rate}, hrd_sample_dup={args.hrd_sample_duplication}, test_fraction={args.test_fraction}, " +
           f"use_nesterov={args.use_nesterov}, starting_model={args.starting_model}")
     train_main(args.sample_tsv, args.purple_root, args.epochs, args.batch_size, args.dropout_rate,
-               args.hrd_sample_duplication, args.test_fraction, args.use_nesterov, args.starting_model)
+               args.hrd_sample_duplication, args.test_fraction, args.use_nesterov, args.starting_model, args.override_purity, args.ignore_missing_samples)
 
 
 if __name__ == "__main__":

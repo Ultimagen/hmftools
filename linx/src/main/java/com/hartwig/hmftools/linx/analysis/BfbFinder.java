@@ -4,8 +4,8 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.pow;
 
+import static com.hartwig.hmftools.common.segmentation.Arm.P;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
-import static com.hartwig.hmftools.common.purple.ChromosomeArm.P_ARM;
 import static com.hartwig.hmftools.linx.types.SvCluster.CLUSTER_ANNOT_BFB;
 
 import java.util.List;
@@ -38,7 +38,7 @@ public class BfbFinder
         if(cluster.getFoldbacks().isEmpty() || cluster.getSvCount() == 1)
             return;
 
-        final List<SvVarData> candidateDMSVs = Lists.newArrayList();
+        List<SvVarData> candidateDMSVs = Lists.newArrayList();
 
         double clusterMaxJcn = 0; // the max of the JCN min values
 
@@ -61,7 +61,7 @@ public class BfbFinder
         double foldbackCount = 0;
         double maxSglJcn = 0;
 
-        for(final SvVarData var : cluster.getSVs())
+        for(SvVarData var : cluster.getSVs())
         {
             if(candidateDMSVs.contains(var))
                 continue;
@@ -104,12 +104,12 @@ public class BfbFinder
 
         for(ArmGroup armGroup : cluster.getArmGroups())
         {
-            final TelomereCentromereCnData tcData = mCnDataLoader.getChrTeleCentroData().get(armGroup.chromosome());
+            TelomereCentromereCnData tcData = mCnDataLoader.getChrTeleCentroData().get(armGroup.chromosome());
 
             if(tcData != null)
             {
-                double centromereCopyNumber = armGroup.arm() == P_ARM ? tcData.CentromerePArm : tcData.CentromereQArm;
-                double telomereCopyNumber = armGroup.arm() == P_ARM ? tcData.TelomerePArm : tcData.TelomereQArm;
+                double centromereCopyNumber = armGroup.arm() == P ? tcData.CentromerePArm : tcData.CentromereQArm;
+                double telomereCopyNumber = armGroup.arm() == P ? tcData.TelomerePArm : tcData.TelomereQArm;
                 maxCopyNumber = max(max(telomereCopyNumber, centromereCopyNumber), maxCopyNumber);
             }
         }

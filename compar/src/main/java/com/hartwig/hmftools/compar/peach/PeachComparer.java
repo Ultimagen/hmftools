@@ -1,7 +1,7 @@
 package com.hartwig.hmftools.compar.peach;
 
 import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
-import static com.hartwig.hmftools.compar.common.Category.PEACH;
+import static com.hartwig.hmftools.compar.common.CategoryType.PEACH;
 import static com.hartwig.hmftools.compar.common.CommonUtils.fileExists;
 import static com.hartwig.hmftools.compar.peach.PeachData.FLD_ALLELE_COUNT;
 import static com.hartwig.hmftools.compar.peach.PeachData.FLD_DRUGS;
@@ -18,10 +18,11 @@ import com.hartwig.hmftools.common.peach.PeachGenotypeFile;
 import com.hartwig.hmftools.compar.ComparConfig;
 import com.hartwig.hmftools.compar.ComparableItem;
 import com.hartwig.hmftools.compar.ItemComparer;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.common.CommonUtils;
 import com.hartwig.hmftools.compar.common.FileSources;
 import com.hartwig.hmftools.compar.common.Mismatch;
+import com.hartwig.hmftools.compar.common.SourceType;
 import com.hartwig.hmftools.patientdb.dao.DatabaseAccess;
 
 public class PeachComparer implements ItemComparer
@@ -34,7 +35,7 @@ public class PeachComparer implements ItemComparer
     }
 
     @Override
-    public Category category()
+    public CategoryType category()
     {
         return PEACH;
     }
@@ -52,7 +53,7 @@ public class PeachComparer implements ItemComparer
     }
 
     @Override
-    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final String sourceName)
+    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final SourceType sourceType)
     {
         List<PeachGenotype> genotypes = dbAccess.readPeachGenotypes(sampleId);
         return genotypes.stream().map(g -> new PeachData(g)).collect(Collectors.toList());

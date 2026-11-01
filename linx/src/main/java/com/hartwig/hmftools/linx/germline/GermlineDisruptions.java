@@ -4,7 +4,6 @@ import static java.lang.Math.abs;
 import static java.lang.Math.min;
 
 import static com.hartwig.hmftools.common.driver.DriverType.GERMLINE_DISRUPTION;
-import static com.hartwig.hmftools.common.driver.DriverType.GERMLINE_HOM_DUP_DISRUPTION;
 import static com.hartwig.hmftools.common.driver.panel.DriverGeneGermlineReporting.NONE;
 import static com.hartwig.hmftools.common.driver.panel.DriverGeneGermlineReporting.VARIANT_NOT_LOST;
 import static com.hartwig.hmftools.common.gene.TranscriptCodingType.UNKNOWN;
@@ -19,12 +18,11 @@ import static com.hartwig.hmftools.common.sv.StructuralVariantType.SGL;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionsWithin;
 import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_FWD;
-import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS_FILTER;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
 import static com.hartwig.hmftools.linx.analysis.ClusterMetrics.findEndIndex;
 import static com.hartwig.hmftools.linx.analysis.ClusterMetrics.findStartIndex;
 import static com.hartwig.hmftools.linx.annotators.PseudoGeneFinder.isPseudogeneDeletion;
-import static com.hartwig.hmftools.linx.drivers.DeletionDrivers.isHomozygousDupDisruption;
 import static com.hartwig.hmftools.linx.types.ResolvedType.LINE;
 import static com.hartwig.hmftools.linx.types.ResolvedType.RECIP_INV;
 
@@ -50,6 +48,7 @@ import com.hartwig.hmftools.common.gene.TranscriptData;
 import com.hartwig.hmftools.common.linx.ImmutableLinxBreakend;
 import com.hartwig.hmftools.common.linx.LinxBreakend;
 import com.hartwig.hmftools.common.linx.LinxGermlineDisruption;
+import com.hartwig.hmftools.common.purple.ReportedStatus;
 import com.hartwig.hmftools.common.sv.StructuralVariantData;
 import com.hartwig.hmftools.common.sv.StructuralVariantType;
 import com.hartwig.hmftools.common.linx.LinxDriver;
@@ -67,7 +66,7 @@ public class GermlineDisruptions
 {
     private final EnsemblDataCache mGeneTransCache;
     private final List<GeneData> mDriverGeneDataList;
-    private final List<DriverGene> mDriverGenes;
+    private final Map<String,DriverGene> mDriverGenes;
     private final List<SvDisruptionData> mDisruptions;
 
     private final Set<SvVarData> mReportableSgls;
@@ -84,15 +83,12 @@ public class GermlineDisruptions
     {
         mGeneTransCache = geneTransCache;
 
-        mDriverGenes = Lists.newArrayList();
+        mDriverGenes = config.DriverGenes;
         mDriverGeneDataList = Lists.newArrayList();
 
-        for(DriverGene driverGene : config.DriverGenes)
+        for(String geneName : config.DriverGenes.keySet())
         {
-            if(driverGene.reportGermlineDisruption() != NONE)
-                mDriverGenes.add(driverGene);
-
-            GeneData geneData = geneTransCache.getGeneDataByName(driverGene.gene());
+            GeneData geneData = geneTransCache.getGeneDataByName(geneName);
 
             if(geneData != null)
                 mDriverGeneDataList.add(geneData);
@@ -131,10 +127,10 @@ public class GermlineDisruptions
         if(cluster.getSvCount() > 1 && !cluster.isFullyChained(true))
             return;
 
-        for(final Map.Entry<String, List<SvBreakend>> entry : cluster.getChrBreakendMap().entrySet())
+        for(Map.Entry<String, List<SvBreakend>> entry : cluster.getChrBreakendMap().entrySet())
         {
-            final String chromosome = entry.getKey();
-            final List<SvBreakend> breakendList = entry.getValue();
+            String chromosome = entry.getKey();
+            List<SvBreakend> breakendList = entry.getValue();
 
             int startIndex = findStartIndex(breakendList);
             int endIndex = findEndIndex(breakendList);
@@ -142,9 +138,9 @@ public class GermlineDisruptions
             // find stand-alone DELs and clustered deletion bridges, then look within them for driver genes which have been deleted
             for(int i = startIndex; i <= endIndex - 1; ++i)
             {
-                final SvBreakend breakend = breakendList.get(i);
-                final SvVarData var = breakend.getSV();
-                final SvBreakend nextBreakend = breakendList.get(i + 1);
+                SvBreakend breakend = breakendList.get(i);
+                SvVarData var = breakend.getSV();
+                SvBreakend nextBreakend = breakendList.get(i + 1);
 
                 boolean isDB = breakend.getDBLink() != null && breakend.getDBLink() == nextBreakend.getDBLink();
 
@@ -372,7 +368,7 @@ public class GermlineDisruptions
 
         for(Map.Entry<SvVarData,List<SvDisruptionData>> entry : svDisruptionsMap.entrySet())
         {
-            final SvVarData var = entry.getKey();
+            SvVarData var = entry.getKey();
 
             StructuralVariantData svData = var.getSvData();
             SvCluster cluster = var.getCluster();
@@ -383,23 +379,39 @@ public class GermlineDisruptions
             String geneName = "";
             DriverType driverType = GERMLINE_DISRUPTION; // default if meets the driver criteria
 
-            // check for a homozygous DUP
-            if(var.type() == DUP && isHomozygousDup(var, standardDisruptions))
-            {
-                driverType = GERMLINE_HOM_DUP_DISRUPTION;
-            }
-
             for(SvDisruptionData disruptionData : entry.getValue())
             {
-                final GeneData gene = disruptionData.Gene;
-                final TranscriptData transcript = disruptionData.Transcript;
+                GeneData gene = disruptionData.Gene;
+                TranscriptData transcript = disruptionData.Transcript;
 
                 // DELs and DUPs which straddle driver genes are not reportable
                 boolean reportable = !mDisruptions.contains(disruptionData) && isReportable(disruptionData);
+                ReportedStatus reportedStatus = ReportedStatus.NONE;
+
+                if(reportable)
+                {
+                    DriverGene driverGene = mDriverGenes.get(disruptionData.Gene.GeneName);
+
+                    if(driverGene != null)
+                    {
+                        if(driverGene.reportGermlineDisruption() == VARIANT_NOT_LOST && var.getSvData().junctionCopyNumber() < 0.1)
+                        {
+                            reportable = false;
+                        }
+                        else if(driverGene.reportGermlineDisruption() == NONE)
+                        {
+                            reportedStatus = ReportedStatus.NOT_REPORTED;
+                        }
+                        else
+                        {
+                            reportedStatus = ReportedStatus.REPORTED;
+                        }
+                    }
+                }
 
                 if(disruptionData.isPseudogeneDeletion())
                 {
-                    allFilters.remove(PASS);
+                    allFilters.remove(PASS_FILTER);
                     allFilters.add(FILTER_PSEUDOGENE);
                 }
 
@@ -408,6 +420,8 @@ public class GermlineDisruptions
                 ImmutableLinxBreakend.Builder builder = ImmutableLinxBreakend.builder()
                         .id(breakendId++)
                         .svId(var.id())
+                        .vcfId(var.getSvData().vcfIdStart())
+                        .coords(var.coordsStr(disruptionData.IsStart))
                         .isStart(disruptionData.IsStart)
                         .gene(gene.GeneName)
                         .geneOrientation(isUpstream ? BREAKEND_ORIENTATION_UPSTREAM : BREAKEND_ORIENTATION_DOWNSTREAM)
@@ -415,11 +429,11 @@ public class GermlineDisruptions
                         .canonical(transcript.IsCanonical)
                         .biotype(transcript.BioType)
                         .disruptive(false)
-                        .reportedDisruption(reportable)
+                        .reportedStatus(reportedStatus)
                         .undisruptedCopyNumber(disruptionData.UndisruptedCopyNumber)
                         .totalExonCount(transcript.exons().size());
 
-                final BreakendGeneData breakendGene = var.getGenesList(disruptionData.IsStart).stream()
+                BreakendGeneData breakendGene = var.getGenesList(disruptionData.IsStart).stream()
                         .filter(x -> x.geneName().equals(disruptionData.Gene.GeneName)).findFirst().orElse(null);
 
                 if(breakendGene != null && breakendGene.canonical() != null)
@@ -454,8 +468,7 @@ public class GermlineDisruptions
                 // add at most one driver record per gene
                 if(reportable && drivers.stream().noneMatch(x -> x.gene().equals(gene.GeneName)))
                 {
-                    DriverGene driverGene = mDriverGenes.stream()
-                            .filter(x -> x.gene().equals(disruptionData.Gene.GeneName)).findFirst().orElse(null);
+                    DriverGene driverGene = mDriverGenes.get(disruptionData.Gene.GeneName);
 
                     drivers.add(ImmutableDriverCatalog.builder()
                             .driver(driverType)
@@ -467,6 +480,7 @@ public class GermlineDisruptions
                             .chromosomeBand(gene.KaryotypeBand)
                             .likelihoodMethod(LikelihoodMethod.GERMLINE)
                             .driverLikelihood(1.0)
+                            .reportedStatus(reportedStatus)
                             .missense(0)
                             .nonsense(0)
                             .splice(0)
@@ -503,48 +517,25 @@ public class GermlineDisruptions
         }
     }
 
-    private boolean isHomozygousDup(final SvVarData var, final List<SvDisruptionData> standardDisruptions)
-    {
-        if(var.type() != DUP)
-            return false;
-
-        SvDisruptionData startDisruptionData = standardDisruptions.stream()
-                .filter(x -> x.Var == var && x.IsStart).findFirst().orElse(null);
-
-        SvDisruptionData endDisruptionData = standardDisruptions.stream()
-                .filter(x -> x.Var == var && !x.IsStart).findFirst().orElse(null);
-
-        if(startDisruptionData == null || endDisruptionData == null || startDisruptionData.Gene != endDisruptionData.Gene)
-            return false;
-
-        return isHomozygousDupDisruption(var.getBreakend(true), var.getBreakend(false), var.getSvData().junctionCopyNumber());
-    }
-
     private boolean isReportable(final SvDisruptionData disruptionData)
     {
         SvVarData var = disruptionData.Var;
 
-        if(!var.getSvData().filter().equals(PASS))
+        if(!var.getSvData().filter().equals(PASS_FILTER))
             return false;
 
         if(var.getSvData().ponCount() > MAX_PON_COUNT)
             return false;
 
-        if(disruptionData.CodingType == UTR_3P)
-            return false;
+        boolean isDelOrDup = var.type() == DEL || var.type() == DUP;
 
-        DriverGene driverGene = mDriverGenes.stream().filter(x -> x.gene().equals(disruptionData.Gene.GeneName)).findFirst().orElse(null);
-
-        if(driverGene == null)
-            return false;
-
-        if(driverGene.reportGermlineDisruption() == VARIANT_NOT_LOST && var.getSvData().junctionCopyNumber() < 0.1)
+        if(disruptionData.CodingType == UTR_3P && !isDelOrDup)
             return false;
 
         if(disruptionData.isPseudogeneDeletion())
             return false;
 
-        final SvCluster cluster = var.getCluster();
+        SvCluster cluster = var.getCluster();
 
         if(cluster.getSvCount() == 1)
         {
@@ -564,6 +555,6 @@ public class GermlineDisruptions
             return true;
 
         // a clustered DEL or DUP is also reportable
-        return var.type() == DEL || var.type() == DUP;
+        return isDelOrDup;
     }
 }

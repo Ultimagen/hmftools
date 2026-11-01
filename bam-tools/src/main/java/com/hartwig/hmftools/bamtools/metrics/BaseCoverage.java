@@ -9,7 +9,10 @@ import static htsjdk.samtools.CigarOperator.M;
 
 import java.util.List;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
+import com.hartwig.hmftools.common.region.BaseRegion;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 
 import htsjdk.samtools.CigarElement;
@@ -41,7 +44,6 @@ public class BaseCoverage
         int alignedBases = read.getCigar().getCigarElements().stream().filter(x -> x.getOperator() == M).mapToInt(x -> x.getLength()).sum();
 
         // the order in which the filters are applied matters and matches Picard CollectWgsMetrics
-
         if(read.getMappingQuality() < mConfig.MapQualityThreshold)
         {
             if(!isConsensusRead)
@@ -58,13 +60,13 @@ public class BaseCoverage
         else
         {
             // lower duplicate data to account for additionally marked duplicate - see previous comments in BamReader
-            if(isConsensusRead)
+            if(isConsensusRead && mConfig.expectDuplicates())
                 mFilterTypeCounts[FilterType.DUPLICATE.ordinal()] -= alignedBases;
         }
 
-        if(!read.getReadPairedFlag() || read.getMateUnmappedFlag())
+        if(read.getReadPairedFlag() && read.getMateUnmappedFlag())
         {
-            mFilterTypeCounts[FilterType.MATE_UNMAPPED.ordinal()] += alignedBases;
+            mFilterTypeCounts[FilterType.MATE_UNMAPPED.ordinal()] += read.getReadBases().length;
             return;
         }
 
@@ -151,26 +153,29 @@ public class BaseCoverage
         }
     }
 
-    public CoverageMetrics createMetrics()
+    public CoverageMetrics createMetrics(@Nullable final List<BaseRegion> targetRegions)
     {
         CoverageMetrics metrics = new CoverageMetrics(mConfig.MaxCoverage);
 
         long coverageBases = 0;
+        long zeroCoverageBases = 0;
 
         for(int i = 0; i < mBaseDepth.length; ++i)
         {
+            int position = mRegionStart + i;
+
+            if(targetRegions != null && targetRegions.stream().noneMatch(x -> x.containsPosition(position)))
+                continue;
+
+            if(!mUnmappableRegions.isEmpty() && mUnmappableRegions.stream().anyMatch(x -> x.containsPosition(position)))
+                continue;
+
             int coverage = mBaseDepth[i];
-
-            if(!mUnmappableRegions.isEmpty())
-            {
-                int position = mRegionStart + i;
-
-                if(mUnmappableRegions.stream().anyMatch(x -> x.containsPosition(position)))
-                    continue;
-            }
 
             if(coverage == 0)
             {
+                ++zeroCoverageBases;
+
                 if(mConfig.ExcludeZeroCoverage)
                     continue;
             }
@@ -187,7 +192,7 @@ public class BaseCoverage
             metrics.FilterTypeCounts[type.ordinal()] += mFilterTypeCounts[type.ordinal()];
         }
 
-        metrics.addCoverageBases(coverageBases);
+        metrics.addCoverageBases(coverageBases, zeroCoverageBases);
 
         return metrics;
     }

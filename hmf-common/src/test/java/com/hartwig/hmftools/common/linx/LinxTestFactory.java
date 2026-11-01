@@ -3,6 +3,7 @@ package com.hartwig.hmftools.common.linx;
 import com.hartwig.hmftools.common.fusion.KnownFusionType;
 import com.hartwig.hmftools.common.gene.TranscriptCodingType;
 import com.hartwig.hmftools.common.gene.TranscriptRegionType;
+import com.hartwig.hmftools.common.purple.ReportedStatus;
 import com.hartwig.hmftools.common.sv.StructuralVariantType;
 
 import org.apache.logging.log4j.util.Strings;
@@ -10,12 +11,15 @@ import org.jetbrains.annotations.NotNull;
 
 public final class LinxTestFactory
 {
-    @NotNull
     public static ImmutableLinxSvAnnotation.Builder svAnnotationBuilder()
     {
         return ImmutableLinxSvAnnotation.builder()
-                .vcfId(Strings.EMPTY)
+                .vcfIdStart(Strings.EMPTY)
+                .vcfIdEnd(Strings.EMPTY)
                 .svId(0)
+                .coordsStart("1:1000:1")
+                .coordsEnd("1:2000:-1")
+                .type(StructuralVariantType.DEL)
                 .clusterId(0)
                 .clusterReason(Strings.EMPTY)
                 .fragileSiteStart(false)
@@ -35,22 +39,19 @@ public final class LinxTestFactory
                 .localTICountEnd(0);
     }
 
-    @NotNull
-    public static LinxFusion createMinimalTestFusion()
-    {
-        return fusionBuilder().build();
-    }
-
-    @NotNull
     public static ImmutableLinxFusion.Builder fusionBuilder()
     {
         return ImmutableLinxFusion.builder()
                 .fivePrimeBreakendId(0)
                 .threePrimeBreakendId(0)
+                .fivePrimeVcfId(Strings.EMPTY)
+                .threePrimeVcfId(Strings.EMPTY)
+                .fivePrimeCoords(Strings.EMPTY)
+                .threePrimeCoords(Strings.EMPTY)
                 .name(Strings.EMPTY)
                 .reported(false)
                 .reportedType(KnownFusionType.NONE.toString())
-                .reportableReasons("OK")
+                .addReportableReasons(FusionReportableReason.OK)
                 .phased(FusionPhasedType.OUT_OF_FRAME)
                 .likelihood(FusionLikelihoodType.NA)
                 .chainLength(0)
@@ -61,29 +62,23 @@ public final class LinxTestFactory
                 .skippedExonsUp(0)
                 .skippedExonsDown(0)
                 .fusedExonUp(0)
-                .fusedExonDown(0)
-                .geneStart(Strings.EMPTY)
-                .geneContextStart(Strings.EMPTY)
-                .geneTranscriptStart(Strings.EMPTY)
-                .geneEnd(Strings.EMPTY)
-                .geneContextEnd(Strings.EMPTY)
-                .geneTranscriptEnd(Strings.EMPTY)
-                .junctionCopyNumber(0D);
+                .fusedExonDown(0);
     }
 
-    @NotNull
     public static ImmutableLinxBreakend.Builder breakendBuilder()
     {
         return ImmutableLinxBreakend.builder()
                 .id(0)
                 .svId(0)
+                .vcfId(Strings.EMPTY)
+                .coords(Strings.EMPTY)
                 .isStart(true)
                 .gene(Strings.EMPTY)
                 .transcriptId(Strings.EMPTY)
                 .canonical(true)
                 .geneOrientation(Strings.EMPTY)
                 .disruptive(false)
-                .reportedDisruption(false)
+                .reportedStatus(ReportedStatus.NONE)
                 .undisruptedCopyNumber(0D)
                 .regionType(TranscriptRegionType.UNKNOWN)
                 .codingType(TranscriptCodingType.UNKNOWN)
@@ -97,14 +92,11 @@ public final class LinxTestFactory
                 .exonDown(0);
     }
 
-    @NotNull
-    public static ImmutableHomozygousDisruption.Builder homozygousDisruptionBuilder()
+    public static ImmutableLinxDriver.Builder driverEventBuilder()
     {
-        return ImmutableHomozygousDisruption.builder()
-                .chromosome(Strings.EMPTY)
-                .chromosomeBand(Strings.EMPTY)
-                .gene(Strings.EMPTY)
-                .transcript(Strings.EMPTY)
-                .isCanonical(false);
+        return ImmutableLinxDriver.builder()
+                .clusterId(0)
+                .eventType(DriverEventType.DEL)
+                .gene("");
     }
 }

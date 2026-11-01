@@ -13,7 +13,8 @@ Various routines to run on a BAM file:
 Captures and writes the follow metrics for a BAM file:
 - overall statistics for types of reads and coverage
 - fragment length distribution
-- coverage distribution
+- general coverage distribution
+- gene coverage and median exon depths (if driver_gene_panel and ensembl_data_dir set)
 - flag stats - frequency by read flag type
 - partition read stats per 1M (default) bucket
 - targeted panel coverage if configured
@@ -52,7 +53,26 @@ map_qual_threshold | Reads below this map quality count towards MAPQ counts, def
 base_qual_threshold | Bases below this base quality count towards BASEQ count, default 10
 max_coverage | Positions with coverage above this count towards CAPPED counts, default 250
 exclude_zero_coverage | Exclude regions of zero coverage from overall statistics
+driver_gene_panel | Path to driver gene panel, required for gene coverage
+ensembl_data_dir | Path to Ensembl data cache, required for gene coverage
 
+### Gene Panel Coverage
+To provide confidence that there is sufficient depth in the gene panel, the depth of each exon base in the gene panel is calculated and written to file for each sample. Note that only reads with MapQ >= 10 are included in the coverage calculations.
+
+Each `DR_*` column holds the number of the gene's exon bases in a depth range, e.g. `DR_60_69` for depths 60 to 69.
+
+For example:
+
+```
+GeneName  Chromosome  PosStart  PosEnd    DR_0  DR_1  ...  DR_60_69  DR_70_79  ...  DR_10000
+PTEN      chr10       87864470  87965472  162   0     ...  424       451       ...  0
+```
+
+A 'missed variant likelihood' is calculated by [Qsee](https://github.com/hartwigmedical/hmftools/tree/master/qsee) using a binomial distribution as the mean probability of not finding at least 3 reads coverage for an allele given the depth distribution over the whole gene:
+- For each depth range, the binomial distribution has `n = depth` trials and success probability `p = purity / alleles` (i.e. a mean allele depth of `purity * depth / alleles`)
+- `depth` is the range's midpoint and `alleles` is 1 for haploid chromosomes (chrX and chrY in males) and 2 otherwise
+- Tumor samples use the PURPLE purity, while reference samples use a purity of 1
+- Sex is taken from the PURPLE output of the tumor sample
 
 ## RegionSlicer
 Slice a BAM across 1 or more regions, and gather any remote mate and supplementary reads linked to those regions
@@ -128,7 +148,9 @@ ignore_dup_diffs   | Ignore difference in duplicate flag
 ignore_alterations | Ignore consensus reads and internal unmappings                 
 ignore_consensus_reads | Ignore consensus reads                                         
 ignore_supp_reads  | Ignore supplementary reads
-ignore_supp_attribute | Ignore differences in supplementary attribute values           
+ignore_supp_attribute | Ignore differences in supplementary attribute values
+ignore_sec_reads | Ignore differences in secondary reads
+coords_only | Only check for coordinate differences in reads
 partition_size     | Default 10M bases, splits chromosomes to analyse in partitions
 max_cached_reads_per_thread | Maximum number of cached reads per thread, automatically calculated if not set
 specific_regions   | As above
@@ -159,6 +181,7 @@ output_dir | Directory to write output into
 output_id  | Extra file name prefix for the output FASTQ files
 log_level | As above
 threads    | As above
+bqsr_reverse | Revert any BQSR quals back to the original quals
 
 ### Optional Configuration
 
@@ -186,7 +209,7 @@ java -cp bam-tools.jar com.hartwig.hmftools.bamtools.checker.BamChecker \
 
 Filter | Description
 ---|---
-bam_file | BAM file to slice
+bam_file | Input BAM file
 ref_genome | Reference genome file used to create the BAM
 output_dir | Path for output file, if omitted will write to same directory as BAM file
 log_level | As above
@@ -201,8 +224,11 @@ specific_regions | List of regions to analyse. Format 'chr:posStart-posEnd; etc'
 bamtool | As above
 write_incompletes | Write information about incomplete or invalid fragments to TSV file
 drop_incompletes | Drop unmatched pair reads from output BAM
-
-
+skip_unmapped | Skip checking and writing fully unmapped reads
+bqsr_reverse | Revert to original from BQSR quals if present
+convert_hard_clips | Convert hard-clipped to soft-clipped supplementaries
+min_align_score | Unmap primaries and drop supplementarties with low alignment score (default 30)
+sort_thread_mem | Limit per-thread memory, integer value in GB
 
 ## AltContigRemapper
 

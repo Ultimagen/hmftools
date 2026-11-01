@@ -1,15 +1,14 @@
 package com.hartwig.hmftools.orange.report.components;
 
-import com.hartwig.hmftools.orange.report.ReportResources;
-import com.itextpdf.kernel.font.PdfFont;
-import com.itextpdf.kernel.geom.Rectangle;
-import com.itextpdf.kernel.pdf.PdfPage;
-import com.itextpdf.kernel.pdf.canvas.PdfCanvas;
-import com.itextpdf.layout.Canvas;
-import com.itextpdf.layout.element.Div;
-import com.itextpdf.layout.element.Paragraph;
+import java.io.IOException;
 
-import org.jetbrains.annotations.NotNull;
+import com.hartwig.hmftools.orange.report.ReportResources;
+
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDFont;
 
 public class SidePanel
 {
@@ -18,72 +17,77 @@ public class SidePanel
     private static final float MAX_WIDTH = 120;
 
     private static final float RECTANGLE_WIDTH = 170;
-    private static final float RECTANGLE_HEIGHT = 84;
+    private static final float RECTANGLE_HEIGHT = 60;
 
-    @NotNull
-    private final String sampleId;
-    @NotNull
-    private final String pipelineVersion;
-    @NotNull
-    private final ReportResources reportResources;
+    private final String mSampleId;
+    private final ReportResources mReportResources;
 
-    public SidePanel(@NotNull final String sampleId, @NotNull final String pipelineVersion, @NotNull ReportResources reportResources)
+    public SidePanel(final String sampleId, final ReportResources reportResources)
     {
-        this.sampleId = sampleId;
-        this.pipelineVersion = pipelineVersion;
-        this.reportResources = reportResources;
+        mSampleId = sampleId;
+        mReportResources = reportResources;
     }
 
-    public void renderSidePanel(@NotNull PdfPage page)
+    public void renderSidePanel(final PDPage page, final PDDocument document)
     {
-        PdfCanvas canvas = new PdfCanvas(page.getLastContentStream(), page.getResources(), page.getDocument());
-        Rectangle pageSize = page.getPageSize();
-        canvas.rectangle(pageSize.getWidth(), pageSize.getHeight(), -RECTANGLE_WIDTH, -RECTANGLE_HEIGHT);
-        canvas.setFillColor(ReportResources.PALETTE_ORANGE);
-        canvas.fill();
+        try(PDPageContentStream cs = new PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true))
+        {
+            PDRectangle pageSize = page.getMediaBox();
 
-        int sideTextIndex = 0;
-        Canvas cv = new Canvas(canvas, page.getDocument(), page.getPageSize());
+            // Draw orange rectangle in top-right corner
+            float rectX = pageSize.getWidth() - RECTANGLE_WIDTH;
+            float rectY = pageSize.getHeight() - RECTANGLE_HEIGHT;
+            cs.setNonStrokingColor(ReportResources.PALETTE_ORANGE);
+            cs.addRect(rectX, rectY, RECTANGLE_WIDTH, RECTANGLE_HEIGHT);
+            cs.fill();
 
-        cv.add(createSidePanelDiv(pageSize, ++sideTextIndex, "Sample", sampleId));
-        cv.add(createSidePanelDiv(pageSize, ++sideTextIndex, "Pipeline version", pipelineVersion));
+            // Draw "SAMPLE" label
+            float xPos = pageSize.getWidth() - RECTANGLE_WIDTH + 15;
+            float yPos = (pageSize.getHeight() + 15) - ROW_SPACING;
 
-        canvas.release();
+            ReportResources.TextStyle labelStyle = mReportResources.sidePanelLabelStyle();
+            cs.beginText();
+            cs.setFont(labelStyle.font(), labelStyle.fontSize());
+            cs.setNonStrokingColor(labelStyle.color());
+            cs.newLineAtOffset(xPos, yPos);
+            cs.showText("SAMPLE");
+            cs.endText();
+
+            // Draw sample ID value
+            float valueFontSize = maxPointSizeForWidth(mReportResources.fontBold(), 11, 6, mSampleId, MAX_WIDTH);
+            yPos -= VALUE_TEXT_Y_OFFSET;
+
+            cs.beginText();
+            cs.setFont(mReportResources.fontBold(), valueFontSize);
+            cs.setNonStrokingColor(ReportResources.PALETTE_WHITE);
+            cs.newLineAtOffset(xPos, yPos);
+            cs.showText(mSampleId);
+            cs.endText();
+        }
+        catch(IOException e)
+        {
+            throw new RuntimeException("Failed to render side panel", e);
+        }
     }
 
-    @NotNull
-    private Div createSidePanelDiv(@NotNull Rectangle pageSize, int index, @NotNull String label, @NotNull String value)
-    {
-        Div div = new Div();
-        div.setKeepTogether(true);
-
-        float yPos = (pageSize.getHeight() + 15) - index * ROW_SPACING;
-        float xPos = pageSize.getWidth() - RECTANGLE_WIDTH + 15;
-
-        div.add(new Paragraph(label.toUpperCase()).addStyle(reportResources.sidePanelLabelStyle())
-                .setFixedPosition(xPos, yPos, MAX_WIDTH));
-
-        float valueFontSize = maxPointSizeForWidth(reportResources.fontBold(), 11, 6, value, MAX_WIDTH);
-        yPos -= VALUE_TEXT_Y_OFFSET;
-        div.add(new Paragraph(value).addStyle(reportResources.sidePanelValueStyle().setFontSize(valueFontSize))
-                .setHeight(15)
-                .setFixedPosition(xPos, yPos, MAX_WIDTH)
-                .setFixedLeading(valueFontSize));
-
-        return div;
-    }
-
-    private static float maxPointSizeForWidth(@NotNull PdfFont font, float initialFontSize, float minFontSize, @NotNull String text,
-            float maxWidth)
+    private static float maxPointSizeForWidth(
+            final PDFont font, float initialFontSize, float minFontSize, final String text, float maxWidth)
     {
         float fontIncrement = 0.1F;
-
         float fontSize = initialFontSize;
-        float width = font.getWidth(text, initialFontSize);
-        while(width > maxWidth && fontSize > minFontSize)
+
+        try
         {
-            fontSize -= fontIncrement;
-            width = font.getWidth(text, fontSize);
+            float width = font.getStringWidth(text) / 1000 * fontSize;
+            while(width > maxWidth && fontSize > minFontSize)
+            {
+                fontSize -= fontIncrement;
+                width = font.getStringWidth(text) / 1000 * fontSize;
+            }
+        }
+        catch(IOException e)
+        {
+            // Fall back to initial font size
         }
 
         return fontSize;

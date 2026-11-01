@@ -2,6 +2,15 @@ package com.hartwig.hmftools.common.variant;
 
 import static java.lang.String.format;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.StringJoiner;
+
+import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.bam.ConsensusType;
+
+import org.jetbrains.annotations.Nullable;
+
 import htsjdk.variant.vcf.VCFHeader;
 import htsjdk.variant.vcf.VCFHeaderLine;
 
@@ -53,11 +62,8 @@ public final class SageVcfTags
     public static final String MAP_QUAL_FACTOR = "MQF";
     public static final String MAP_QUAL_FACTOR_DESC = "Map qual heuristic as used in min tumor quality filter";
 
-    public static final String AVG_RAW_BASE_QUAL = "RABQ";
-    public static final String AVG_RAW_BASE_QUAL_DESC = "Average calculated raw base quality in alt reads";
-
-    public static final String AVG_BASE_QUAL = "ABQ";
-    public static final String AVG_BASE_QUAL_DESC = "Average calculated base quality (all,alt)";
+    public static final String AVG_RECALIBRATED_BASE_QUAL = "ARCBQ";
+    public static final String AVG_RECALIBRATED_BASE_QUAL_DESC = "Average recalibrated base quality (all,alt)";
 
     public static final String NEARBY_INDEL_FLAG = "NEARBY_INDEL";
     public static final String NEARBY_INDEL_FLAG_DESC = "Variant has an INDEL overlapping its core";
@@ -65,17 +71,48 @@ public final class SageVcfTags
     public static final String MIN_COORDS_COUNT = "MUC";
     public static final String MIN_COORDS_COUNT_DESC = "Min unique fragment coordinates in alt reads";
 
-    public static final String AVG_READ_EDGE_DISTANCE = "AED";
-    public static final String AVG_READ_EDGE_DISTANCE_DESC = "Average read edge distance [alt,total]";
+    public static final String AVG_EDGE_DISTANCE_PERC = "AED";
+    public static final String AVG_EDGE_DISTANCE_PERC_DESC = "Average edge distance as percent of read length [alt,total]";
 
-    public static final int UMI_TYPE_COUNT = 6;
+    public static final int CONSENSUS_TYPE_COUNT = ConsensusType.values().length;
+    public static final int CONSENSUS_TAG_TYPE_COUNT = CONSENSUS_TYPE_COUNT * 2;
+
+    public static final String READ_STRAND_BIAS = "RSB";
+    public static final String READ_STRAND_BIAS_DESC = "Read strand bias - percentage of forward-orientation reads (ref,alt)";
 
     public static final String TINC_LEVEL = "tincLevel";
 
-    public static final String TINC_RECOVERED_FLAG = "TINC_RECOVERED";
-    public static final String TINC_RECOVERED_DESC = "Variant recovered from germline filters by TINC detection";
-
+    public static final String LPS_DELIM = ";";
     public static final String LIST_SEPARATOR = ",";
+
+    public static List<Integer> localPhaseSetsStringToList(@Nullable final String localPhaseSetStr)
+    {
+        if(localPhaseSetStr == null || localPhaseSetStr.isEmpty())
+        {
+            return null;
+        }
+
+        List<Integer> localPhaseSets = Lists.newArrayList();
+        Arrays.stream(localPhaseSetStr.split(LPS_DELIM)).forEach(x -> localPhaseSets.add(Integer.valueOf(x)));
+        return localPhaseSets;
+    }
+
+    public static String localPhaseSetsStr(@Nullable final List<Integer> localPhaseSets)
+    {
+        if(localPhaseSets == null || localPhaseSets.isEmpty())
+        {
+            return "";
+        }
+
+        if(localPhaseSets.size() == 1)
+        {
+            return String.valueOf(localPhaseSets.get(0));
+        }
+
+        StringJoiner sj = new StringJoiner(LPS_DELIM);
+        localPhaseSets.forEach(x -> sj.add(String.valueOf(x)));
+        return sj.toString();
+    }
 
     public static void writeTincLevel(final VCFHeader vcfHeader, final double tincLevel)
     {

@@ -1,61 +1,91 @@
 package com.hartwig.hmftools.orange.report.components;
 
+import static com.hartwig.hmftools.orange.report.ReportResources.HEADER_ORANGE_HEIGHT;
+
+import java.awt.Color;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 
 import com.hartwig.hmftools.orange.report.ReportResources;
-import com.itextpdf.io.image.ImageDataFactory;
-import com.itextpdf.kernel.pdf.PdfPage;
-import com.itextpdf.kernel.pdf.canvas.PdfCanvas;
-import com.itextpdf.kernel.pdf.xobject.PdfImageXObject;
-import com.itextpdf.layout.Canvas;
-import com.itextpdf.layout.element.Paragraph;
-import com.itextpdf.layout.element.Text;
 
-import org.jetbrains.annotations.NotNull;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 
 public class Header
 {
-    @NotNull
-    private final PdfImageXObject orangeCircosObject;
-    private final ReportResources reportResources;
-    private final boolean addDisclaimer;
+    private final PDImageXObject mCircosImage;
+    private final ReportResources mReportResources;
+    private final boolean mAddDisclaimer;
 
-    public Header(@NotNull URL orangeCircosPath, @NotNull ReportResources reportResources, boolean addDisclaimer)
+    public Header(final URL orangeCircosPath, final ReportResources reportResources, boolean addDisclaimer,
+            final PDDocument document)
     {
-        this.orangeCircosObject = new PdfImageXObject(ImageDataFactory.create(orangeCircosPath));
-        this.reportResources = reportResources;
-        this.addDisclaimer = addDisclaimer;
+        mReportResources = reportResources;
+        mAddDisclaimer = addDisclaimer;
+        try(InputStream imageStream = orangeCircosPath.openStream())
+        {
+            mCircosImage = PDImageXObject.createFromByteArray(document, imageStream.readAllBytes(), "orange_circos.png");
+        }
+        catch(IOException e)
+        {
+            throw new RuntimeException("Failed to load header image", e);
+        }
     }
 
-    public void renderHeader(@NotNull PdfPage page)
+    public void renderHeader(final PDPage page, final PDDocument document)
     {
-        PdfCanvas pdfCanvas = new PdfCanvas(page.getLastContentStream(), page.getResources(), page.getDocument());
-        Canvas canvas = new Canvas(pdfCanvas, page.getDocument(), page.getPageSize());
-
-        pdfCanvas.addXObject(orangeCircosObject, 50, page.getPageSize().getHeight() - 70, 60, false);
-
-        Paragraph title = new Paragraph().add(new Text("O").setFont(reportResources.fontBold())
-                        .setFontSize(11)
-                        .setFontColor(ReportResources.PALETTE_ORANGE_1))
-                .add(new Text("R").setFont(reportResources.fontBold()).setFontSize(11).setFontColor(ReportResources.PALETTE_ORANGE_2))
-                .add(new Text("A").setFont(reportResources.fontBold()).setFontSize(11).setFontColor(ReportResources.PALETTE_ORANGE_3))
-                .add(new Text("N").setFont(reportResources.fontBold()).setFontSize(11).setFontColor(ReportResources.PALETTE_ORANGE_4))
-                .add(new Text("G").setFont(reportResources.fontBold()).setFontSize(11).setFontColor(ReportResources.PALETTE_ORANGE_5))
-                .add(new Text("E").setFont(reportResources.fontBold()).setFontSize(11).setFontColor(ReportResources.PALETTE_ORANGE_6))
-                .add(new Text(" Report").setFont(reportResources.fontBold()).setFontSize(11).setFontColor(ReportResources.PALETTE_BLACK));
-
-        if(addDisclaimer)
+        try(PDPageContentStream cs = new PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true))
         {
-            title = title.add(new Text(" (Research Use Only)").setFont(reportResources.fontBold())
-                    .setFontSize(9)
-                    .setFontColor(ReportResources.PALETTE_BLACK));
+            PDRectangle pageSize = page.getMediaBox();
+            float pageHeight = pageSize.getHeight();
+
+            // Draw the circos image (reuses the single cached PDImageXObject across all pages)
+            float imgScale = (float) HEADER_ORANGE_HEIGHT / mCircosImage.getHeight();
+            float imgWidth = mCircosImage.getWidth() * imgScale;
+            float imgHeight = HEADER_ORANGE_HEIGHT;
+            float orangeImageVerticalPosition = pageHeight - HEADER_ORANGE_HEIGHT - 10;
+            cs.drawImage(mCircosImage, 50, orangeImageVerticalPosition, imgWidth, imgHeight);
+
+            // Draw the "ORANGE Report" title text, each letter in a different orange shade
+            float fontSize = 11;
+            float left = mAddDisclaimer ? 150 : 180;
+            float textY = pageHeight - 40;
+
+            Color[] letterColors = {
+                    ReportResources.PALETTE_ORANGE_1, ReportResources.PALETTE_ORANGE_2,
+                    ReportResources.PALETTE_ORANGE_3, ReportResources.PALETTE_ORANGE_4,
+                    ReportResources.PALETTE_ORANGE_5, ReportResources.PALETTE_ORANGE_6
+            };
+            String[] letters = { "O", "R", "A", "N", "G", "E" };
+
+            cs.beginText();
+            cs.setFont(mReportResources.fontBold(), fontSize);
+            cs.newLineAtOffset(left, textY);
+
+            for(int i = 0; i < letters.length; i++)
+            {
+                cs.setNonStrokingColor(letterColors[i]);
+                cs.showText(letters[i]);
+            }
+
+            cs.setNonStrokingColor(ReportResources.PALETTE_BLACK);
+            cs.showText(" Report");
+
+            if(mAddDisclaimer)
+            {
+                cs.setFont(mReportResources.fontBold(), 9);
+                cs.showText(" (Research Use Only)");
+            }
+
+            cs.endText();
         }
-
-        float left = addDisclaimer ? 150 : 180;
-        float width = addDisclaimer ? 370 : 300;
-
-        canvas.add(title.setFixedPosition(left, page.getPageSize().getHeight() - 40, width));
-
-        pdfCanvas.release();
+        catch(IOException e)
+        {
+            throw new RuntimeException("Failed to render header", e);
+        }
     }
 }

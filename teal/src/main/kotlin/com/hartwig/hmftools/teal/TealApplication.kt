@@ -1,16 +1,14 @@
 package com.hartwig.hmftools.teal
 
+import com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder
 import com.hartwig.hmftools.common.utils.config.ConfigUtils
 import com.hartwig.hmftools.common.utils.file.FileWriterUtils
-import com.hartwig.hmftools.common.utils.config.VersionInfo
 import com.hartwig.hmftools.teal.breakend.BreakEndApp
 import com.hartwig.hmftools.teal.telbam.TelbamApp
 import com.hartwig.hmftools.teal.tellength.SampleType
 import com.hartwig.hmftools.teal.tellength.TelLengthApp
 import org.apache.logging.log4j.LogManager
-import java.time.Duration
-import java.time.Instant
 import kotlin.system.exitProcess
 
 class TealApplication(val params: TealParams)
@@ -25,11 +23,9 @@ class TealApplication(val params: TealParams)
             return 1
         }
 
-        val versionInfo = VersionInfo("teal.version")
-        logger.info("Teal version: {}", versionInfo.version())
         logger.info("starting telomeric analysis")
         logger.info("{}", params)
-        val start = Instant.now()
+        val startTimeMs = System.currentTimeMillis()
 
         val tumorOnly = params.commonParams.tumorOnly()
         val germlineOnly = params.commonParams.referenceOnly()
@@ -69,6 +65,7 @@ class TealApplication(val params: TealParams)
                 val germlineTelLengthApp = TelLengthApp()
                 germlineTelLengthApp.params.sampleId = params.commonParams.referenceSampleId
                 germlineTelLengthApp.params.sampleType = SampleType.ref
+                germlineTelLengthApp.params.sequencingType = params.commonParams.sequenceType
                 germlineTelLengthApp.params.outputFile = params.commonParams.germlineTelLegnthTsvPath()
                 germlineTelLengthApp.params.telbamFile = params.commonParams.germlineTelbamPath()
                 germlineTelLengthApp.params.duplicatePercent = params.germlineDuplicateProportion
@@ -82,6 +79,7 @@ class TealApplication(val params: TealParams)
                 val tumorTelLengthApp = TelLengthApp()
                 tumorTelLengthApp.params.sampleId = params.commonParams.tumorSampleId
                 tumorTelLengthApp.params.sampleType = SampleType.tumor
+                tumorTelLengthApp.params.sequencingType = params.commonParams.sequenceType
                 tumorTelLengthApp.params.outputFile = params.commonParams.tumorTelLengthTsvPath()
                 tumorTelLengthApp.params.telbamFile = params.commonParams.tumorTelbamPath()
                 tumorTelLengthApp.params.germlineTelomereLength = germlineTelomereLength
@@ -105,7 +103,7 @@ class TealApplication(val params: TealParams)
                 breakEndApp.findBreakEnds()
             }
         }
-        catch (e: InterruptedException)
+        catch (_: InterruptedException)
         {
             logger.warn("Teal run interrupted, exiting")
             return 1
@@ -116,9 +114,8 @@ class TealApplication(val params: TealParams)
             return 1
         }
 
-        val finish = Instant.now()
-        val seconds = Duration.between(start, finish).seconds
-        logger.info("Teal run complete, time taken: {}m {}s", seconds / 60, seconds % 60)
+        logger.info("Teal run complete, mins({})", runTimeMinsStr(startTimeMs))
+
         return 0
     }
 

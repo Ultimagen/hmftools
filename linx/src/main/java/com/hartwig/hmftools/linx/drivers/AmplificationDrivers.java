@@ -3,7 +3,8 @@ package com.hartwig.hmftools.linx.drivers;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
-import static com.hartwig.hmftools.common.genome.chromosome.HumanChromosome.isShortArm;
+import static com.hartwig.hmftools.common.genome.chromosome.HumanChromosome.hasShortArm;
+import static com.hartwig.hmftools.common.segmentation.Arm.P;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DEL;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
 import static com.hartwig.hmftools.linx.analysis.SvUtilities.copyNumbersEqual;
@@ -12,7 +13,6 @@ import static com.hartwig.hmftools.linx.analysis.SvUtilities.formatPloidy;
 import static com.hartwig.hmftools.common.linx.DriverEventType.GAIN;
 import static com.hartwig.hmftools.common.linx.DriverEventType.GAIN_ARM;
 import static com.hartwig.hmftools.common.linx.DriverEventType.GAIN_CHR;
-import static com.hartwig.hmftools.common.purple.ChromosomeArm.P_ARM;
 
 import java.util.List;
 import java.util.Map;
@@ -54,7 +54,7 @@ public class AmplificationDrivers
     private void checkChromosomeAmplification(final DriverGeneData dgData)
     {
         // check for an arm or whole chromosome amplified above the sample ploidy
-        final TelomereCentromereCnData tcData = mDataCache.CopyNumberData.getChrTeleCentroData().get(dgData.GeneInfo.Chromosome);
+        TelomereCentromereCnData tcData = mDataCache.CopyNumberData.getChrTeleCentroData().get(dgData.GeneInfo.Chromosome);
 
         if(tcData == null)
             return;
@@ -67,7 +67,7 @@ public class AmplificationDrivers
 
         double samplePloidy = mDataCache.samplePloidy();
 
-        if(!isShortArm(dgData.GeneInfo.Chromosome))
+        if(!hasShortArm(dgData.GeneInfo.Chromosome))
         {
             if(chromosomeCopyNumber / samplePloidy > 2)
             {
@@ -81,14 +81,14 @@ public class AmplificationDrivers
             }
         }
 
-        double centromereCNChange = dgData.Arm == P_ARM ?
+        double centromereCNChange = dgData.ChrArm == P ?
                 min(tcData.CentromerePArm, tcData.TelomerePArm) - tcData.CentromereQArm
                 : min(tcData.CentromereQArm, tcData.TelomereQArm) - tcData.CentromerePArm;
 
         if(centromereCNChange > 0 && !copyNumbersEqual(centromereCNChange, 0))
         {
             LNX_LOGGER.debug("gene({}) AMP gain from arm({}) cnChange across centromere({} -> {} = {})",
-                    dgData.GeneInfo.GeneName, dgData.Arm, formatJcn(tcData.CentromerePArm), formatJcn(tcData.CentromereQArm),
+                    dgData.GeneInfo.GeneName, dgData.ChrArm, formatJcn(tcData.CentromerePArm), formatJcn(tcData.CentromereQArm),
                     formatJcn(centromereCNChange));
 
             DriverGeneEvent event = new DriverGeneEvent(GAIN_ARM);
@@ -166,7 +166,7 @@ public class AmplificationDrivers
 
         double startCopyNumber = startBreakend.getCopyNumber(traverseUp);
 
-        final SvCluster targetCluster = startBreakend.getCluster();
+        SvCluster targetCluster = startBreakend.getCluster();
 
         boolean inSegment = true;
         double segmentStartCopyNumber = startCopyNumber;
@@ -191,7 +191,7 @@ public class AmplificationDrivers
             if((traverseUp && breakend.position() > transStart) || (!traverseUp && breakend.position() < transEnd))
                 break;
 
-            final SvCluster cluster = breakend.getCluster();
+            SvCluster cluster = breakend.getCluster();
 
             if(cluster != targetCluster)
             {
@@ -207,7 +207,7 @@ public class AmplificationDrivers
                     {
                         // take the end copy number from the centromere
                         int prevIndex = index + (traverseUp ? -1 : 1);
-                        final SvBreakend prevBreakend = breakendList.get(prevIndex);
+                        SvBreakend prevBreakend = breakendList.get(prevIndex);
                         endCopyNumber = prevBreakend.getCopyNumber(!traverseUp);
                     }
 
@@ -324,7 +324,7 @@ public class AmplificationDrivers
                 if((traverseUp && breakend.position() > transEnd) || (!traverseUp && breakend.position() < transStart))
                     break;
 
-                final SvCluster cluster = breakend.getCluster();
+                SvCluster cluster = breakend.getCluster();
 
                 if(cluster.hasLinkingLineElements() || processedClusters.contains(cluster))
                     continue;
@@ -374,8 +374,8 @@ public class AmplificationDrivers
 
         for(Map.Entry<SvCluster,DriverAmpData> entry : clusterAmpData.entrySet())
         {
-            final SvCluster cluster = entry.getKey();
-            final DriverAmpData ampData = entry.getValue();
+            SvCluster cluster = entry.getKey();
+            DriverAmpData ampData = entry.getValue();
 
             // take any at least 20% of the largest contributing cluster
             if(ampData.NetCNChange / maxCnChange < MIN_AMP_PERCENT_VS_MAX)

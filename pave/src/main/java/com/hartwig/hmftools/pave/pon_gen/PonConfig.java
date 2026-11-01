@@ -12,6 +12,7 @@ import static com.hartwig.hmftools.common.utils.config.ConfigUtils.addSampleIdFi
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.loadSampleIdsFile;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.addOutputOptions;
 import static com.hartwig.hmftools.common.variant.pon.PonCache.PON_FILE;
+import static com.hartwig.hmftools.pave.PaveConfig.PV_LOGGER;
 
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.region.SpecificRegions;
@@ -27,8 +28,7 @@ public class PonConfig
     public final int QualCutoff;
     public final int MqfCutoff;
     public final int MinSamples;
-    public final boolean ApplyWgsFilters;
-    public final boolean WriteFinal;
+    public final boolean WriteDetailed;
 
     public final int RefSampleGenoptypeIndex;
     public final RefGenomeVersion RefGenVersion;
@@ -42,11 +42,10 @@ public class PonConfig
     private static final String QUAL_CUTOFF = "qual_cutoff";
     private static final String MQF_CUTOFF = "mqf_cutoff";
     private static final String MIN_SAMPLES = "min_samples";
-    private static final String APPLY_WGS_FILTERS = "apply_wgs_filters";
     private static final String REF_SAMPLE_GENOTYPE_INDEX = "ref_sample_index";
     private static final String PARTITION_SIZE = "partition_size";
 
-    public static final String WRITE_FINAL_PON = "write_final";
+    public static final String WRITE_DETAILED = "write_detailed";
     public static final String MANUAL_ENTRIES = "manual_entries";
     public static final String SOMATIC_HOTSPOT = "somatic_hotspots";
     public static final String GERMLINE_HOTSPOT = "germline_hotspots";
@@ -72,10 +71,11 @@ public class PonConfig
 
         RefGenVersion = RefGenomeVersion.from(configBuilder);
 
-        ApplyWgsFilters = configBuilder.hasFlag(APPLY_WGS_FILTERS);
-        WriteFinal = configBuilder.hasFlag(WRITE_FINAL_PON);
+        WriteDetailed = configBuilder.hasFlag(WRITE_DETAILED);
 
-        ExistingPonFilename = configBuilder.getValue(PON_FILE);
+        ExistingPonFilename = configBuilder.getValue(PON_FILE, "");
+
+        PV_LOGGER.info("key config: minSamples({}) cut-offs(qual={} mqf={})", MinSamples, QualCutoff, MqfCutoff);
 
         Threads = parseThreads(configBuilder);
 
@@ -95,8 +95,7 @@ public class PonConfig
         configBuilder.addConfigItem(REF_GENOME_VERSION, true, REF_GENOME_VERSION_CFG_DESC);
         configBuilder.addConfigItem(MANUAL_ENTRIES, false, "Manual PON entries in form Chr:Pos:Ref:Alt separated by ';'");
 
-        configBuilder.addFlag(APPLY_WGS_FILTERS, "Apply WGS filters");
-        configBuilder.addFlag(WRITE_FINAL_PON, "Write final PON without annotations");
+        configBuilder.addFlag(WRITE_DETAILED, "Write final PON without annotations");
 
         configBuilder.addPath(PON_FILE, false, "PON entries");
         ClinvarAnnotation.addConfig(configBuilder);

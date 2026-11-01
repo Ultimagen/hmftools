@@ -3,35 +3,45 @@ package com.hartwig.hmftools.sage.append;
 import static java.lang.Math.max;
 import static java.lang.String.format;
 
+import static com.hartwig.hmftools.common.variant.SageVcfTags.AVG_EDGE_DISTANCE_PERC;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.CONSENSUS_TAG_TYPE_COUNT;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.MIN_COORDS_COUNT;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.UMI_TYPE_COUNTS;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
-import static com.hartwig.hmftools.sage.vcf.CandidateSerialisation.PRE_v3_5_FLANK_EXTENSION_LENGTH;
-import static com.hartwig.hmftools.sage.vcf.VariantContextFactory.checkGenotypeFields;
 import static com.hartwig.hmftools.sage.vcf.VariantContextFactory.createGenotype;
+import static com.hartwig.hmftools.sage.vcf.VcfTags.AVG_SEQ_TECH_BASE_QUAL;
+import static com.hartwig.hmftools.sage.vis.VisFileBuilder.writeToHtmlFile;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.common.sage.FragmentLengthCounts;
-import com.hartwig.hmftools.sage.bqr.BqrRecordMap;
 import com.hartwig.hmftools.sage.candidate.Candidate;
 import com.hartwig.hmftools.sage.common.RefSequence;
+import com.hartwig.hmftools.sage.common.SageVariant;
 import com.hartwig.hmftools.sage.common.SamSlicerFactory;
 import com.hartwig.hmftools.sage.evidence.FragmentLengthWriter;
 import com.hartwig.hmftools.sage.evidence.ReadContextCounter;
 import com.hartwig.hmftools.sage.evidence.ReadContextCounters;
 import com.hartwig.hmftools.sage.phase.AppendVariantPhaser;
 import com.hartwig.hmftools.sage.pipeline.EvidenceStage;
+import com.hartwig.hmftools.sage.quality.BqrRecordMap;
 import com.hartwig.hmftools.sage.quality.MsiJitterCalcs;
 import com.hartwig.hmftools.sage.vcf.CandidateSerialisation;
+import com.hartwig.hmftools.sage.vis.VariantVis;
 
 import htsjdk.samtools.reference.IndexedFastaSequenceFile;
 import htsjdk.variant.variantcontext.Genotype;
+import htsjdk.variant.variantcontext.GenotypeBuilder;
 import htsjdk.variant.variantcontext.VariantContext;
 import htsjdk.variant.variantcontext.VariantContextBuilder;
 
@@ -53,7 +63,8 @@ public class RegionAppendTask implements Callable<Void>
 
     public RegionAppendTask(
             final int taskId, final ChrBaseRegion region, final List<VariantContext> variants,
-            final SageAppendConfig config, final IndexedFastaSequenceFile refGenome, final Map<String, BqrRecordMap> qualityRecalibrationMap,
+            final SageAppendConfig config, final IndexedFastaSequenceFile refGenome,
+            final Map<String, BqrRecordMap> qualityRecalibrationMap,
             final FragmentLengthWriter fragmentLengths, final MsiJitterCalcs msiJitterCalcs)
     {
         mTaskId = taskId;
@@ -78,6 +89,8 @@ public class RegionAppendTask implements Callable<Void>
 
     public List<VariantContext> finalVariants() { return mFinalVariants; }
 
+    private static int READ_CONTEXT_EXTENSION_LENGTH = 50;
+
     @Override
     public Void call()
     {
@@ -85,14 +98,14 @@ public class RegionAppendTask implements Callable<Void>
 
         ChrBaseRegion extendedRegion = new ChrBaseRegion(
                 mRegion.Chromosome,
-                max(1, mRegion.start() - PRE_v3_5_FLANK_EXTENSION_LENGTH),
-                mRegion.end() + PRE_v3_5_FLANK_EXTENSION_LENGTH);
+                max(1, mRegion.start() - READ_CONTEXT_EXTENSION_LENGTH),
+                mRegion.end() + READ_CONTEXT_EXTENSION_LENGTH);
 
         RefSequence refSequence = new RefSequence(extendedRegion, mRefGenome);
 
         List<Candidate> candidates = mOriginalVariants.stream()
                 .map(x -> CandidateSerialisation.toCandidate(x, refSequence))
-                .filter(x -> x != null)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
         if(candidates.size() < mOriginalVariants.size())
@@ -110,6 +123,23 @@ public class RegionAppendTask implements Callable<Void>
         createFinalVariants(readContextCounters, mConfig.Common.ReferenceIds);
 
         mVariantPhaser.populateLocalPhaseSetInfo(candidates, mFinalVariants);
+
+        /* not currently supported
+        if(mConfig.Common.Visualiser.enabled())
+        {
+            for(int candidateIndex = 0; candidateIndex < mOriginalVariants.size(); ++candidateIndex)
+            {
+                Candidate candidate = candidates.get(candidateIndex);
+
+                List<ReadContextCounter> refCounters = readContextCounters.getReadCounters(candidateIndex);
+
+                SageVariant sageVariant = new SageVariant(candidate, refCounters, Lists.newArrayList());
+
+                writeToHtmlFile(
+                        sageVariant, Lists.newArrayList(), mConfig.Common.ReferenceIds, mConfig.Common.Visualiser, null);
+            }
+        }
+        */
 
         if(mConfig.Common.WriteFragmentLengths)
         {
@@ -138,7 +168,7 @@ public class RegionAppendTask implements Callable<Void>
         return null;
     }
 
-    public void createFinalVariants(final ReadContextCounters readContextCounters, final List<String> sampleIds)
+    private void createFinalVariants(final ReadContextCounters readContextCounters, final List<String> sampleIds)
     {
         for(int i = 0; i < mOriginalVariants.size(); ++i)
         {
@@ -155,20 +185,74 @@ public class RegionAppendTask implements Callable<Void>
     {
         VariantContextBuilder builder = new VariantContextBuilder(variantContext);
 
-        List<Genotype> genotypes = Lists.newArrayList();
+        // first gather existing genotype attributes from existing genotypes
+        Set<String> existingGenotypeTags = Sets.newHashSet();
 
         for(Genotype genotype : variantContext.getGenotypes())
         {
-            genotypes.add(checkGenotypeFields(genotype));
+            existingGenotypeTags.addAll(genotype.getExtendedAttributes().keySet());
         }
+
+        Set<String> expectedGenotypeTags = Sets.newHashSet();
+
+        List<Genotype> newGenotypes = Lists.newArrayList();
 
         for(int i = 0; i < readCounters.size(); ++i)
         {
             ReadContextCounter readCounter = readCounters.get(i);
-            Genotype genotype = createGenotype(readCounter, sampleIds.get(i));
-            genotypes.add(genotype);
+            Genotype genotype = createGenotype(readCounter, sampleIds.get(i), existingGenotypeTags);
+            newGenotypes.add(genotype);
+
+            if(expectedGenotypeTags.isEmpty())
+                expectedGenotypeTags.addAll(genotype.getExtendedAttributes().keySet());
         }
 
+        List<Genotype> genotypes = Lists.newArrayList();
+
+        // check that existing genotypes have an entry for all tags
+        for(Genotype genotype : variantContext.getGenotypes())
+        {
+            genotypes.add(checkGenotypeFields(genotype, expectedGenotypeTags));
+        }
+
+        genotypes.addAll(newGenotypes);
+
         return builder.genotypes(genotypes).make();
+    }
+
+    // built in fields: GT:AD:DP, not populated: RAD:RDP
+    // v4.0 attributes: ABQ:    AF:AMBQ:AMMQ:AMQ:         RC_CNT:RC_IPC:RC_JIT:RC_QUAL:RSB:SAC:SB:UMI_CNT
+    // v4.1 attributes: ABQ:AED:AF:AMBQ:AMMQ:AMQ:MUC:RABQ:RC_CNT:RC_IPC:RC_JIT:RC_QUAL:RSB:SAC:SB:UMI_CNT
+
+    // added in v4.1: MIN_COORDS_FLAG, AVG_RAW_BASE_QUAL, AVG_READ_EDGE_DISTANCE
+    // added in v4.2: AVG_EDGE_DISTANCE_PERC, replacing AVG_READ_EDGE_DISTANCE
+
+    private static Genotype checkGenotypeFields(final Genotype genotype, final Set<String> expectedTags)
+    {
+        // checks that existing genotype contain all required fields (eg append is adding any new ones) and if not adds defaults
+        if(expectedTags.stream().allMatch(x -> genotype.getExtendedAttributes().containsKey(x)))
+            return genotype;
+
+        // otherwise add meaningful defaults where possible
+        GenotypeBuilder genotypeBuilder = new GenotypeBuilder(genotype);
+
+        for(String vcfTag : expectedTags)
+        {
+            if(genotype.getExtendedAttributes().containsKey(vcfTag))
+                continue;
+
+            if(vcfTag.equals(MIN_COORDS_COUNT))
+                genotypeBuilder.attribute(MIN_COORDS_COUNT, 0);
+            else if(vcfTag.equals(AVG_SEQ_TECH_BASE_QUAL))
+                genotypeBuilder.attribute(AVG_SEQ_TECH_BASE_QUAL, new int[] { 0, 0 });
+            else if(vcfTag.equals(AVG_EDGE_DISTANCE_PERC))
+                genotypeBuilder.attribute(AVG_EDGE_DISTANCE_PERC, new double[] { 0, 0 });
+            else if(vcfTag.equals(UMI_TYPE_COUNTS))
+                genotypeBuilder.attribute(UMI_TYPE_COUNTS, new int[CONSENSUS_TAG_TYPE_COUNT]);
+            else
+                genotypeBuilder.attribute(vcfTag, "");
+        }
+
+        return genotypeBuilder.make();
     }
 }

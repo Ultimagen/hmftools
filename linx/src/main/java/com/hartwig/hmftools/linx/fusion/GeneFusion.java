@@ -8,8 +8,8 @@ import static com.hartwig.hmftools.common.fusion.FusionCommon.FS_DOWN;
 import static com.hartwig.hmftools.common.fusion.FusionCommon.FS_UP;
 import static com.hartwig.hmftools.common.fusion.FusionCommon.fsIndex;
 import static com.hartwig.hmftools.common.fusion.KnownFusionType.EXON_DEL_DUP;
-import static com.hartwig.hmftools.common.fusion.KnownFusionType.IG_KNOWN_PAIR;
-import static com.hartwig.hmftools.common.fusion.KnownFusionType.IG_PROMISCUOUS;
+import static com.hartwig.hmftools.common.fusion.KnownFusionType.ENHANCER_KNOWN_PAIR;
+import static com.hartwig.hmftools.common.fusion.KnownFusionType.ENHANCER_PROMISCUOUS;
 import static com.hartwig.hmftools.common.fusion.KnownFusionType.KNOWN_PAIR;
 import static com.hartwig.hmftools.common.fusion.KnownFusionType.PROMISCUOUS_3;
 import static com.hartwig.hmftools.common.fusion.KnownFusionType.PROMISCUOUS_5;
@@ -17,10 +17,8 @@ import static com.hartwig.hmftools.common.fusion.KnownFusionType.PROMISCUOUS_BOT
 import static com.hartwig.hmftools.common.linx.FusionPhasedType.INFRAME;
 import static com.hartwig.hmftools.common.linx.FusionPhasedType.OUT_OF_FRAME;
 import static com.hartwig.hmftools.common.linx.FusionPhasedType.SKIPPED_EXONS;
-import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 
 import java.util.List;
-import java.util.StringJoiner;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.fusion.KnownFusionType;
@@ -35,9 +33,9 @@ public class GeneFusion
     private final BreakendTransData[] mTranscripts;
 
     private boolean mIsReportable;
-    private List<FusionReportableReason> mReportableReasons;
-    private boolean mPhaseMatched;
-    private int[] mExonsSkipped;
+    private final List<FusionReportableReason> mReportableReasons;
+    private final boolean mPhaseMatched;
+    private final int[] mExonsSkipped;
     private KnownFusionType mKnownFusionType;
     private final boolean[] mIsPromiscuous;
     private boolean mKnownExons;
@@ -52,13 +50,13 @@ public class GeneFusion
     public GeneFusion(final BreakendTransData upstreamTrans, final BreakendTransData downstreamTrans, boolean phaseMatched)
     {
         mTranscripts = new BreakendTransData[] { upstreamTrans, downstreamTrans };
+        mPhaseMatched = phaseMatched;
 
         mIsReportable = false;
         mReportableReasons = Lists.newArrayList();
+        mExonsSkipped = new int[] { 0, 0 };
         mKnownFusionType = KnownFusionType.NONE;
         mIsPromiscuous = new boolean[] { false, false };
-        mPhaseMatched = phaseMatched;
-        mExonsSkipped = new int[] { 0, 0 };
         mKnownExons = false;
         mHighImpactPromiscuous = false;
         mProteinFeaturesSet = false;
@@ -71,13 +69,13 @@ public class GeneFusion
 
     public String name()
     {
-        if(isIG()) // form like @IGH-MYC
+        if(isEnhancer()) // form like @IGH-MYC
             return mTranscripts[FS_UP].transName() + "_" + mTranscripts[FS_DOWN].geneName();
         else
             return mTranscripts[FS_UP].geneName() + "_" + mTranscripts[FS_DOWN].geneName();
     }
 
-    public int svId(boolean isUpstream) { return mTranscripts[fsIndex(isUpstream)].gene().id(); }
+    public int svId(boolean isUpstream) { return mTranscripts[fsIndex(isUpstream)].breakendGeneData().varId(); }
 
     public BreakendTransData[] transcripts() { return mTranscripts; }
     public BreakendTransData upstreamTrans() { return mTranscripts[FS_UP]; }
@@ -85,7 +83,7 @@ public class GeneFusion
 
     public String geneName(int fs)
     {
-        if(fs == FS_UP && isIG())
+        if(fs == FS_UP && isEnhancer())
             return mTranscripts[FS_UP].transName();
         else
             return mTranscripts[fs].geneName();
@@ -102,17 +100,15 @@ public class GeneFusion
     public void setReportableReasons(final List<FusionReportableReason> reasons) { mReportableReasons.addAll(reasons); }
     public void addReportableReason(final FusionReportableReason reason) { mReportableReasons.add(reason); }
 
-    public String reportableReasonsStr()
+    public List<FusionReportableReason> reportableReasons()
     {
         if(mReportableReasons.isEmpty())
-            return FusionReportableReason.OK.toString();
+            return List.of(FusionReportableReason.OK);
 
         if(mKnownFusionType == KnownFusionType.NONE) // only log the first reason for non-known types
-            return mReportableReasons.get(0).toString();
+            return List.of(mReportableReasons.get(0));
 
-        StringJoiner sj = new StringJoiner(ITEM_DELIM);
-        mReportableReasons.forEach(x -> sj.add(x.toString()));
-        return sj.toString();
+        return mReportableReasons;
     }
 
     public boolean proteinFeaturesSet() { return mProteinFeaturesSet; }
@@ -131,7 +127,7 @@ public class GeneFusion
 
     public KnownFusionType knownType() { return mKnownFusionType; }
     public boolean[] isPromiscuous() { return mIsPromiscuous; }
-    public boolean isIG() { return mKnownFusionType == IG_KNOWN_PAIR || mKnownFusionType == IG_PROMISCUOUS; }
+    public boolean isEnhancer() { return mKnownFusionType == ENHANCER_KNOWN_PAIR || mKnownFusionType == ENHANCER_PROMISCUOUS; }
 
     public void setKnownType(KnownFusionType type) { mKnownFusionType = type; }
 
@@ -150,7 +146,7 @@ public class GeneFusion
         if(!mIsReportable)
             return FusionLikelihoodType.NA;
 
-        if(mKnownFusionType == KNOWN_PAIR || mKnownFusionType == EXON_DEL_DUP || mKnownFusionType == IG_KNOWN_PAIR || mKnownExons)
+        if(mKnownFusionType == KNOWN_PAIR || mKnownFusionType == EXON_DEL_DUP || mKnownFusionType == ENHANCER_KNOWN_PAIR || mKnownExons)
             return FusionLikelihoodType.HIGH;
         else
             return FusionLikelihoodType.LOW;
@@ -164,7 +160,7 @@ public class GeneFusion
 
     public boolean sameChromosome()
     {
-        return mTranscripts[FS_UP].gene().chromosome().equals(mTranscripts[FS_DOWN].gene().chromosome());
+        return mTranscripts[FS_UP].breakendGeneData().chromosome().equals(mTranscripts[FS_DOWN].breakendGeneData().chromosome());
     }
 
     public int distance()
@@ -172,7 +168,7 @@ public class GeneFusion
         if(!sameChromosome())
             return 0;
 
-        return abs(mTranscripts[FS_UP].gene().position() - mTranscripts[FS_DOWN].gene().position());
+        return abs(mTranscripts[FS_UP].breakendGeneData().position() - mTranscripts[FS_DOWN].breakendGeneData().position());
     }
 
     public void setExonsSkipped(int exonsUp, int exonsDown)
@@ -256,17 +252,17 @@ public class GeneFusion
 
     public String svIdPair()
     {
-        return String.format("%d_%d", mTranscripts[FS_UP].gene().id(), mTranscripts[FS_DOWN].gene().id());
+        return String.format("%d_%d", mTranscripts[FS_UP].breakendGeneData().varId(), mTranscripts[FS_DOWN].breakendGeneData().varId());
     }
 
     public final String toString()
     {
         return String.format("%d: %s type(%s) reportable(%s reason=%s) phased(%s) SVs(%d & %d) up(%s:%d:%d exon=%d) down(%s:%d:%d exon=%d)",
                 mId, name(), knownTypeStr(), mIsReportable, mReportableReasons, mPhaseMatched,
-                mTranscripts[FS_UP].gene().id(), mTranscripts[FS_DOWN].gene().id(),
-                mTranscripts[FS_UP].gene().chromosome(), mTranscripts[FS_UP].gene().orientation(),
-                mTranscripts[FS_UP].gene().position(), getFusedExon(true),
-                mTranscripts[FS_DOWN].gene().chromosome(), mTranscripts[FS_DOWN].gene().orientation(),
-                mTranscripts[FS_DOWN].gene().position(), getFusedExon(false));
+                mTranscripts[FS_UP].breakendGeneData().varId(), mTranscripts[FS_DOWN].breakendGeneData().varId(),
+                mTranscripts[FS_UP].breakendGeneData().chromosome(), mTranscripts[FS_UP].breakendGeneData().orientation(),
+                mTranscripts[FS_UP].breakendGeneData().position(), getFusedExon(true),
+                mTranscripts[FS_DOWN].breakendGeneData().chromosome(), mTranscripts[FS_DOWN].breakendGeneData().orientation(),
+                mTranscripts[FS_DOWN].breakendGeneData().position(), getFusedExon(false));
     }
 }

@@ -15,10 +15,12 @@ import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_CHROMOSOME
 import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_POSITION;
 import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_POSITION_END;
 import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_POSITION_START;
+import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedReader;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.geneutils.common.CommonUtils.APP_NAME;
 import static com.hartwig.hmftools.geneutils.common.CommonUtils.GU_LOGGER;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,6 +33,7 @@ import java.util.StringJoiner;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.genome.refgenome.GenomeLiftoverCache;
+import com.hartwig.hmftools.common.genome.refgenome.RefGenomeFunctions;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.region.BaseRegion;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
@@ -46,6 +49,7 @@ public class FileLiftover
     private static final String OUTPUT_FILE = "output_file";
     private static final String SORT_OUTPUT = "sort_output";
     private static final String SOURCE_REF_GENOME_VERSION = "source_ref_genome_version";
+    private static final String WRITE_OLD_COORDS = "write_old_coords";
 
     public FileLiftover(final ConfigBuilder configBuilder)
     {
@@ -56,6 +60,7 @@ public class FileLiftover
         RefGenomeVersion destVersion = sourceVersion.is37() ? V38 : V37;
 
         boolean sortOutput = configBuilder.hasFlag(SORT_OUTPUT);
+        boolean writeOldCoords = configBuilder.hasFlag(WRITE_OLD_COORDS);
 
         GenomeLiftoverCache liftoverCache = new GenomeLiftoverCache(true);
 
@@ -63,11 +68,11 @@ public class FileLiftover
 
         try
         {
-            List<String> lines = Files.readAllLines(Paths.get(inputFile));
+            BufferedReader reader = createBufferedReader(inputFile);
+
             String delim = FileDelimiters.inferFileDelimiter(inputFile);
 
-            String header = lines.get(0);
-            lines.remove(0);
+            String header = reader.readLine();
             Map<String,Integer> fieldIndexMap = FileReaderUtils.createFieldsIndexMap(header, delim);
 
             int chrIndex = getChromosomeFieldIndex(fieldIndexMap);
@@ -90,18 +95,39 @@ public class FileLiftover
 
             BufferedWriter writer = createBufferedWriter(outputFile);
 
-            writer.write(header);
+            if(writeOldCoords)
+            {
+                StringJoiner headerSj = new StringJoiner(delim);
+                headerSj.add(header);
+                headerSj.add("OldChromosome");
+
+                if(posIndex != INVALID_FIELD)
+                    headerSj.add("OldPosition");
+                else
+                    headerSj.add("OldPositionStart").add("OldPositionEnd");
+
+                writer.write(headerSj.toString());
+            }
+            else
+            {
+                writer.write(header);
+            }
+
             writer.newLine();
 
             int failedLiftoverCount = 0;
             String currentChromosome = "";
             List<RegionEntry> currentRegions = null;
 
-            for(String line : lines)
+            String line = null;
+
+            while((line = reader.readLine()) != null)
             {
                 String[] values = line.split(delim, -1);
 
                 String chromosome = values[chrIndex];
+
+                chromosome = sourceVersion.versionedChromosome(chromosome);
 
                 if(!currentChromosome.equals(chromosome))
                 {
@@ -188,6 +214,17 @@ public class FileLiftover
                     }
                 }
 
+                if(writeOldCoords)
+                {
+                    sj.add(chromosome);
+                    sj.add(String.valueOf(origPosStart));
+
+                    if(posEndIndex != INVALID_FIELD)
+                    {
+                        sj.add(String.valueOf(origPosEnd));
+                    }
+                }
+
                 if(liftoverOk)
                 {
                     if(sortOutput)
@@ -263,6 +300,7 @@ public class FileLiftover
         configBuilder.addConfigItem(SOURCE_REF_GENOME_VERSION, true, "Source ref genome version");
         configBuilder.addConfigItem(OUTPUT_FILE, true, "Output filename");
         configBuilder.addFlag(SORT_OUTPUT, "Sort output by chromosome and position");
+        configBuilder.addFlag(WRITE_OLD_COORDS, "Sort output by chromosome and position");
         addLoggingOptions(configBuilder);
 
         configBuilder.checkAndParseCommandLine(args);

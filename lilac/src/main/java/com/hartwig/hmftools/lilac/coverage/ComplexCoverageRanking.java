@@ -15,7 +15,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
@@ -39,15 +39,17 @@ public class ComplexCoverageRanking
 {
     private final double mMaxScoreDifference;
     private final ReferenceData mRefData;
+    private final int mGeneCount;
 
-    public ComplexCoverageRanking(double maxScoreDifference, final ReferenceData refData)
+    public ComplexCoverageRanking(double maxScoreDifference, final ReferenceData refData, int geneCount)
     {
         mMaxScoreDifference = maxScoreDifference;
         mRefData = refData;
+        mGeneCount = geneCount;
     }
 
     public List<ComplexCoverage> rankCandidates(
-            final List<ComplexCoverage> complexes, final List<HlaAllele> recoveredAlleles, final Collection<HlaSequenceLoci> sequences)
+            final List<ComplexCoverage> complexes, final Set<HlaAllele> recoveredAlleles, final Collection<HlaSequenceLoci> sequences)
     {
         if(complexes.isEmpty())
             return complexes;
@@ -69,8 +71,10 @@ public class ComplexCoverageRanking
 
         // initial cull before sort
         double baseThreshold = topScore - 0.25 * topCoverage;
-        List<ComplexCoverage> candidateResults = complexes.stream().filter(x -> x.getScore() >= baseThreshold).collect(Collectors.toList());
-        Collections.sort(candidateResults, new ComplexCoverageSorter());
+        List<ComplexCoverage> candidateResults = complexes.stream()
+                .filter(x -> x.getScore() >= baseThreshold)
+                .sorted(new ComplexCoverageSorter())
+                .toList();
 
         List<ComplexCoverage> results = Lists.newArrayList();
 
@@ -90,7 +94,7 @@ public class ComplexCoverageRanking
     }
 
     private void calcScore(
-            final ComplexCoverage complexCoverage, final List<HlaAllele> recoveredAlleles, final Collection<HlaSequenceLoci> sequences)
+            final ComplexCoverage complexCoverage, final Set<HlaAllele> recoveredAlleles, final Collection<HlaSequenceLoci> sequences)
     {
         calcCohortFrequency(complexCoverage);
         calcRecoveryPenalty(complexCoverage, recoveredAlleles);
@@ -98,7 +102,7 @@ public class ComplexCoverageRanking
         calcComplexScore(complexCoverage);
     }
 
-    private static void calcRecoveryPenalty(final ComplexCoverage complexCoverage, final List<HlaAllele> recoveredAlleles)
+    private static void calcRecoveryPenalty(final ComplexCoverage complexCoverage, final Set<HlaAllele> recoveredAlleles)
     {
         int recoveredCount = (int) complexCoverage.getAlleles().stream()
                 .filter(recoveredAlleles::contains)
@@ -152,9 +156,11 @@ public class ComplexCoverageRanking
     {
         int totalCoverage = complexCoverage.TotalCoverage;
 
-        int complexity = solutionComplexity(mRefData.ExonSequencesLookup, complexCoverage);
+        double penaltyFactor = 3.0 / mGeneCount;
+
+        double complexity = penaltyFactor * solutionComplexity(mRefData.ExonSequencesLookup, complexCoverage);
         double complexityPenalty = -complexity * SOLUTION_COMPLEXITY_PENALTY_WEIGHT * totalCoverage;
-        double cohortFrequencyPenalty = complexCoverage.cohortFrequencyTotal() * FREQUENCY_SCORE_PENALTY * totalCoverage;
+        double cohortFrequencyPenalty = penaltyFactor * complexCoverage.cohortFrequencyTotal() * FREQUENCY_SCORE_PENALTY * totalCoverage;
         double score = totalCoverage
                 + cohortFrequencyPenalty
                 + complexityPenalty

@@ -27,6 +27,7 @@ public class SageVariant
 
     private int mMixedImpact;
     private boolean mNearIndel;
+    private boolean mNearMultiBaseIndel;
 
     public SageVariant(
             final Candidate candidate,  final List<ReadContextCounter> referenceCounters, final List<ReadContextCounter> tumorReadCounters)
@@ -36,6 +37,7 @@ public class SageVariant
         mTumorReadCounters = tumorReadCounters;
         mFilters = Sets.newHashSet();
         mNearIndel = false;
+        mNearMultiBaseIndel = false;
     }
 
     public Candidate candidate()
@@ -162,6 +164,9 @@ public class SageVariant
     public void setNearIndel() { mNearIndel = true; }
     public boolean nearIndel() { return mNearIndel; }
 
+    public void setNearMultiBaseIndel() { mNearMultiBaseIndel = true; }
+    public boolean nearMultiBaseIndel() { return mNearMultiBaseIndel; }
+
     public SimpleVariant variant() { return mCandidate.variant(); }
 
     public VariantTier tier() { return mCandidate.tier(); }
@@ -189,7 +194,13 @@ public class SageVariant
     public boolean isDelete() { return variant().ref().length() > variant().alt().length(); }
     public boolean isInsert() { return variant().ref().length() < variant().alt().length(); }
 
-    public boolean isLongInsert() { return isLongInsert(mCandidate.variant()); }
+    public static String indelAltBases(final SimpleVariant variant)
+    {
+        if(!variant.isIndel())
+            return "";
+
+        return variant.isInsert() ? variant.Alt.substring(1) : variant.Ref.substring(1);
+    }
 
     public static boolean isLongInsert(final SimpleVariant variant)
     {

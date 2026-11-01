@@ -1,6 +1,8 @@
 package com.hartwig.hmftools.amber;
 
 import static com.hartwig.hmftools.amber.AmberConfig.AMB_LOGGER;
+import static com.hartwig.hmftools.amber.AmberConstants.CONTAMINATON_MIN_NORMAL_READ_DEPTH;
+import static com.hartwig.hmftools.amber.AmberUtils.aboveQualFilter;
 
 import java.util.Collections;
 import java.util.List;
@@ -10,6 +12,7 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.hartwig.hmftools.amber.contamination.TumorContamination;
 import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 
@@ -18,31 +21,35 @@ import htsjdk.samtools.SamReaderFactory;
 public class TumorAnalysis
 {
     private final AmberConfig mConfig;
-    private ListMultimap<Chromosome, TumorBAF> mBafs;
-    private ListMultimap<Chromosome, TumorContamination> mContamination;
+    private final ListMultimap<Chromosome, TumorBAF> mBafs;
+    private final List<TumorContamination> mContaminationSites;
 
-    public ListMultimap<Chromosome, TumorBAF> getBafs() { return mBafs; }
-    public ListMultimap<Chromosome, TumorContamination> getContamination() { return mContamination; }
+    public ListMultimap<Chromosome, TumorBAF> chrBafMap()
+    {
+        return mBafs;
+    }
+    public List<TumorContamination> contaminationSites() { return mContaminationSites; }
 
     public TumorAnalysis(
             final AmberConfig config, SamReaderFactory readerFactory,
             final ListMultimap<Chromosome, PositionEvidence> germlineHetLoci,
             final ListMultimap<Chromosome, PositionEvidence> germlineHomLoci)
-            throws InterruptedException
     {
         mConfig = config;
+        mContaminationSites = Lists.newArrayList();
+        mBafs = ArrayListMultimap.create();
 
         tumorBAFAndContamination(readerFactory, germlineHetLoci, germlineHomLoci);
     }
 
-    private void tumorBAFAndContamination(final SamReaderFactory readerFactory,
-            final ListMultimap<Chromosome, PositionEvidence> germlineHetLoci,
-            final ListMultimap<Chromosome, PositionEvidence> germlineHomLoci) throws InterruptedException
+    private void tumorBAFAndContamination(
+            final SamReaderFactory readerFactory, final ListMultimap<Chromosome, PositionEvidence> germlineHetLoci,
+            final ListMultimap<Chromosome, PositionEvidence> germlineHomLoci)
     {
         AMB_LOGGER.info("processing tumor germline heterozygous({}) and homozygous({}) sites",
                 germlineHetLoci.values().size(), germlineHomLoci.size());
 
-        Map<Chromosome,List<PositionEvidence>> chrPositionEvidence = Maps.newHashMap();
+        Map<Chromosome, List<PositionEvidence>> chrPositionEvidence = Maps.newHashMap();
         Map<PositionEvidence, PositionEvidence> contaminationBafMap = Maps.newHashMap();
         List<TumorBAF> tumorBAFs = Lists.newArrayList();
 
@@ -90,21 +97,22 @@ public class TumorAnalysis
         BamEvidenceReader bamEvidenceReader = new BamEvidenceReader(mConfig);
         bamEvidenceReader.processBam(mConfig.TumorBam, readerFactory, chrPositionEvidence);
 
-        mBafs = ArrayListMultimap.create();
-
-        tumorBAFs.stream().filter(x -> x.TumorEvidence.IndelCount == 0).forEach(x -> mBafs.put(HumanChromosome.fromString(x.chromosome()), x));
-
-        mContamination = ArrayListMultimap.create();
+        tumorBAFs.stream()
+                .filter(x -> x.TumorEvidence.IndelCount == 0)
+                .forEach(x -> mBafs.put(HumanChromosome.fromString(x.chromosome()), x));
 
         for(Map.Entry<PositionEvidence, PositionEvidence> entry : contaminationBafMap.entrySet())
         {
             PositionEvidence normal = entry.getKey();
+
+            if(normal.RefSupport <= CONTAMINATON_MIN_NORMAL_READ_DEPTH)
+                continue;
+
             PositionEvidence tumor = entry.getValue();
 
-            if(tumor.AltSupport > 0)
+            if(tumor.AltSupport > 0 && aboveQualFilter(tumor))
             {
-                mContamination.put(
-                        HumanChromosome.fromString(normal.chromosome()),
+                mContaminationSites.add(
                         new TumorContamination(normal.Chromosome, normal.Position, normal.toBaseDepthData(), tumor.toBaseDepthData()));
             }
         }

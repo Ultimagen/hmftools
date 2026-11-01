@@ -4,11 +4,17 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.readToString;
+import static com.hartwig.hmftools.sage.SageConfig.SEQUENCING_TYPE;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
+import static com.hartwig.hmftools.sage.SageConfig.isIllumina;
+import static com.hartwig.hmftools.sage.SageConfig.isUltima;
 import static com.hartwig.hmftools.sage.SageConstants.MAX_REPEAT_LENGTH;
 import static com.hartwig.hmftools.sage.SageConstants.MIN_CORE_DISTANCE;
 import static com.hartwig.hmftools.sage.SageConstants.MIN_REPEAT_COUNT;
+import static com.hartwig.hmftools.common.sequencing.UltimaBamUtils.ULTIMA_MAX_HP_LEN;
 import static com.hartwig.hmftools.sage.common.SageVariant.isLongInsert;
+import static com.hartwig.hmftools.sage.seqtech.UltimaCoreExtender.extendUltimaCore;
+import static com.hartwig.hmftools.sage.seqtech.UltimaUtils.hasLongHomopolymerInRange;
 
 import static htsjdk.samtools.CigarOperator.I;
 import static htsjdk.samtools.CigarOperator.M;
@@ -17,10 +23,14 @@ import static htsjdk.samtools.CigarOperator.S;
 import java.util.Collections;
 import java.util.List;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.bam.CigarUtils;
+import com.hartwig.hmftools.common.redux.BaseQualAdjustment;
 import com.hartwig.hmftools.common.utils.Arrays;
 import com.hartwig.hmftools.common.variant.SimpleVariant;
-import com.hartwig.hmftools.sage.quality.ArtefactContext;
+import com.hartwig.hmftools.sage.SageConfig;
+import com.hartwig.hmftools.sage.seqtech.IlluminaArtefactContext;
 
 import htsjdk.samtools.CigarElement;
 import htsjdk.samtools.SAMRecord;
@@ -45,7 +55,11 @@ public class VariantReadContextBuilder
                 return null;
 
             // enforce full flanks
-            if(readContext.leftFlankLength() < mFlankSize || readContext.rightFlankLength() < mFlankSize)
+            int minFlankLength = isUltima() && SageConfig.AppendMode ? 1 : mFlankSize;
+            if(readContext.leftFlankLength() < minFlankLength || readContext.rightFlankLength() < minFlankLength)
+                return null;
+
+            if(!aboveMinBaseQual(readContext, read, varReadIndex))
                 return null;
 
             // enforce ref base padding for trinucleotide generation
@@ -58,13 +72,16 @@ public class VariantReadContextBuilder
                 byte[] extendedRefBases = refSequence.baseRange(
                         readContext.CorePositionStart - readContext.leftFlankLength(),
                         readContext.CorePositionEnd + readContext.rightFlankLength() + 1);
-                readContext.setExtendedRefBases(extendedRefBases);
+
+                if(extendedRefBases != null)
+                    readContext.setExtendedRefBases(extendedRefBases);
             }
 
             // set max ref repeat for use in MSI calcs and VCF output
             setMaxRefRepeat(readContext);
 
-            readContext.setArtefactContext(ArtefactContext.buildContext(readContext));
+            if(isIllumina())
+                readContext.setArtefactContext(IlluminaArtefactContext.buildContext(readContext));
 
             return readContext;
         }
@@ -78,7 +95,8 @@ public class VariantReadContextBuilder
         }
     }
 
-    private VariantReadContext buildContext(
+    @VisibleForTesting
+    public VariantReadContext buildContext(
             final SimpleVariant variant, final SAMRecord read, int varIndexInRead, final RefSequence refSequence)
     {
         /* Routine:
@@ -98,8 +116,11 @@ public class VariantReadContextBuilder
         {
             readCoreStart = varIndexInRead - MIN_CORE_DISTANCE + 1;
             readCoreEnd = varIndexInRead + (variant.isInsert() ? variant.indelLength() + 1 : 1) + MIN_CORE_DISTANCE - 1;
-            int refBaseLength = read.getReadBases().length - varIndexInRead;
+            int refBaseLength = read.getReadBases().length - varIndexInRead + (variant.isDelete() ? variant.indelLengthAbs() : 0);
             byte[] homologyRefBases = refSequence.baseRange(variant.position(), variant.position() + refBaseLength);
+
+            if(homologyRefBases == null)
+                return null;
 
             softClipReadAdjustment = checkIndelSoftClipAdjustment(read, variant, varIndexInRead);
 
@@ -117,6 +138,12 @@ public class VariantReadContextBuilder
                 homology = refHomology;
             if(homology != null)
                 readCoreEnd += homology.Length;
+
+            if(readCoreEnd + mFlankSize >= read.getReadBases().length && homology != null && SageConfig.AppendMode && isLongInsert(variant))
+            {
+                // most likely a long insert aligned from softclip - assume the old core is correct
+                readCoreEnd = read.getReadBases().length - mFlankSize - 1;
+            }
         }
         else
         {
@@ -149,6 +176,37 @@ public class VariantReadContextBuilder
         if(readCigarInfo == null || !readCigarInfo.isValid())
             return null;
 
+        // for ultima we expand core so that homopolymers are not cut off in the read or the ref
+        if(isUltima())
+        {
+            // long inserts with S elements won't work properly in append mode with core extension
+            boolean skippableLongInsert = SageConfig.AppendMode && isLongInsert(variant);
+
+            ReadCigarInfo newReadCigarInfo = extendUltimaCore(
+                    read.getReadBases(), refSequence,
+                    softClipReadAdjustment != null ? softClipReadAdjustment.AlignmentStart : read.getAlignmentStart(),
+                    softClipReadAdjustment != null ? softClipReadAdjustment.ConvertedCigar : read.getCigar().getCigarElements(),
+                    readCigarInfo, mFlankSize, SageConfig.AppendMode);
+
+            if(newReadCigarInfo != null)
+            {
+                readCigarInfo = newReadCigarInfo;
+
+                int maxPosStart = max(readCigarInfo.FlankPositionStart, readCigarInfo.ReadAlignmentStart);
+
+                readCoreStart = readCigarInfo.FlankIndexStart + CigarUtils.getReadIndexFromPosition(
+                        maxPosStart, readCigarInfo.Cigar, readCigarInfo.CorePositionStart, false, true);
+
+                readCoreEnd = readCigarInfo.FlankIndexStart + CigarUtils.getReadIndexFromPosition(
+                        maxPosStart, readCigarInfo.Cigar, readCigarInfo.CorePositionEnd, false, true);
+            }
+            else
+            {
+                if(!skippableLongInsert)
+                    return null;
+            }
+        }
+
         int readPositionStart = readCigarInfo.ReadAlignmentStart; // may have been adjusted
         readFlankStart = readCigarInfo.FlankIndexStart;
         readFlankEnd = readCigarInfo.FlankIndexEnd;
@@ -169,8 +227,14 @@ public class VariantReadContextBuilder
         int readVarIndex = varIndexInRead - readContextOffset;
         int coreIndexEnd = readCoreEnd - readContextOffset;
 
+        if(isUltima() && hasLongHomopolymerInRange(readCoreStart, readCoreEnd, ULTIMA_MAX_HP_LEN - 1, read))
+            return null;
+
         // ref bases are the core width around the variant's position
         byte[] refBases = refSequence.baseRange(corePositionStart, corePositionEnd);
+
+        if(refBases == null) // can occur at the end of a chromosome / contig (esp MT)
+            return null;
 
         RepeatInfo maxRepeat = null;
         List<RepeatInfo> allRepeats;
@@ -197,6 +261,24 @@ public class VariantReadContextBuilder
         return new VariantReadContext(
                 variant, alignmentStart, alignmentEnd, refBases, contextReadBases, readCigarInfo.Cigar, coreIndexStart,
                 readVarIndex, coreIndexEnd, homology, maxRepeat, allRepeats, corePositionStart, corePositionEnd);
+    }
+
+    private static boolean aboveMinBaseQual(final VariantReadContext readContext, final SAMRecord read, final int varReadIndex)
+    {
+        int indexStart = varReadIndex - readContext.leftCoreLength() - readContext.leftFlankLength();
+        int indexEnd = varReadIndex + readContext.rightCoreLength() + readContext.rightFlankLength();
+
+        if(indexStart < 0 || indexEnd >= read.getBaseQualities().length)
+            return false;
+
+        for(int i = indexStart; i <= indexEnd; ++i)
+        {
+            if(BaseQualAdjustment.isUncertainBaseQual(read.getBaseQualities()[i])
+            || BaseQualAdjustment.isMediumBaseQual(read.getBaseQualities()[i], SEQUENCING_TYPE))
+                return false;
+        }
+
+        return true;
     }
 
     private class SoftClipReadAdjustment

@@ -1,5 +1,8 @@
 package com.hartwig.hmftools.cider
 
+import com.hartwig.hmftools.cider.CiderUtils.getAdapterDnaTrim
+import com.hartwig.hmftools.cider.genes.VJ
+import com.hartwig.hmftools.cider.genes.VJGeneType
 import com.hartwig.hmftools.cider.layout.LayoutForest
 import com.hartwig.hmftools.cider.layout.ReadLayout
 import com.hartwig.hmftools.common.utils.Doubles
@@ -121,18 +124,20 @@ class VJReadLayoutBuilder(private val trimBases: Int, private val minBaseQuality
         return layout.reads.map({ read: ReadLayout.Read -> toReadCandidate(read)})
     }
 
-    // get the anchor boundary position for this layout read
-    fun getAnchorBoundaryPosition(read: ReadLayout.Read) : Int
-    {
-        return read.alignedPosition
-    }
-
     // apply trim bases and polyG trimming
     private fun determineReadSlice(read: SAMRecord, useReverseComplement: Boolean) : ReadSlice?
     {
-        // work out the slice start and end
-        var sliceStart: Int = trimBases
-        var sliceEnd: Int = read.readLength - trimBases
+        var sliceStart = 0
+        var sliceEnd = read.readLength
+
+        // Trim off any sequencing adapter bases.
+        val adapterTrim = getAdapterDnaTrim(read)
+        sliceStart += adapterTrim.first
+        sliceEnd -= adapterTrim.second
+
+        // Apply constant trimming.
+        sliceStart += trimBases
+        sliceEnd -= trimBases
 
         // now we also want to try poly G tail trimming
         // we want to work out there the tail is.
@@ -160,6 +165,12 @@ class VJReadLayoutBuilder(private val trimBases: Int, private val minBaseQuality
             }
         }
 
+        if ((sliceEnd - sliceStart) < 5)
+        {
+            // if too little left don't bother
+            return null
+        }
+
         // the above logic is before reverse complement, the following logic is after
         // so we swap the start / end here
         if (useReverseComplement)
@@ -167,12 +178,6 @@ class VJReadLayoutBuilder(private val trimBases: Int, private val minBaseQuality
             val sliceStartTmp = sliceStart
             sliceStart = read.readLength - sliceEnd
             sliceEnd = read.readLength - sliceStartTmp
-        }
-
-        if ((sliceEnd - sliceStart) < 5)
-        {
-            // if too little left don't bother
-            return null
         }
 
         return ReadSlice(read, useReverseComplement, sliceStart, sliceEnd)
@@ -244,6 +249,16 @@ class VJReadLayoutBuilder(private val trimBases: Int, private val minBaseQuality
             }
         }
 
+        // always build from left to right
+        layoutReads.sortWith(
+            Collections.reverseOrder(
+                Comparator.comparingInt { r: ReadLayout.Read -> r.alignedPosition }
+                    .thenComparingDouble { r: ReadLayout.Read -> r.baseQualities.average() } // handle the highest quality ones first
+                    .thenComparingInt { r: ReadLayout.Read -> r.alignedPosition + r.sequence.size }
+                    .thenComparing { r: ReadLayout.Read -> r.readKey.readName } // lastly we use read Id just in case
+                    .thenComparing { r: ReadLayout.Read -> !r.readKey.firstOfPair }
+            ))
+
         // here is the high qual reads
         numHighQualReads = layoutReads.size
 
@@ -255,7 +270,7 @@ class VJReadLayoutBuilder(private val trimBases: Int, private val minBaseQuality
             sLogger.printf(Level.INFO, "building %s layouts, read count(%d) > limit(%d), downsampling(frac to keep: %.3f)",
                 geneType, layoutReads.size, maxReadCountPerGene, fractionToKeep)
 
-            // we always use the same seed to make it predictable
+            // we always use the same seed to make it deterministic
             val random = Random(0)
 
             val downSampledReads = layoutReads.filter { (random.nextDouble() < fractionToKeep) }
@@ -270,15 +285,6 @@ class VJReadLayoutBuilder(private val trimBases: Int, private val minBaseQuality
         }
 
         sLogger.info("building {} layouts from {} reads", geneType, layoutReads.size)
-
-        // always build from left to right
-        layoutReads.sortWith(
-            Collections.reverseOrder(
-                Comparator.comparingInt({ r: ReadLayout.Read -> r.alignedPosition })
-                    .thenComparingDouble({ r: ReadLayout.Read -> r.baseQualities.average() }) // handle the highest quality ones first
-                    .thenComparingInt({ r: ReadLayout.Read -> r.alignedPosition + r.sequence.size })
-                    .thenComparing({ r: ReadLayout.Read -> r.readKey.readName }) // lastly we use read Id just in case
-            ))
 
         val layoutForest = LayoutForest(minBaseQuality.toByte(), minMatchedBases, CiderConstants.LAYOUT_MIN_SUPPORT_TO_SEAL_NODE)
 

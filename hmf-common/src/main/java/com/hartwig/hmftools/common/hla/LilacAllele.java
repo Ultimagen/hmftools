@@ -1,10 +1,13 @@
 package com.hartwig.hmftools.common.hla;
 
+import static com.hartwig.hmftools.common.hla.HlaCommon.MHC_CLASS_I;
+import static com.hartwig.hmftools.common.hla.LilacQcData.FLD_GENES;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.checkFileExtensionRename;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.inferFileDelimiter;
 import static com.hartwig.hmftools.common.utils.file.FileReaderUtils.createFieldsIndexMap;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,6 +25,8 @@ import org.jetbrains.annotations.Nullable;
 @Value.Style(passAnnotations = { NotNull.class, Nullable.class })
 public abstract class LilacAllele
 {
+    public abstract String genes();
+
     public abstract String allele();
 
     public abstract int refFragments();
@@ -82,16 +87,22 @@ public abstract class LilacAllele
         final String header = lines.get(0);
         lines.remove(0);
 
-        final Map<String, Integer> fieldsIndexMap = createFieldsIndexMap(header, delim);
+        Map<String, Integer> fieldsIndexMap = createFieldsIndexMap(header, delim);
+
+        Integer genesIndex = fieldsIndexMap.get(FLD_GENES);
 
         List<LilacAllele> alleles = Lists.newArrayList();
 
-        for(int i = 0; i < lines.size(); ++i)
+        for(String line : lines)
         {
-            String[] values = lines.get(i).split(delim);
+            String[] values = line.split(delim);
+
+            String allele = values[fieldsIndexMap.get(FLD_ALLELE)];
+            String genes = genesIndex != null ? values[genesIndex] : MHC_CLASS_I;
 
             alleles.add(ImmutableLilacAllele.builder()
-                    .allele(values[fieldsIndexMap.get(FLD_ALLELE)])
+                    .genes(genes)
+                    .allele(allele)
                     .refFragments(Integer.parseInt(values[fieldsIndexMap.get(FLD_REF_TOTAL)]))
                     .refUnique(Integer.parseInt(values[fieldsIndexMap.get(FLD_REF_UNIQUE)]))
                     .refShared(Integer.parseInt(values[fieldsIndexMap.get(FLD_REF_SHARED)]))
@@ -116,15 +127,19 @@ public abstract class LilacAllele
         return alleles;
     }
 
-    public static void write(final String filename, List<LilacAllele> alleles) throws IOException
+    public static void write(final BufferedWriter writer, final List<LilacAllele> alleles) throws IOException
     {
-        Files.write(new File(filename).toPath(), toLines(alleles));
+        List<String> lines = Lists.newArrayList(toLines(alleles));
+        for(String line : lines)
+        {
+            writer.write(line);
+            writer.newLine();
+        }
     }
 
     private static List<String> toLines(final List<LilacAllele> alleles)
     {
         final List<String> lines = Lists.newArrayList();
-        lines.add(header());
         alleles.stream().map(x -> toString(x)).forEach(lines::add);
         return lines;
     }
@@ -152,6 +167,7 @@ public abstract class LilacAllele
     public static String header()
     {
         return new StringJoiner(TSV_DELIM)
+                .add(FLD_GENES)
                 .add(FLD_ALLELE)
                 .add(FLD_REF_TOTAL)
                 .add(FLD_REF_UNIQUE)
@@ -177,6 +193,7 @@ public abstract class LilacAllele
     private static String toString(final LilacAllele allele)
     {
         return new StringJoiner(TSV_DELIM)
+                .add(allele.genes())
                 .add(allele.allele())
                 .add(String.valueOf(allele.refFragments()))
                 .add(String.valueOf(allele.refUnique()))

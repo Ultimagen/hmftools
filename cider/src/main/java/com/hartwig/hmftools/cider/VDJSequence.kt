@@ -1,8 +1,12 @@
 package com.hartwig.hmftools.cider
 
-import com.google.common.collect.ImmutableCollection
+import com.hartwig.hmftools.cider.genes.VJ
+import com.hartwig.hmftools.cider.genes.VJAnchorTemplate
+import com.hartwig.hmftools.cider.genes.VJGeneType
 import com.hartwig.hmftools.cider.layout.ReadLayout
 import com.hartwig.hmftools.common.codon.Codons
+import kotlin.math.max
+import kotlin.math.min
 
 interface VJAnchor
 {
@@ -18,7 +22,7 @@ data class VJAnchorByBlosum(
     override val geneType: VJGeneType,
     override val anchorBoundary: Int,
     override val templateAnchorSeq: String,
-    val templateGenes: ImmutableCollection<VJAnchorTemplate>,
+    val templateGenes: List<VJAnchorTemplate>,
     val similarityScore: Int
 ) : VJAnchor
 {
@@ -30,7 +34,7 @@ data class VJAnchorByBlosum(
         if (geneTypeList.size != 1)
             throw IllegalStateException("VJAnchorByBlosum: gene types(${geneTypeList}) size != 1")
         if (geneTypeList[0] != geneType)
-            throw IllegalStateException("VJAnchorByBlosum: gene type mismatch: ${geneType} != ${geneTypeList[0]}")
+            throw IllegalStateException("VJAnchorByBlosum: gene type mismatch: $geneType != ${geneTypeList[0]}")
     }
 }
 
@@ -42,8 +46,6 @@ data class VJAnchorByReadMatch(
     override val templateAnchorSeq: String,
     val numReads: Int
 ) : VJAnchor
-{
-}
 
 // NOTE: vAnchorBoundary could be smaller than jAnchorBoundary
 // if the anchors overlap
@@ -70,11 +72,6 @@ class VDJSequence(
     val sequence: String get()
     {
         return layout.consensusSequenceString().substring(layoutSliceStart, layoutSliceEnd)
-    }
-
-    val isFullyRearranged: Boolean get()
-    {
-        return vAnchor != null && jAnchor != null
     }
 
     val vAnchorBoundary: Int? get()
@@ -154,20 +151,6 @@ class VDJSequence(
         return if (jAnchor == null) null else sequence.substring(jAnchorBoundary!!)
     }
 
-    /*
-    val vAnchorAA: String get()
-    {
-        val vAnchorSeq = vAnchorSequence
-
-        // codon align
-        return Codons.aminoAcidFromBases(vAnchorSeq.drop(Math.floorMod(vAnchorSeq.length, 3)))
-    }
-
-    val jAnchorAA: String get()
-    {
-        return Codons.aminoAcidFromBases(jAnchorSequence)
-    }*/
-
     // does not include the C and W
     val cdr3SequenceShort: String get()
     {
@@ -188,7 +171,7 @@ class VDJSequence(
     {
         if (vAnchorBoundary != null)
         {
-            return Math.max(vAnchorBoundary!! - 3, 0)
+            return max(vAnchorBoundary!! - 3, 0)
         }
         if (jAnchorBoundary != null)
         {
@@ -202,7 +185,7 @@ class VDJSequence(
     val cdr3End: Int get()
     {
         // protect against case where v anchor boundary is actually > j anchor boundary
-        return Math.max(Math.min((jAnchorBoundary ?: return length) + 3, length), cdr3Start)
+        return max(min((jAnchorBoundary ?: return length) + 3, length), cdr3Start)
     }
 
     val cdr3Sequence: String get()
@@ -213,11 +196,6 @@ class VDJSequence(
     val supportCounts: IntArray get()
     {
         return layout.highQualSupportCounts().sliceArray(layoutSliceStart until layoutSliceEnd)
-    }
-
-    val supportString: String get()
-    {
-        return CiderUtils.countsToString(supportCounts)
     }
 
     val isInFrame: Boolean get()

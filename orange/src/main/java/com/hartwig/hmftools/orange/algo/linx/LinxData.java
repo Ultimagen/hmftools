@@ -1,0 +1,59 @@
+package com.hartwig.hmftools.orange.algo.linx;
+
+import java.util.List;
+import java.util.Map;
+
+import com.hartwig.hmftools.common.driver.DriverCatalog;
+import com.hartwig.hmftools.common.linx.LinxBreakend;
+import com.hartwig.hmftools.common.linx.LinxDriver;
+import com.hartwig.hmftools.common.linx.LinxFusion;
+import com.hartwig.hmftools.common.linx.LinxGermlineDisruption;
+import com.hartwig.hmftools.common.linx.LinxSvAnnotation;
+
+import org.immutables.value.Value;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+@Value.Immutable
+@Value.Style(passAnnotations = { NotNull.class, Nullable.class })
+public interface LinxData
+{
+    @NotNull
+    List<LinxSvAnnotation> somaticSvAnnotations(); // used in interpreter to form final LinxBreakend info
+
+    @NotNull
+    List<LinxDriver> somaticDriverData();
+
+    @NotNull
+    List<DriverCatalog> somaticDrivers();
+
+    @NotNull
+    List<LinxFusion> fusions();
+
+    @NotNull
+    Map<LinxFusion,Integer> fusionClusterIds();
+
+    @NotNull
+    List<LinxBreakend> somaticBreakends();
+
+    @NotNull
+    Map<LinxBreakend,Integer> somaticBreakendClusterIds();
+
+    @NotNull
+    List<DriverCatalog> somaticHomozygousDisruptions();
+
+    @Nullable
+    List<DriverCatalog> germlineDrivers();
+
+    @Nullable
+    List<LinxBreakend> germlineBreakends();
+
+    @Nullable
+    List<LinxGermlineDisruption> germlineDisruptions();
+
+    @Nullable
+    List<LinxSvAnnotation> germlineSvAnnotations();
+
+    @NotNull
+    List<String> reportableEventPlots();
+}

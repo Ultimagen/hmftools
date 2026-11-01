@@ -1,55 +1,42 @@
 package com.hartwig.hmftools.orange.report.chapters;
 
+import java.io.IOException;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.StringJoiner;
-import java.util.stream.Collectors;
 
-import com.hartwig.hmftools.datamodel.linx.LinxHomozygousDisruption;
 import com.hartwig.hmftools.datamodel.linx.LinxBreakend;
-import com.hartwig.hmftools.datamodel.linx.LinxSvAnnotation;
 import com.hartwig.hmftools.datamodel.orange.OrangeRecord;
 import com.hartwig.hmftools.datamodel.peach.PeachGenotype;
 import com.hartwig.hmftools.datamodel.purple.PurpleDriver;
 import com.hartwig.hmftools.datamodel.purple.PurpleGainDeletion;
 import com.hartwig.hmftools.datamodel.purple.PurpleGermlineAberration;
-import com.hartwig.hmftools.datamodel.purple.PurpleLossOfHeterozygosity;
 import com.hartwig.hmftools.datamodel.purple.PurpleVariant;
+import com.hartwig.hmftools.orange.algo.QcStatusInterpretation;
+import com.hartwig.hmftools.orange.report.DocumentContext;
 import com.hartwig.hmftools.orange.report.ReportResources;
-import com.hartwig.hmftools.orange.report.datamodel.BreakendEntry;
-import com.hartwig.hmftools.orange.report.datamodel.BreakendEntryFactory;
-import com.hartwig.hmftools.orange.report.datamodel.VariantEntry;
-import com.hartwig.hmftools.orange.report.datamodel.VariantEntryFactory;
-import com.hartwig.hmftools.orange.report.interpretation.VariantDedup;
-import com.hartwig.hmftools.orange.report.tables.BreakendTable;
+import com.hartwig.hmftools.orange.report.tables.DisruptionTable;
 import com.hartwig.hmftools.orange.report.tables.GainDeletionTable;
-import com.hartwig.hmftools.orange.report.tables.GermlineLossOfHeterozygosityTable;
 import com.hartwig.hmftools.orange.report.tables.GermlineVariantTable;
-import com.hartwig.hmftools.orange.report.tables.HomozygousDisruptionTable;
-import com.hartwig.hmftools.orange.report.tables.MissedVariantLikelihoodTable;
 import com.hartwig.hmftools.orange.report.tables.PharmacogeneticsTable;
 import com.hartwig.hmftools.orange.report.util.Cells;
-import com.hartwig.hmftools.orange.report.util.Tables;
-import com.itextpdf.kernel.geom.PageSize;
-import com.itextpdf.layout.Document;
-import com.itextpdf.layout.element.Paragraph;
-import com.itextpdf.layout.element.Table;
-import com.itextpdf.layout.property.UnitValue;
 
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.jetbrains.annotations.NotNull;
+
+import be.quodlibet.boxable.BaseTable;
+import be.quodlibet.boxable.Row;
 
 public class GermlineFindingsChapter implements ReportChapter
 {
-    @NotNull
-    private final OrangeRecord report;
-    @NotNull
-    private final ReportResources reportResources;
+    private final OrangeRecord mReport;
+    private final ReportResources mReportResources;
 
-    public GermlineFindingsChapter(@NotNull final OrangeRecord report, @NotNull final ReportResources reportResources)
+    public GermlineFindingsChapter(final OrangeRecord report, final ReportResources reportResources)
     {
-        this.report = report;
-        this.reportResources = reportResources;
+        mReport = report;
+        mReportResources = reportResources;
     }
 
     @NotNull
@@ -61,116 +48,77 @@ public class GermlineFindingsChapter implements ReportChapter
 
     @NotNull
     @Override
-    public PageSize pageSize()
+    public PDRectangle pageSize()
     {
-        return PageSize.A4;
+        return PDRectangle.A4;
     }
 
     @Override
-    public void render(@NotNull final Document document)
+    public void render(@NotNull final DocumentContext document) throws IOException
     {
-        document.add(new Paragraph(name()).addStyle(reportResources.chapterTitleStyle()));
+        document.addParagraph(name(), mReportResources.chapterTitleStyle());
 
-        if(report.refSample() != null)
+        if(QcStatusInterpretation.hasPurpleFail(mReport.purple().fit().qc()))
+        {
+            document.addQcFailNotice(mReportResources);
+            return;
+        }
+
+        if(mReport.referenceId() != null)
         {
             addGermlineVariants(document);
-            addGermlineDeletions(document);
-            addGermlineHomozygousDisruptions(document);
+            addSpaceBetweenSubsections(document);
+            addGermlineAmpDels(document);
+            addSpaceBetweenSubsections(document);
             addGermlineBreakends(document);
-            addMVLHAnalysis(document);
+            addSpaceBetweenSubsections(document);
             addGermlineCNAberrations(document);
+            addSpaceBetweenSubsections(document);
             addPharmacogenetics(document);
         }
         else
         {
-            document.add(new Paragraph(ReportResources.NOT_AVAILABLE).addStyle(reportResources.tableContentStyle()));
+            document.addParagraph(ReportResources.NOT_AVAILABLE, mReportResources.tableContentStyle());
         }
     }
 
-    private void addGermlineVariants(@NotNull Document document)
+    private void addGermlineVariants(final DocumentContext document) throws IOException
     {
-        List<PurpleDriver> drivers = report.purple().germlineDrivers();
+        List<PurpleDriver> drivers = mReport.purple().germlineDrivers();
 
-        List<PurpleVariant> reportableVariants = report.purple().reportableGermlineVariants();
+        List<PurpleVariant> reportableVariants = mReport.purple().germlineVariants();
         if(drivers != null && reportableVariants != null)
         {
-            List<VariantEntry> reportableEntries = VariantEntryFactory.create(VariantDedup.apply(reportableVariants), drivers);
-            String titleDrivers = "Driver variants (" + reportableEntries.size() + ")";
-            document.add(GermlineVariantTable.build(titleDrivers, contentWidth(), reportableEntries, reportResources));
-        }
-
-        List<PurpleVariant> additionalSuspectVariants = report.purple().additionalSuspectGermlineVariants();
-        if(drivers != null && additionalSuspectVariants != null)
-        {
-            List<VariantEntry> additionalSuspectEntries =
-                    VariantEntryFactory.create(VariantDedup.apply(additionalSuspectVariants), drivers);
-            String titleNonDrivers = "Other potentially relevant variants (" + additionalSuspectEntries.size() + ")";
-            document.add(GermlineVariantTable.build(titleNonDrivers, contentWidth(), additionalSuspectEntries, reportResources));
+            String titleDrivers = "Small Variants (" + reportableVariants.size() + ")";
+            document.addTable(GermlineVariantTable.build(document, titleDrivers, contentWidth(), reportableVariants, mReportResources));
         }
     }
 
-    private void addGermlineDeletions(@NotNull Document document)
+    private void addGermlineAmpDels(final DocumentContext document) throws IOException
     {
-        List<PurpleGainDeletion> reportableGermlineFullDels = report.purple().reportableGermlineFullDels();
+        List<PurpleGainDeletion> reportableGermlineFullDels = mReport.purple().germlineGainsDels();
         if(reportableGermlineFullDels != null)
         {
-            String title = "Potentially pathogenic germline deletions (" + reportableGermlineFullDels.size() + ")";
-            document.add(GainDeletionTable.build(title, contentWidth(), reportableGermlineFullDels, report.isofox(), reportResources));
-        }
-
-        List<PurpleLossOfHeterozygosity> reportableGermlineLossOfHeterozygosities =
-                report.purple().reportableGermlineLossOfHeterozygosities();
-        if(reportableGermlineLossOfHeterozygosities != null)
-        {
-            String title = "Potentially pathogenic germline LOH events (" + reportableGermlineLossOfHeterozygosities.size() + ")";
-            document.add(GermlineLossOfHeterozygosityTable.build(title, contentWidth(), reportableGermlineLossOfHeterozygosities, report.isofox(), reportResources));
+            String title = "Amplifications and Deletions (" + reportableGermlineFullDels.size() + ")";
+            document.addTable(GainDeletionTable.build(
+                    document, title, contentWidth(), reportableGermlineFullDels, mReportResources, mReport.hasRna()));
         }
     }
 
-    private void addGermlineHomozygousDisruptions(@NotNull Document document)
+    private void addGermlineBreakends(final DocumentContext document) throws IOException
     {
-        List<LinxHomozygousDisruption> germlineHomozygousDisruptions = report.linx().germlineHomozygousDisruptions();
-        if(germlineHomozygousDisruptions != null)
+        List<LinxBreakend> germlineBreakends = mReport.linx().germlineBreakends();
+
+        if(germlineBreakends != null)
         {
-            String title = "Potentially pathogenic germline homozygous disruptions (" + germlineHomozygousDisruptions.size() + ")";
-            document.add(HomozygousDisruptionTable.build(title, contentWidth(), germlineHomozygousDisruptions, reportResources));
+            String title = "Disruptions (" + germlineBreakends.size() + ")";
+            document.addTable(DisruptionTable.build(document, title, contentWidth(), germlineBreakends, mReportResources));
         }
     }
 
-    private void addGermlineBreakends(@NotNull Document document)
+    private void addGermlineCNAberrations(final DocumentContext document) throws IOException
     {
-        List<LinxSvAnnotation> allGermlineStructuralVariants = report.linx().allGermlineStructuralVariants();
-        List<LinxBreakend> reportableGermlineBreakends = report.linx().reportableGermlineBreakends();
-
-        if(allGermlineStructuralVariants != null && reportableGermlineBreakends != null)
-        {
-            // TODO: Load Linx germline drivers properly
-            List<BreakendEntry> reportableBreakends =
-                    BreakendEntryFactory.create(reportableGermlineBreakends, allGermlineStructuralVariants, List.of());
-
-            String title = "Potentially pathogenic germline gene disruptions (" + reportableBreakends.size() + ")";
-            document.add(BreakendTable.build(title, contentWidth(), reportableBreakends, reportResources));
-        }
-    }
-
-    private void addMVLHAnalysis(@NotNull Document document)
-    {
-        Map<String, Double> germlineMVLHPerGene = report.germlineMVLHPerGene();
-        if(germlineMVLHPerGene != null)
-        {
-            Map<String, Double> significantGermlineMVLHPerGene = germlineMVLHPerGene.entrySet()
-                    .stream()
-                    .filter(e -> e.getValue() > 0.01)
-                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-
-            String title = "Genes with missed variant likelihood > 1% (" + significantGermlineMVLHPerGene.size() + ")";
-            document.add(MissedVariantLikelihoodTable.build(title, contentWidth(), significantGermlineMVLHPerGene, reportResources));
-        }
-    }
-
-    private void addGermlineCNAberrations(@NotNull Document document)
-    {
-        Set<PurpleGermlineAberration> germlineAberrations = report.purple().fit().qc().germlineAberrations();
+        Set<PurpleGermlineAberration> germlineAberrations = mReport.purple().fit().qc().germlineAberrations();
         if(!germlineAberrations.isEmpty())
         {
             int count = 0;
@@ -183,19 +131,24 @@ public class GermlineFindingsChapter implements ReportChapter
                 }
                 germlineAberrationJoiner.add(germlineAberration.toString());
             }
-            Table table = new Table(UnitValue.createPercentArray(new float[] { 1 })).setWidth(contentWidth());
-            table.addCell(new Cells(reportResources).createContent(germlineAberrationJoiner.toString()));
-            document.add(new Tables(reportResources).createWrapping(table, "Germline CN aberrations (" + count + ")"));
+
+            Cells cells = new Cells(mReportResources);
+            BaseTable table = document.createTable(contentWidth(), null);
+            Row<PDPage> titleRow = table.createRow(15f);
+            cells.applyTitleStyle(titleRow.createCell(100, "Chromosomal Aberrations (" + count + ")"));
+            Row<PDPage> dataRow = table.createRow(12f);
+            cells.addContentCell(dataRow, 100, germlineAberrationJoiner.toString());
+            document.addTable(table);
         }
     }
 
-    private void addPharmacogenetics(@NotNull Document document)
+    private void addPharmacogenetics(final DocumentContext document) throws IOException
     {
-        Set<PeachGenotype> peach = report.peach();
+        Set<PeachGenotype> peach = mReport.peach();
         if(peach != null)
         {
             String titlePharmacogenetics = "Pharmacogenetics (" + peach.size() + ")";
-            document.add(PharmacogeneticsTable.build(titlePharmacogenetics, contentWidth(), peach, reportResources));
+            document.addTable(PharmacogeneticsTable.build(document, titlePharmacogenetics, contentWidth(), peach, mReportResources));
         }
     }
 }

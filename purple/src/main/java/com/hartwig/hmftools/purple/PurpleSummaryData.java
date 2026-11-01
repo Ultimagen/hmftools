@@ -7,7 +7,7 @@ import static com.hartwig.hmftools.purple.fitting.WholeGenomeDuplication.wholeGe
 import java.util.List;
 import java.util.Set;
 
-import com.hartwig.hmftools.common.driver.DeletionDrivers;
+import com.hartwig.hmftools.purple.drivers.DeletionDrivers;
 import com.hartwig.hmftools.common.genome.chromosome.GermlineAberration;
 import com.hartwig.hmftools.common.purple.FittedPurityMethod;
 import com.hartwig.hmftools.common.purple.Gender;
@@ -31,7 +31,7 @@ public final class PurpleSummaryData
     public static PurpleQC createQC(
             double contamination, final BestFit bestFit, final Gender amberGender, final Gender cobaltGender,
             final List<PurpleCopyNumber> copyNumbers, final List<GeneCopyNumber> geneCopyNumbers,
-            final Set<GermlineAberration> aberrations, int amberMeanDepth, int maxDeletedGenes, double tincLevel, final double chimerismPercentage)
+            final Set<GermlineAberration> aberrations, int amberMeanDepth, int maxDeletedGenes, double tincLevel)
     {
         boolean containsAnySvSupport = copyNumbers.stream().anyMatch(PurpleCopyNumber::svSupport);
 
@@ -61,7 +61,6 @@ public final class PurpleSummaryData
                 .amberMeanDepth(amberMeanDepth)
                 .lohPercent(lohCalcData.lohPercent())
                 .tincLevel(tincLevel)
-                .chimerismPercentage(chimerismPercentage)
                 .build();
     }
 

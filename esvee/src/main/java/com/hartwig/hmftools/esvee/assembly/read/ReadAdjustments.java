@@ -13,6 +13,9 @@ import static com.hartwig.hmftools.esvee.common.CommonUtils.belowMinQual;
 import static com.hartwig.hmftools.esvee.assembly.types.BaseType.G;
 import static com.hartwig.hmftools.esvee.assembly.types.BaseType.C;
 
+import com.hartwig.hmftools.common.redux.BaseQualAdjustment;
+import com.hartwig.hmftools.common.utils.StartEndPair;
+
 public final class ReadAdjustments
 {
     public static boolean trimPolyGSequences(final Read read)
@@ -51,9 +54,9 @@ public final class ReadAdjustments
 
     public static void markLineSoftClips(final Read read)
     {
-        for(int i = 0; i <= 1; ++i)
+        for(StartEndPair se : StartEndPair.values())
         {
-            boolean fromStart = (i == 0);
+            boolean fromStart = se.isStart();
             int scBaseCount = fromStart ? read.leftClipLength() : read.rightClipLength();
 
             if(scBaseCount == 0)
@@ -63,9 +66,9 @@ public final class ReadAdjustments
 
             int softClipIndex = fromStart ? scBaseCount - 1 : read.basesLength() - scBaseCount;
 
-            if(hasLineTail(read.getBases(), softClipIndex, fromStart, lineBase))
+            if(hasLineTail(read.getBases(), softClipIndex, fromStart, lineBase, read.getBaseQuality()))
             {
-                read.markLineTail();
+                read.markLineTail(fromStart);
                 return;
             }
         }
@@ -100,7 +103,9 @@ public final class ReadAdjustments
 
             byte lineBase = fromStart ? LINE_BASE_A : LINE_BASE_T;
 
-            if(read.hasLineTail())
+            boolean hasLineTail = fromStart ? read.hasLineTailStart() : read.hasLineTailEnd();
+
+            if(hasLineTail)
             {
                 lineExclusionLength = lineTestLength;
 
@@ -136,7 +141,6 @@ public final class ReadAdjustments
         {
             readIndexEnd = read.basesLength() - 1;
             readIndexStart = readIndexEnd - scCheckLength + 1;
-
         }
 
         int trimCount = findLowBaseQualTrimCount(read, readIndexStart, readIndexEnd);
@@ -148,19 +152,24 @@ public final class ReadAdjustments
         return true;
     }
 
-    public static int findLowBaseQualTrimCount(final Read read, int readIndexStart, int readIndexEnd)
+    public static int findLowBaseQualTrimCount(final Read read, int indexStart, int indexEnd)
     {
-        boolean fromStart = read.negativeStrand();
+        return findLowBaseQualTrimCount(read, indexStart, indexEnd, read.negativeStrand(), false);
+    }
 
+    public static int findLowBaseQualTrimCount(final Read read, int indexStart, int indexEnd, boolean fromStart, boolean uncertainOnly)
+    {
         double lowestScore = 0;
         double currentScore = 0;
         int lastLowestScoreIndex = -1;
 
-        int baseIndex = fromStart ? readIndexStart : readIndexEnd;
+        int baseIndex = fromStart ? indexStart : indexEnd;
 
-        while(baseIndex >= readIndexStart && baseIndex <= readIndexEnd)
+        while(baseIndex >= indexStart && baseIndex <= indexEnd)
         {
-            if(belowMinQual(read.getBaseQuality()[baseIndex]))
+            byte qual = read.getBaseQuality()[baseIndex];
+            boolean isLowQual = uncertainOnly ? BaseQualAdjustment.isUncertainBaseQual(qual) : belowMinQual(qual);
+            if(isLowQual)
             {
                 currentScore -= LOW_QUAL_SCORE;
 
@@ -184,7 +193,7 @@ public final class ReadAdjustments
         if(lastLowestScoreIndex < 0)
             return 0;
 
-        return fromStart ? lastLowestScoreIndex - readIndexStart + 1 : readIndexEnd - lastLowestScoreIndex + 1;
+        return fromStart ? lastLowestScoreIndex - indexStart + 1 : indexEnd - lastLowestScoreIndex + 1;
     }
 
     protected static final double LOW_QUAL_SCORE = 1 / LOW_BASE_TRIM_PERC - 1;

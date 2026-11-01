@@ -1,6 +1,6 @@
 package com.hartwig.hmftools.sage.evidence;
 
-import static com.hartwig.hmftools.common.basequal.jitter.JitterModelParams.REPEAT_UNIT_3_PLUS_LABEL;
+import static com.hartwig.hmftools.common.redux.JitterModelParams.REPEAT_UNIT_3_PLUS_LABEL;
 import static com.hartwig.hmftools.common.test.SamRecordTestUtils.buildDefaultBaseQuals;
 import static com.hartwig.hmftools.sage.SageConstants.DEFAULT_FLANK_LENGTH;
 import static com.hartwig.hmftools.sage.common.TestUtils.REF_BASES_200;
@@ -24,8 +24,8 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.List;
 
-import com.hartwig.hmftools.common.basequal.jitter.ConsensusType;
-import com.hartwig.hmftools.common.basequal.jitter.JitterModelParams;
+import com.hartwig.hmftools.common.bam.ConsensusType;
+import com.hartwig.hmftools.common.redux.JitterModelParams;
 import com.hartwig.hmftools.sage.common.ReadContextMatcher;
 import com.hartwig.hmftools.sage.common.RefSequence;
 import com.hartwig.hmftools.sage.common.RepeatInfo;
@@ -178,20 +178,20 @@ public class JitterTest
 
         JitterMatch jitterMatch;
 
-        jitterMatch = checkJitter(readContext, matcher, read1, 29);
+        jitterMatch = checkJitter(readContext, matcher, read1, 29, false);
         assertEquals(JitterMatch.NONE, jitterMatch);
 
         readBases = refBases.substring(1, 30) + "TTCC" + variant.alt() + refBases.substring(31, 71);
         readCigar = buildCigarString(readBases.length());
         read1 = buildSamRecord(1, readCigar, readBases);
 
-        jitterMatch = checkJitter(readContext, matcher, read1, 33);
+        jitterMatch = checkJitter(readContext, matcher, read1, 33, false);
         assertEquals(JitterMatch.LENGTHENED, jitterMatch);
 
         readBases = refBases.substring(1, 26) + variant.alt() + refBases.substring(31, 71);
         read1 = buildSamRecord(1, readCigar, readBases);
 
-        jitterMatch = checkJitter(readContext, matcher, read1, 25);
+        jitterMatch = checkJitter(readContext, matcher, read1, 25, false);
         assertEquals(JitterMatch.SHORTENED, jitterMatch);
 
         // now test reads where the jitter is after the variant read index
@@ -200,13 +200,13 @@ public class JitterTest
         readCigar = buildCigarString(readBases.length());
         read1 = buildSamRecord(1, readCigar, readBases);
 
-        jitterMatch = checkJitter(readContext, matcher, read1, 29);
+        jitterMatch = checkJitter(readContext, matcher, read1, 29, false);
         assertEquals(JitterMatch.LENGTHENED, jitterMatch);
 
         readBases = refBases.substring(1, 30) + variant.alt() + refBases.substring(32, 71);
         read1 = buildSamRecord(1, readCigar, readBases);
 
-        jitterMatch = checkJitter(readContext, matcher, read1, 29);
+        jitterMatch = checkJitter(readContext, matcher, read1, 29, false);
         assertEquals(JitterMatch.SHORTENED, jitterMatch);
 
         // test a partial core on each side - still valid for jitter
@@ -216,7 +216,7 @@ public class JitterTest
         readCigar = buildCigarString(readBases.length());
         read1 = buildSamRecord(13, readCigar, readBases);
 
-        jitterMatch = checkJitter(readContext, matcher, read1, 17);
+        jitterMatch = checkJitter(readContext, matcher, read1, 17, false);
         assertEquals(JitterMatch.LENGTHENED, jitterMatch);
 
         // now missing the right core
@@ -224,7 +224,7 @@ public class JitterTest
         readCigar = buildCigarString(readBases.length());
         read1 = buildSamRecord(1, readCigar, readBases);
 
-        jitterMatch = checkJitter(readContext, matcher, read1, 29);
+        jitterMatch = checkJitter(readContext, matcher, read1, 29, false);
         assertEquals(JitterMatch.SHORTENED, jitterMatch);
 
         // test read not covering the repeat so cannot test it correctly
@@ -232,7 +232,7 @@ public class JitterTest
         readCigar = buildCigarString(readBases.length());
         read1 = buildSamRecord(1, readCigar, readBases);
 
-        jitterMatch = checkJitter(readContext, matcher, read1, 29);
+        jitterMatch = checkJitter(readContext, matcher, read1, 29, false);
         assertEquals(JitterMatch.NONE, jitterMatch);
     }
 
@@ -259,23 +259,23 @@ public class JitterTest
         String read1Bases = refBases.substring(1, 30) + "AC" + variant.alt() + refBases.substring(31, 71);
         SAMRecord readWithIndel = buildSamRecord(1, "21M2I49M", read1Bases);
 
-        JitterMatch jitterMatch = checkJitter(readContext, matcher, readWithIndel, 31);
+        JitterMatch jitterMatch = checkJitter(readContext, matcher, readWithIndel, 31, false);
         assertEquals(JitterMatch.LENGTHENED, jitterMatch);
 
         // test 2: insert but without a matching CIGAR
         SAMRecord readWithoutIndel = buildSamRecord(1, buildCigarString(read1Bases.length()), read1Bases);
-        jitterMatch = checkJitter(readContext, matcher, readWithoutIndel, 29);
+        jitterMatch = checkJitter(readContext, matcher, readWithoutIndel, 29, false);
         assertEquals(JitterMatch.LENGTHENED, jitterMatch);
 
         // test 3: deleted repeat bases matched in the CIGAR
         String read2Bases = refBases.substring(1, 28) + variant.alt() + refBases.substring(31, 71);
         readWithIndel = buildSamRecord(1, "21M2D47M", read2Bases);
-        jitterMatch = checkJitter(readContext, matcher, readWithIndel, 27);
+        jitterMatch = checkJitter(readContext, matcher, readWithIndel, 27, false);
         assertEquals(JitterMatch.SHORTENED, jitterMatch);
 
         // test 4: deleted but all bases appear aligned
         readWithoutIndel = buildSamRecord(1, buildCigarString(read2Bases.length()), read2Bases);
-        jitterMatch = checkJitter(readContext, matcher, readWithoutIndel, 29);
+        jitterMatch = checkJitter(readContext, matcher, readWithoutIndel, 29, false);
         assertEquals(JitterMatch.SHORTENED, jitterMatch);
     }
 
@@ -300,11 +300,11 @@ public class JitterTest
 
         String read1Bases = refBases.substring(1, 49) + "CA" + variant.alt() + refBases.substring(50, 71);
         SAMRecord read1_withCigarElem = buildSamRecord(1, "21M2I49M", read1Bases);
-        JitterMatch jitterMatch_withCigarElem = checkJitter(readContext, matcher, read1_withCigarElem, 50);
+        JitterMatch jitterMatch_withCigarElem = checkJitter(readContext, matcher, read1_withCigarElem, 50, false);
         assertEquals(JitterMatch.LENGTHENED, jitterMatch_withCigarElem);
 
         SAMRecord read1_noCigarElem = buildSamRecord(1, buildCigarString(read1Bases.length()), read1Bases);
-        JitterMatch jitterMatch_noCigarElem = checkJitter(readContext, matcher, read1_noCigarElem, 48);
+        JitterMatch jitterMatch_noCigarElem = checkJitter(readContext, matcher, read1_noCigarElem, 48, false);
         assertEquals(JitterMatch.LENGTHENED, jitterMatch_noCigarElem);
     }
 
@@ -312,7 +312,7 @@ public class JitterTest
     public void testMsiJitterCalcs()
     {
         JitterModelParams jitterParams = new JitterModelParams(
-                "A/T",	ConsensusType.IGNORE, 0.05,0.05, 0.11,	0.0444,
+                "A/T", ConsensusType.NONE, 0.05,0.05, 0.11,	0.0444,
                 -0.1835,	1.0164);
 
         MsiModelParams modelParams = new MsiModelParams(jitterParams);
@@ -330,15 +330,15 @@ public class JitterTest
         MsiJitterCalcs msiJitterCalcs = new MsiJitterCalcs();
 
         JitterModelParams jitterParams1 = new JitterModelParams(
-                "A/T",	ConsensusType.IGNORE, 0.05,0.06, 0.07,	0.0444,
+                "A/T", ConsensusType.NONE, 0.05,0.06, 0.07,	0.0444,
                 -0.1835,	1.0164);
 
         JitterModelParams jitterParams2 = new JitterModelParams(
-                "AT/TA",	ConsensusType.IGNORE, 0.02,0.03, 0.04,	0.0444,
+                "AT/TA", ConsensusType.NONE, 0.02,0.03, 0.04,	0.0444,
                 -0.1835,	1.0164);
 
         JitterModelParams jitterParams3 = new JitterModelParams(
-                REPEAT_UNIT_3_PLUS_LABEL,	ConsensusType.IGNORE, 0.1, 0.11, 0.12, 0.0133,
+                REPEAT_UNIT_3_PLUS_LABEL, ConsensusType.NONE, 0.1, 0.11, 0.12, 0.0133,
                 0.1115, 1.6087);
 
         String sampleId = TEST_SAMPLE;
@@ -378,7 +378,7 @@ public class JitterTest
         MsiJitterCalcs msiJitterCalcs = new MsiJitterCalcs();
 
         JitterModelParams jitterParams1 = new JitterModelParams(
-                "A/C/G/T",	ConsensusType.IGNORE, 0.05,0.06, 0.07,	0.05,
+                "A/C/G/T", ConsensusType.NONE, 0.05,0.06, 0.07,	0.05,
                 -0.02,	0.05);
 
         msiJitterCalcs.setSampleParams(TEST_SAMPLE, List.of(jitterParams1));
@@ -395,11 +395,10 @@ public class JitterTest
         VariantReadContext readContext = builder.createContext(var, read, 20, REF_SEQUENCE_200);
         ReadContextCounter readContextCounter = createReadCounter(0, readContext);
 
-        JitterData jitterData = new JitterData();
+        JitterData jitterData = readContextCounter.jitter();
 
         // lengthened is noise
-        jitterData.setValues(10, 10);
-        readContextCounter.readSupportCounts().Full = 50;
+        jitterData.setValues(10, 10, 50);
 
         jitterData.setJitterQualFilterState(msiJitterCalcs, readContextCounter);
 
@@ -407,8 +406,7 @@ public class JitterTest
         assertFalse(jitterData.filterOnNoise());
 
         // shortened is noise
-        jitterData.setValues(5, 35);
-        readContextCounter.readSupportCounts().Full = 50;
+        jitterData.setValues(5, 35, 50);
 
         jitterData.setJitterQualFilterState(msiJitterCalcs, readContextCounter);
 
@@ -416,8 +414,7 @@ public class JitterTest
         assertFalse(jitterData.filterOnNoise());
 
         // both noise
-        jitterData.setValues(5, 2);
-        readContextCounter.readSupportCounts().Full = 50;
+        jitterData.setValues(5, 2, 50);
 
         jitterData.setJitterQualFilterState(msiJitterCalcs, readContextCounter);
 
@@ -425,8 +422,7 @@ public class JitterTest
         assertFalse(jitterData.filterOnNoise());
 
         // shortened too high
-        jitterData.setValues(21, 1);
-        readContextCounter.readSupportCounts().Full = 10;
+        jitterData.setValues(21, 1, 10);
 
         jitterData.setJitterQualFilterState(msiJitterCalcs, readContextCounter);
 
@@ -434,8 +430,7 @@ public class JitterTest
         assertEquals(1, jitterData.qualBoost(), 0.01);
 
         // again for lengthened
-        jitterData.setValues(1, 60);
-        readContextCounter.readSupportCounts().Full = 2;
+        jitterData.setValues(1, 60, 2);
 
         jitterData.setJitterQualFilterState(msiJitterCalcs, readContextCounter);
 
@@ -443,8 +438,7 @@ public class JitterTest
         assertEquals(1, jitterData.qualBoost(), 0.01);
 
         // combined
-        jitterData.setValues(126, 126);
-        readContextCounter.readSupportCounts().Full = 35;
+        jitterData.setValues(126, 126, 35);
 
         jitterData.setJitterQualFilterState(msiJitterCalcs, readContextCounter);
 

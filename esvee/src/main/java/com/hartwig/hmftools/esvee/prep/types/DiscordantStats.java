@@ -3,22 +3,19 @@ package com.hartwig.hmftools.esvee.prep.types;
 import static java.lang.Math.abs;
 import static java.lang.String.format;
 
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.getAlignmentEndFromCigar;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.inferredInsertSizeAbs;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
-import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
-import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
-import static com.hartwig.hmftools.esvee.prep.types.WriteType.DISCORDANT_STATS;
+import static com.hartwig.hmftools.esvee.common.WriteType.DISCORDANT_STATS;
 
-import java.io.BufferedWriter;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.Arrays;
-import java.util.List;
 import java.util.StringJoiner;
 
+import com.hartwig.hmftools.common.bam.SupplementaryReadData;
 import com.hartwig.hmftools.common.genome.region.Orientation;
+import com.hartwig.hmftools.common.sv.DiscordantFragType;
+import com.hartwig.hmftools.common.sv.EsveeDiscordantStats;
 import com.hartwig.hmftools.esvee.prep.PrepConfig;
 
 public class DiscordantStats
@@ -47,13 +44,108 @@ public class DiscordantStats
     private static final int LENGTH_5K = 5000;
     private static final int LENGTH_100K = 100_000;
 
-    public void processReadGroup(final ReadGroup readGroup)
+    public void processReadGroup(final ReadGroup readGroup, final boolean isDiscordantPair)
     {
         PrepRead read = readGroup.reads().stream().filter(x -> !x.isSupplementaryAlignment()).findFirst().orElse(null);
 
-        addToCounts(
-                read.Chromosome, read.MateChromosome, read.AlignmentStart, read.MatePosStart, read.orientation(), read.mateOrientation(),
-                inferredInsertSizeAbs(read.record()));
+        if(read.isPaired())
+        {
+            if(isDiscordantPair)
+            {
+                // use the primary reads if discordant
+                addToCounts(
+                        read.Chromosome, read.MateChromosome, read.AlignmentStart, read.MatePosStart, read.orientation(), read.mateOrientation(),
+                        inferredInsertSizeAbs(read.record()));
+            }
+            else
+            {
+                // otherwise use the longest primary to supp pairing
+                int maxInsertSize = -1;
+                PrepRead maxPrimaryRead = null;
+                PrimarySuppPairing maxPositionPairing = null;
+
+                for(PrepRead primaryRead : readGroup.reads())
+                {
+                    if(!primaryRead.hasSuppAlignment() || primaryRead.isUnmapped())
+                        continue;
+
+                    PrimarySuppPairing positionPairing = formPositionPairing(primaryRead);
+                    int inferredInsertSize = primarySuppInferredInsertSize(primaryRead, positionPairing);
+
+                    if(inferredInsertSize > maxInsertSize)
+                    {
+                        maxPrimaryRead = primaryRead;
+                        maxInsertSize = inferredInsertSize;
+                        maxPositionPairing = positionPairing;
+                    }
+                }
+
+                if(maxPrimaryRead != null)
+                {
+                    addToCounts(
+                            maxPrimaryRead.Chromosome, maxPrimaryRead.supplementaryAlignment().Chromosome, maxPositionPairing.ReadPosition,
+                            maxPositionPairing.SuppPosition, maxPrimaryRead.orientation(),
+                            maxPrimaryRead.supplementaryAlignment().orient().opposite(), maxInsertSize);
+                }
+            }
+        }
+        else if(read.supplementaryAlignment() != null)
+        {
+            // use the span of the read and the reads if on the same chromosome
+            PrimarySuppPairing positionPairing = formPositionPairing(read);
+            int inferredInsertSize = primarySuppInferredInsertSize(read, positionPairing);
+
+            addToCounts(
+                    read.Chromosome, read.supplementaryAlignment().Chromosome, positionPairing.ReadPosition, positionPairing.SuppPosition,
+                    read.orientation(), read.supplementaryAlignment().orient().opposite(), inferredInsertSize);
+        }
+    }
+
+    private static int primarySuppInferredInsertSize(final PrepRead read, final PrimarySuppPairing positionPairing)
+    {
+        if(read.Chromosome.equals(read.supplementaryAlignment().Chromosome))
+        {
+            return abs(positionPairing.ReadPosition - positionPairing.SuppPosition);
+        }
+        else
+        {
+            return 0;
+        }
+    }
+
+    private record PrimarySuppPairing(int ReadPosition, int SuppPosition) {}
+
+    private static PrimarySuppPairing formPositionPairing(final PrepRead read)
+    {
+        SupplementaryReadData suppData = read.supplementaryAlignment();
+
+        int readPosition, suppPosition;
+
+        if(read.Chromosome.equals(suppData.Chromosome))
+        {
+            if(read.leftClipLength() > read.rightClipLength())
+            {
+                readPosition = read.AlignmentEnd;
+                suppPosition = suppData.Position;
+            }
+            else
+            {
+                readPosition = read.AlignmentStart;
+                suppPosition = getAlignmentEndFromCigar(suppData.Position, suppData.Cigar);
+            }
+        }
+        else
+        {
+            readPosition = read.AlignmentStart;
+            suppPosition = suppData.Position;
+        }
+
+        return new PrimarySuppPairing(readPosition, suppPosition);
+    }
+
+    public static boolean hasPrimaryWithSupplementary(final ReadGroup readGroup)
+    {
+        return readGroup.reads().stream().anyMatch(x -> !x.isSupplementaryAlignment() && x.hasSuppAlignment());
     }
 
     private void addToCounts(
@@ -141,75 +233,26 @@ public class DiscordantStats
         return format("totalReads=%d writtenReads=%d %s", TotalReads, PrepReads, sj);
     }
 
-    private static final String FLD_TOTAL_READS = "TotalReads";
-    private static final String FLD_PREP_READS = "PrepReads";
-
     public static void writeDiscordantStats(
             final PrepConfig config, final long totalReads, final long writtenReads, final DiscordantStats discordantStats)
     {
-        try
-        {
-            final String outputFileName = config.formFilename(DISCORDANT_STATS);
+        String fileName = config.formFilename(DISCORDANT_STATS);
 
-            BufferedWriter writer = createBufferedWriter(outputFileName, false);
-
-            StringJoiner sj = new StringJoiner(TSV_DELIM);
-            sj.add(FLD_TOTAL_READS);
-            sj.add(FLD_PREP_READS);
-
-            for(DiscordantFragType type : DiscordantFragType.values())
-            {
-                sj.add(type.toString());
-            }
-
-            writer.write(sj.toString());
-            writer.newLine();
-
-            sj = new StringJoiner(TSV_DELIM);
-            sj.add(String.valueOf(totalReads));
-            sj.add(String.valueOf(writtenReads));
-
-            for(DiscordantFragType type : DiscordantFragType.values())
-            {
-                sj.add(String.valueOf(discordantStats.TypeCounts[type.ordinal()]));
-            }
-
-            writer.write(sj.toString());
-            writer.newLine();
-
-            writer.close();
-        }
-        catch(IOException e)
-        {
-            SV_LOGGER.error("failed to write fragment length file: {}", e.toString());
-        }
+        EsveeDiscordantStats esveeDiscordantStats = new EsveeDiscordantStats(totalReads, writtenReads, discordantStats.TypeCounts);
+        EsveeDiscordantStats.write(fileName, esveeDiscordantStats);
     }
 
     public static DiscordantStats loadDiscordantStats(final String filename)
     {
         try
         {
-            List<String> lines = Files.readAllLines(Paths.get(filename));
-            String[] values = lines.get(1).split(TSV_DELIM);
-
-            long totalReads = Long.parseLong(values[0]);
-            long prepReads = 0;
-
-            long[] typeCounts = new long[DiscordantFragType.values().length];
-
-            prepReads = Long.parseLong(values[1]);
-
-            for(int i = 0; i < typeCounts.length; ++i)
-            {
-                typeCounts[i] = Long.parseLong(values[i + 2]);
-            }
-
-            return new DiscordantStats(totalReads, prepReads, typeCounts);
+            EsveeDiscordantStats esveeDiscordantStats = EsveeDiscordantStats.read(filename);
+            return new DiscordantStats(esveeDiscordantStats.TotalReads, esveeDiscordantStats.PrepReads, esveeDiscordantStats.TypeCounts);
         }
         catch(Exception e)
         {
-            SV_LOGGER.warn("failed to read discordant read statistics file({}): {}", filename, e.toString());
-            return new DiscordantStats();
+            SV_LOGGER.error("failed to load Esvee discordant stat file({}): {}", filename, e.toString());
+            return null;
         }
     }
 }

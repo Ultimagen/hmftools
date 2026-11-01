@@ -14,12 +14,11 @@ import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_EXTENSION;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.SAMPLE_DESC;
-import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS_FILTER;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.QUAL;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.getGenotypeAttributeAsDouble;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.parseIntegerList;
-import static com.hartwig.hmftools.common.variant.SageVcfTags.AVG_BASE_QUAL;
-import static com.hartwig.hmftools.common.variant.SageVcfTags.LIST_SEPARATOR;
+import static com.hartwig.hmftools.common.variant.SageVcfTags.AVG_RECALIBRATED_BASE_QUAL;
 import static com.hartwig.hmftools.common.variant.SageVcfTags.LOCAL_PHASE_SET;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.addLoggingOptions;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.OUTPUT_ID;
@@ -45,11 +44,8 @@ import static com.hartwig.hmftools.sage.SageCommon.APP_NAME;
 import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
 import static com.hartwig.hmftools.sage.utils.VariantData.comparePositions;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.MAX_READ_EDGE_DISTANCE;
-import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_CORE;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_INFO;
 import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_JITTER;
-import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_LEFT_FLANK;
-import static com.hartwig.hmftools.sage.vcf.VcfTags.READ_CONTEXT_RIGHT_FLANK;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
@@ -309,7 +305,7 @@ public class SageCompareVcfs
         compareAttributeField(origVar, newVar, READ_CONTEXT_REPEAT_SEQUENCE, FieldType.STRING);
         compareAttributeField(origVar, newVar, READ_CONTEXT_REPEAT_COUNT, FieldType.EXACT_INT);
 
-        compareAttributeField(origVar, newVar, AVG_BASE_QUAL, FieldType.DECIMAL);
+        compareAttributeField(origVar, newVar, AVG_RECALIBRATED_BASE_QUAL, FieldType.DECIMAL);
         compareAttributeField(origVar, newVar, MAX_READ_EDGE_DISTANCE, FieldType.DECIMAL);
 
         // compare genotype fields
@@ -333,8 +329,8 @@ public class SageCompareVcfs
 
         if(!newFilterDiffs.isEmpty() || !origFilterDiffs.isEmpty())
         {
-            String origFiltersStr = origVar.filters().isEmpty() ? PASS : filtersStr(origFilterDiffs);
-            String newFiltersStr = newVar.filters().isEmpty() ? PASS : filtersStr(newFilterDiffs);
+            String origFiltersStr = origVar.filters().isEmpty() ? PASS_FILTER : filtersStr(origFilterDiffs);
+            String newFiltersStr = newVar.filters().isEmpty() ? PASS_FILTER : filtersStr(newFilterDiffs);
             writeDiffs(origVar, newVar, "FILTERS", origFiltersStr, newFiltersStr);
         }
 
@@ -399,16 +395,7 @@ public class SageCompareVcfs
 
     private static String extractReadBases(final VariantData var)
     {
-        if(var.context().hasAttribute(READ_CONTEXT_INFO))
-        {
-            return ReadContextVcfInfo.fromVcfTag(var.context().getAttributeAsString(READ_CONTEXT_INFO, "")).readBases();
-        }
-        else
-        {
-            return var.context().getAttributeAsString(READ_CONTEXT_LEFT_FLANK, "")
-                    + var.context().getAttributeAsString(READ_CONTEXT_CORE, "")
-                    + var.context().getAttributeAsString(READ_CONTEXT_RIGHT_FLANK, "");
-        }
+        return ReadContextVcfInfo.fromVcfTag(var.context().getAttributeAsString(READ_CONTEXT_INFO, "")).readBases();
     }
 
     private void compareGenotypeAttributeField(

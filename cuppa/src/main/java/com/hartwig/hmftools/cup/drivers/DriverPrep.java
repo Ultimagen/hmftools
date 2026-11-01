@@ -1,5 +1,9 @@
 package com.hartwig.hmftools.cup.drivers;
 
+import static com.hartwig.hmftools.common.cuppa.CuppaCommon.INDEL_ALB;
+import static com.hartwig.hmftools.common.cuppa.CuppaCommon.INDEL_MAX_REPEAT_COUNT;
+import static com.hartwig.hmftools.common.cuppa.CuppaCommon.INDEL_SFTPB;
+import static com.hartwig.hmftools.common.cuppa.CuppaCommon.INDEL_SLC34A2;
 import static com.hartwig.hmftools.cup.prep.CategoryType.DRIVER;
 import static com.hartwig.hmftools.common.variant.VariantType.INDEL;
 import static com.hartwig.hmftools.common.purple.MicrosatelliteStatus.MSS;
@@ -15,6 +19,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+import com.hartwig.hmftools.common.purple.PurplePurity;
+import com.hartwig.hmftools.common.purple.ReportedStatus;
 import com.hartwig.hmftools.cup.prep.CategoryType;
 import com.hartwig.hmftools.common.driver.DriverCatalog;
 import com.hartwig.hmftools.common.driver.DriverCatalogFile;
@@ -22,8 +28,6 @@ import com.hartwig.hmftools.common.driver.DriverType;
 import com.hartwig.hmftools.common.fusion.KnownFusionType;
 import com.hartwig.hmftools.common.linx.FusionLikelihoodType;
 import com.hartwig.hmftools.common.linx.LinxFusion;
-import com.hartwig.hmftools.common.purple.PurityContext;
-import com.hartwig.hmftools.common.purple.PurityContextFile;
 import com.hartwig.hmftools.common.virus.AnnotatedVirus;
 import com.hartwig.hmftools.common.virus.AnnotatedVirusFile;
 import com.hartwig.hmftools.cup.prep.CategoryPrep;
@@ -48,11 +52,6 @@ public class DriverPrep implements CategoryPrep
 
     private static final String PROMISCUOUS_5_SUFFIX = "_PROM5";
     private static final String PROMISCUOUS_3_SUFFIX = "_PROM3";
-
-    private static final int INDEL_MAX_REPEAT_COUNT = 6;
-    private static final String INDEL_ALB = "ALB";
-    private static final String INDEL_SFTPB = "SFTPB";
-    private static final String INDEL_SLC34A2 = "SLC34A2";
 
     public DriverPrep(final PrepConfig config)
     {
@@ -105,13 +104,18 @@ public class DriverPrep implements CategoryPrep
             if(DriverType.isGermline(driver.driver()))
                 continue;
 
+            if(driver.reportedStatus() != ReportedStatus.REPORTED)
+                continue;
+
             double likelihood = driver.driverLikelihood();
 
             String featureName = driver.gene();
             if(driver.driver() == DriverType.AMP || driver.driver() == DriverType.PARTIAL_AMP)
             {
                 featureName += AMP_SUFFIX;
-            } else {
+            }
+            else
+            {
                 featureName += MUTATION_SUFFIX;
             }
 
@@ -122,12 +126,9 @@ public class DriverPrep implements CategoryPrep
 
     public void getIndelDrivers(String sampleId) throws IOException
     {
-        PurityContext purityContext = PurityContextFile.readWithQC(
-                mConfig.purpleQcFile(sampleId),
-                mConfig.purplePurityFile(sampleId)
-        );
+        PurplePurity purity = PurplePurity.read(mConfig.purplePurityFile(sampleId));
 
-        boolean isMicrosatelliteStable = purityContext.microsatelliteStatus() == MSS;
+        boolean isMicrosatelliteStable = purity.MsStatus == MSS;
 
         if(!isMicrosatelliteStable)
             return;
@@ -225,8 +226,7 @@ public class DriverPrep implements CategoryPrep
         }
         catch(Exception e)
         {
-            CUP_LOGGER.error("sample({}) failed to extract category({}):", sampleId, categoryType());
-            e.printStackTrace();
+            CUP_LOGGER.error("sample({}) failed to extract category({}):", sampleId, categoryType(), e);
             System.exit(1);
         }
 

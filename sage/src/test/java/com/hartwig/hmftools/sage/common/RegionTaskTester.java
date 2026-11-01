@@ -6,16 +6,17 @@ import java.util.Map;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.gene.TranscriptData;
-import com.hartwig.hmftools.common.test.MockRefGenome;
 import com.hartwig.hmftools.common.region.BaseRegion;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
+import com.hartwig.hmftools.common.test.MockRefGenome;
 import com.hartwig.hmftools.common.variant.SimpleVariant;
 import com.hartwig.hmftools.sage.SageCallConfig;
+import com.hartwig.hmftools.sage.candidate.CandidateWriter;
 import com.hartwig.hmftools.sage.evidence.FragmentLengthWriter;
 import com.hartwig.hmftools.sage.phase.PhaseSetCounter;
 import com.hartwig.hmftools.sage.pipeline.RegionResults;
 import com.hartwig.hmftools.sage.pipeline.RegionTask;
-import com.hartwig.hmftools.sage.bqr.BqrRecordMap;
+import com.hartwig.hmftools.sage.quality.BqrRecordMap;
 import com.hartwig.hmftools.sage.quality.MsiJitterCalcs;
 
 public class RegionTaskTester
@@ -63,7 +64,8 @@ public class RegionTaskTester
     public RegionTask createRegionTask(final ChrBaseRegion region)
     {
         return new RegionTask(
-                0, region, Results, Config, RefGenome, Hotspots, PanelRegions, Transcripts, HighConfidenceRegions,
-                QualityRecalibrationMap, JitterCalcs, PhaseSetCounter, SamSlicerFactory, new FragmentLengthWriter(Config.Common));
+                0, region, Results, Config, RefGenome, null, Hotspots, PanelRegions, Transcripts, HighConfidenceRegions,
+                QualityRecalibrationMap, JitterCalcs, PhaseSetCounter, SamSlicerFactory, new FragmentLengthWriter(Config.Common),
+                new CandidateWriter(Config));
     }
 }

@@ -2,12 +2,12 @@
 
 # Introduction
 
-CUPPA is a tissue of origin classifier that uses features derived from whole genome sequencing (WGS; DNA) and/or whole 
-transcriptome sequencing data (WTS; RNA). The Python classifier component of CUPPA is built off the 
+Cuppa is a tissue of origin classifier that uses features derived from whole genome sequencing (WGS; DNA) and/or whole 
+transcriptome sequencing data (WTS; RNA). The Python classifier component of Cuppa is built off the 
 [scikit-learn](https://scikit-learn.org/) library and is based on multiple logistic regressions chained together. Please 
 see the section [Classifier structure](#classifier-structure) for more information.
 
-CUPPA is intended to provide:
+Cuppa is intended to provide:
 1) Molecular tumor type prediction to verify histopathological classification
 2) Support for specific tumor type classification in case of inconclusive histopathological outcome (differential diagnosis)
 3) Predictions of primary tumor location for Cancer of Unknown Primary (CUP)
@@ -49,23 +49,42 @@ CUPPA is intended to provide:
 <!-- TOC -->
 
 # Usage
-The latest version of CUPPA can be downloaded from the HMFTools [releases page](https://github.com/hartwigmedical/hmftools/releases/).
+The latest version of Cuppa can be downloaded from the HMFTools [releases page](https://github.com/hartwigmedical/hmftools/releases/).
 
 ## Feature extraction (Java component)
-The `CuppaDataPrep` java class can be used to extract the features required for CUPPA. `CuppaDataPrep` can be run for a single sample or 
+The `CuppaDataPrep` java class can be used to extract the features required for Cuppa. `CuppaDataPrep` can be run for a single sample or 
 multiple samples.
 
 ### Single sample example
 The below command will extract the DNA and RNA features for one sample:
 ```shell
 java -cp cuppa.jar com.hartwig.hmftools.cup.prep.CuppaDataPrep \
-  -sample COLO829v003T \
+  -sample SAMPLE_ID \
+  -rna_sample SAMPLE_ID_RNA \
   -categories ALL \
   -ref_genome_version V37 \
-  -sample_data_dir /dir/with/all/input/files/ \
+  -sample_data_dir /sample/data/dir/ \
   -output_dir path/to/output/dir/ \
   -ref_alt_sj_sites /path/to/alt_sj.selected_loci.tsv.gz
 ```
+
+assuming the input files are all located in the same directory:
+```
+/sample/data/dir/SAMPLE_ID.purple.somatic.vcf.gz
+/sample/data/dir/SAMPLE_ID.purple.sv.vcf.gz
+/sample/data/dir/SAMPLE_ID.purple.purity.tsv
+/sample/data/dir/SAMPLE_ID.linx.clusters.tsv
+/sample/data/dir/SAMPLE_ID.linx.driver.catalog.tsv
+/sample/data/dir/SAMPLE_ID.linx.fusion.tsv
+/sample/data/dir/SAMPLE_ID.virus.annotated.tsv
+/sample/data/dir/SAMPLE_ID_RNA.isf.alt_splice_junc.csv
+/sample/data/dir/SAMPLE_ID_RNA.isf.gene_data.csv
+```
+
+Argument `-rna_sample` is only needed if the [sample ID prefix](#inputs-and-arguments) for RNA and DNA input files differ. 
+
+If the directories containing the files from each tool (PURPLE, LINX, etc...) are different, they can be 
+[specified individually](#inputs-and-arguments) (e.g. with `-purple_dir`).  
 
 This will produce a TSV file with the following format:
 ```
@@ -76,12 +95,9 @@ Source  Category       Key  Value
 ```
 
 ### Multi sample example
-In the single sample example, we have all input files in the path provided to `-sample_data_dir`. However, for multiple samples, the input
-files are likely located in separate dirs. 
-
-We can instead provide input paths to `-purple_dir`, `-linx_dir`, `-virus_dir`, and `-isofox_dir` 
-using with wildcards (`*`) which are converted to sample ids as specified in the `-sample_id_file`. **NOTE: Paths containing wildcards must 
-be surrounded by double quotes (`"`)!**
+For multiple samples, the input files are likely located in separate dirs. We can  provide input paths to `-purple_dir`, `-linx_dir`, 
+`-virus_dir`, and `-isofox_dir` using with wildcards (`*`) which are converted to sample ids as specified in the `-sample_id_file`. 
+**NOTE: Paths containing wildcards must be surrounded by double quotes (`"`)!**
 
 The below command will extract the DNA and RNA features for multiple samples:
 
@@ -100,19 +116,37 @@ java -cp cuppa.jar com.hartwig.hmftools.cup.prep.CuppaDataPrep \
   -threads 8
 ```
 
+with the below example `sample_ids.tsv` file:
+```tsv
+SampleId	RnaSampleId
+SAMPLE_1	
+SAMPLE_2	SAMPLE_2_RNA
+SAMPLE_3	NO_RNA
+```
+
 assuming the input directory structure looks like this:
 ```shell
+## SAMPLE_1: RNA input files have same sample ID prefix and dirname as DNA input files
 /data/datasets/SAMPLE_1/purple/SAMPLE_1.purple.somatic.vcf.gz
 /data/datasets/SAMPLE_1/purple/SAMPLE_1.purple.sv.vcf.gz
 /data/datasets/SAMPLE_1/purple/SAMPLE_1.purple.purity.tsv
-/data/datasets/SAMPLE_1/purple/SAMPLE_1.purple.qc
 /data/datasets/SAMPLE_1/linx/SAMPLE_1.linx.clusters.tsv
 /data/datasets/SAMPLE_1/linx/SAMPLE_1.linx.driver.catalog.tsv
 /data/datasets/SAMPLE_1/linx/SAMPLE_1.linx.fusion.tsv
 /data/datasets/SAMPLE_1/virus_interpreter/SAMPLE_1.virus.annotated.tsv
+
 /data/rna/SAMPLE_1/SAMPLE_1.isf.alt_splice_junc.csv
 /data/rna/SAMPLE_1/SAMPLE_1.isf.gene_data.csv
+
+## SAMPLE_2: has different sample ID prefix and dirname for RNA input files (SAMPLE_2_RNA)
 /data/datasets/SAMPLE_2/purple/SAMPLE_2.purple.somatic.vcf.gz
+...
+
+/data/rna/SAMPLE_2_RNA/SAMPLE_2_RNA.isf.alt_splice_junc.csv
+/data/rna/SAMPLE_2_RNA/SAMPLE_2_RNA.isf.gene_data.csv
+
+## SAMPLE_3: has no RNA data
+/data/datasets/SAMPLE_3/purple/SAMPLE_3.purple.somatic.vcf.gz
 ...
 ```
 
@@ -140,39 +174,39 @@ Source  Category       Key  SAMPLE_1  SAMPLE_2
 
 Below is a description of the input files for `CuppaDataPrep`:
 
-| Category | Tool              | Filename suffix          | File details                                     |
-|----------|-------------------|--------------------------|--------------------------------------------------|
-| DNA      | PURPLE            | .purple.somatic.vcf.gz   | SNVs; used for the GEN_POS and SNV96 features    |
-| DNA      | PURPLE            | .purple.sv.vcf.gz        | Structural variants                              |
-| DNA      | PURPLE            | .purple.purity.tsv       | Sample sex and WGD presence (amongst other data) |
-| DNA      | PURPLE            | .purple.qc               | WGS quality control stats                        |
-| DNA      | LINX              | .linx.clusters.tsv       | Structural variant clusters                      |
-| DNA      | LINX              | .linx.driver.catalog.tsv | Driver mutations                                 |
-| DNA      | LINX              | .linx.fusion.tsv         | Gene fusions                                     |
-| DNA      | Virus Interpreter | .virus.annotated.tsv     | Viral sequence insertions                        |
-| RNA      | ISOFOX            | .gene_data.csv           | Gene expression data                             |
-| RNA      | ISOFOX            | .alt_splice_junc.csv     | Alternative splice junction counts               |
+| Category | Tool              | Filename pattern                    | File details                                     |
+|----------|-------------------|-------------------------------------|--------------------------------------------------|
+| DNA      | PURPLE            | <SAMPLE_ID>.purple.somatic.vcf.gz   | SNVs; used for the GEN_POS and SNV96 features    |
+| DNA      | PURPLE            | <SAMPLE_ID>.purple.sv.vcf.gz        | Structural variants                              |
+| DNA      | PURPLE            | <SAMPLE_ID>.purple.purity.tsv       | Sample sex and WGD presence (amongst other data) |
+| DNA      | LINX              | <SAMPLE_ID>.linx.clusters.tsv       | Structural variant clusters                      |
+| DNA      | LINX              | <SAMPLE_ID>.linx.driver.catalog.tsv | Driver mutations                                 |
+| DNA      | LINX              | <SAMPLE_ID>.linx.fusion.tsv         | Gene fusions                                     |
+| DNA      | Virus Interpreter | <SAMPLE_ID>.virus.annotated.tsv     | Viral sequence insertions                        |
+| RNA      | ISOFOX            | <SAMPLE_ID>.gene_data.csv           | Gene expression data                             |
+| RNA      | ISOFOX            | <SAMPLE_ID>.alt_splice_junc.csv     | Alternative splice junction counts               |
 
 
 Below are all arguments that can be passed to `CuppaDataPrep`. Superscript numbers mark conditionally required arguments.
 
-| Argument              | Example                               | Description                                                                                                                                   |
-|-----------------------|---------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| `-sample`             | COLO829v003T                          | [Required <sup>1</sup>] Sample name                                                                                                           |
-| `-sample_id_file`     | sample_ids.tsv                        | [Required <sup>1</sup>] One column text file with "SampleId" as the header, and where each row is a sample name                               |
-| `-sample_data_dir`    |                                       | [Required <sup>2</sup>] Directory containing all input files                                                                                  |
-| `-purple_dir`         | "/data/datasets/*/purple/"            | [Required <sup>2</sup>] Directory containing the PURPLE files                                                                                 |
-| `-linx_dir`           | "/data/datasets/*/linx/"              | [Required <sup>2</sup>] Directory containing the LINX files                                                                                   |
-| `-virus_dir`          | "/data/datasets/*/virus_interpreter/" | [Required <sup>2</sup>] Directory containing the VirusInterpreter files                                                                       |
-| `-isofox_dir`         | "/data/rna/*/"                        | [Required <sup>2</sup>] Directory containing the ISOFOX files                                                                                 |
-| `-ref_alt_sj_sites`   | alt_sj.selected_loci.tsv.gz           | [Required <sup>3</sup>] TSV file containing the required alternative splice junctions. Required columns: GeneId, Chromosome, PosStart, PosEnd |
-| `-categories`         | DNA                                   | [Required] One of: ALL, DNA, RNA; or one/many of: SNV, SV, DRIVER, SAMPLE_TRAIT, GENE_EXP, ALT_SJ                                             |
-| `-output_dir`         |                                       | [Required] Directory to write the output files                                                                                                |
-| `-ref_genome_version` | V37                                   | Valid values: V37 (default), V38                                                                                                              |
-| `-threads`            | 8                                     | Number of threads to use. Each thread processes one sample at a time                                                                          |
-| `-write_by_category`  |                                       | Flag. Split output of `CuppaDataPrep` over multiple files                                                                                     |
-| `-log_level`          | DEBUG                                 | Set log level to one of: ERROR, WARN, INFO, DEBUG or TRACE                                                                                    |
-| `-log_debug`          |                                       | Flag. Set log level to DEBUG                                                                                                                  |
+| Argument              | Example                               | Description                                                                                                                                                                        |
+|-----------------------|---------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-sample`             | SAMPLE_ID                             | [Required <sup>1</sup>] Sample ID                                                                                                                                                  |
+| `-rna_sample`         | SAMPLE_ID_RNA                         | Sample ID for RNA input files. Only needed if the sample ID prefix for the RNA and DNA input files differ                                                                          |
+| `-sample_id_file`     | sample_ids.tsv                        | [Required <sup>1</sup>] TSV file with columns SampleId and/or RnaSampleId. RnaSampleId values can be blank (SampleId value used instead) or NO_RNA (skips extracting RNA features) |
+| `-sample_data_dir`    |                                       | [Required <sup>2</sup>] Directory containing all input files                                                                                                                       |
+| `-purple_dir`         | "/data/datasets/*/purple/"            | [Required <sup>2</sup>] Directory containing the PURPLE files                                                                                                                      |
+| `-linx_dir`           | "/data/datasets/*/linx/"              | [Required <sup>2</sup>] Directory containing the LINX files                                                                                                                        |
+| `-virus_dir`          | "/data/datasets/*/virus_interpreter/" | [Required <sup>2</sup>] Directory containing the VirusInterpreter files                                                                                                            |
+| `-isofox_dir`         | "/data/rna/*/"                        | [Required <sup>2</sup>] Directory containing the ISOFOX files                                                                                                                      |
+| `-ref_alt_sj_sites`   | alt_sj.selected_loci.tsv.gz           | [Required <sup>3</sup>] TSV file containing the required alternative splice junctions. Required columns: GeneId, Chromosome, PosStart, PosEnd                                      |
+| `-categories`         | DNA                                   | [Required] One of: ALL, DNA, RNA; or one/many of: SNV, SV, DRIVER, SAMPLE_TRAIT, GENE_EXP, ALT_SJ                                                                                  |
+| `-output_dir`         |                                       | [Required] Directory to write the output files                                                                                                                                     |
+| `-ref_genome_version` | V37                                   | Valid values: V37 (default), V38                                                                                                                                                   |
+| `-threads`            | 8                                     | Number of threads to use. Each thread processes one sample at a time                                                                                                               |
+| `-write_by_category`  |                                       | Flag. Split output of `CuppaDataPrep` over multiple files                                                                                                                          |
+| `-log_level`          | DEBUG                                 | Set log level to one of: ERROR, WARN, INFO, DEBUG or TRACE                                                                                                                         |
+| `-log_debug`          |                                       | Flag. Set log level to DEBUG                                                                                                                                                       |
 
 Conditional requirements:
 1. Either `sample` or `sample_id_file` is required
@@ -184,7 +218,7 @@ All resource files for this tool and the WiGiTs pipeline are available for downl
 ## Classifier (Python component)
 
 ### Installation
-The core classification component of CUPPA is a python package (`pycuppa`). You may skip to step 3 if you have Python correctly set up.
+The core classification component of Cuppa is a python package (`pycuppa`). You may skip to step 3 if you have Python correctly set up.
 However, it is recommended to install Python via `pyenv` (step 1 and 2). This ensures that the correct Python version is installed, as well 
 as ensuring no dependency collisions with the system pre-installed Python.
 
@@ -225,7 +259,7 @@ pip install --upgrade pip
 pip install hmftools/cuppa/src/main/python/pycuppa
 ```
 
-3b. Alternatively, install `pycuppa` from a CUPPA jar file (see [releases](https://github.com/hartwigmedical/hmftools/releases/) for available versions):
+3b. Alternatively, install `pycuppa` from a Cuppa jar file (see [releases](https://github.com/hartwigmedical/hmftools/releases/) for available versions):
 ```shell
 ## Download a cuppa jar. Replace the URL with the desired version
 wget https://github.com/hartwigmedical/hmftools/releases/download/cuppa-v2.2.1/cuppa_v2.2.1.jar
@@ -274,7 +308,9 @@ python -m cuppa.train \
 --log_to_file
 ```
 
-The below table lists all possible arguments for training and/or predicting.
+### Arguments
+
+The below table lists all possible arguments for the Python component of Cuppa.
 
 | Argument                  | Task    | Description                                                                                                                                                                                   |
 |---------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -286,7 +322,8 @@ The below table lists all possible arguments for training and/or predicting.
 | `--cv_predictions_path`   | Predict | Path to a CuppaPrediction tsv file containing the cross-validation predictions. Samples found in <br/>this file will have their predictions returned from this file instead of being computed |
 | `--compress_tsv_files`    | Predict | Compress tsv files with gzip? (will add .gz to the file extension)                                                                                                                            |
 | `--force_plot`            | Predict | Force plotting when there are >10 samples in multi-sample mode                                                                                                                                |
-| `--excl_classes`          | Train   | Comma separated list of cancer subtypes to exclude from training. E.g. 'Breast' or 'Breast,Lung'. Default: '_Other,_Unknown'                                                                  |
+| `--rename_classes`        | Predict | Key/value pairs for changing cancer type names in prediction output files, e.g. `'Breast: Other=Breast: ER and/or HER2 positive,Kidney: Other=Kidney: Clear cell carcinoma'`                  |
+| `--excl_classes`          | Train   | Comma separated list of cancer subtypes to exclude from training, e.g. `'Breast'` or `'Breast,Lung'`. Default: `'_Other,_Unknown'`                                                            |
 | `--min_samples_with_rna`  | Train   | Minimum number of samples with RNA in each cancer subtype. If the cancer subtype has fewer samples with RNA than this value, the cancer subtype will be excluded from training. Default: 5    |
 | `--fusion_overrides_path` | Train   | Path to the fusion overrides tsv file. See section [FusionProbOverrider](#fusionproboverrider) for how this file should be formatted                                                          |
 | `--cv_folds`              | Train   | Number of cross-validation folds. Default: 10                                                                                                                                                 |
@@ -296,12 +333,12 @@ The below table lists all possible arguments for training and/or predicting.
 | `--log_to_file`           | Train   | Output logs to a file?                                                                                                                                                                        |
 | `--log_path`              | Train   | Path to log file. Default: `${output_dir}/run.log`                                                                                                                                            |
 
-### Additional input files for training CUPPA
+### Additional input files for training Cuppa
 
 #### Metadata
 
 This file specifies the cancer type labels for each sample. Internally, `CancerSubtype` is used as the label for each
-sample, and corresponds to the cancer types that CUPPA classifies. 
+sample, and corresponds to the cancer types that Cuppa classifies. 
 
 `RnaReadLength` together with `CancerSubtype` is used to create 
 [stratified](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.StratifiedKFold.html) 
@@ -327,21 +364,21 @@ event.fusion.      FUS_DDIT3    Bone/Soft tissue: Liposarcoma
           ...            ...                              ...
 ```
 
-### Running CUPPA within python
-Training of CUPPA and making predictions can be done interactively in Python. Please refer to these jupyter notebooks
+### Running Cuppa within python
+Training of Cuppa and making predictions can be done interactively in Python. Please refer to these jupyter notebooks
 for example code at [doc/notebooks/](src/main/python/pycuppa/doc/notebooks/). This below links:
 - [predict_example.ipynb](src/main/python/pycuppa/doc/notebooks/predict_example.ipynb): view on [nbviewer.org](https://nbviewer.org/github/hartwigmedical/hmftools/blob/master/cuppa/src/main/python/pycuppa/doc/notebooks/predict_example.ipynb)
 - [train_example.ipynb](src/main/python/pycuppa/doc/notebooks/train_example.ipynb): view on [nbviewer.org](https://nbviewer.org/github/hartwigmedical/hmftools/blob/master/cuppa/src/main/python/pycuppa/doc/notebooks/train_example.ipynb)
 
 # Classifier output
-For each sample CUPPA outputs a visualization of the predictions (PNG file), as well as the raw visualization data as a 
+For each sample Cuppa outputs a visualization of the predictions (PNG file), as well as the raw visualization data as a 
 TSV file. Please see later sections for more info on the [features](#features) and [classifiers](#classifier-structure) 
 shown in the visualization.
 
 ![](src/main/python/pycuppa/doc/visualization/COLO829v003T.cuppa.vis.png)
 
 ### Probabilities by classifier
-The CUPPA visualization is split into 4 panels. The first panel shows the probabilities for each cancer subtype 
+The Cuppa visualization is split into 4 panels. The first panel shows the probabilities for each cancer subtype 
 (columns) for each classifier (rows). The grey tabs indicate cancer type groupings based on molecular/histological
 supertypes (e.g. Lung cancer) but also by organ type (Bone/Soft tissue cancers). Group probabilities are shown for the 
 COMBINED, DNA_COMBINED and RNA_COMBINED classifiers, where these probabilities are simply the sum of probabilities 
@@ -352,10 +389,10 @@ This panel shows the presence of certain [mutational signatures](https://cancer.
 to their presence in each cancer type in the training set. Each heatmap cell shows the where a given sample lies in the 
 cancer type cohort distribution for a particular signature (quantile).
 
-**NOTE: CUPPA does not use signatures as features internally**. These are only displayed for informational 
-purposes to confirm or reject CUPPA's predictions, such as in the following scenario:
+**NOTE: Cuppa does not use signatures as features internally**. These are only displayed for informational 
+purposes to confirm or reject Cuppa's predictions, such as in the following scenario:
 - A pathologist determines that a tumor is a breast cancer
-- CUPPA predicts the tumor to be a lung cancer
+- Cuppa predicts the tumor to be a lung cancer
 - This tumor has over 10,000 SBS4 (smoking) mutations, which falls within the typical range for lung cancers
 - This tumor is therefore more likely to be a lung cancer
 
@@ -389,8 +426,8 @@ For each cancer type, the number of training samples, as well recall and precisi
 [cross-validation](#training-procedure)) are shown to give an idea about how reliably each cancer type can be predicted. 
 
 - Number of training samples: Cancer types with more training samples are usually more reliably predicted
-- Recall: A recall of e.g. 0.95 for prostate cancer means that CUPPA expects to miss 5% of prostate cancer cases
-- Precision: A precision of e.g. 0.95 for prostate cancer means that of 100 samples CUPPA predicts as prostate cancer,
+- Recall: A recall of e.g. 0.95 for prostate cancer means that Cuppa expects to miss 5% of prostate cancer cases
+- Precision: A precision of e.g. 0.95 for prostate cancer means that of 100 samples Cuppa predicts as prostate cancer,
 5% of those predictions are wrong
 
 ### TSV file
@@ -429,7 +466,7 @@ Below is a description of the columns:
 
 # Features
 
-The features used by CUPPA are derived from DNA and RNA sequencing. These features are provided to CUPPA as a single 
+The features used by Cuppa are derived from DNA and RNA sequencing. These features are provided to Cuppa as a single 
 dataframe containing the features (columns) for each sample (rows).
 
 | Source | Feature type | Feature description                                           | No. of features |
@@ -451,7 +488,7 @@ The genomic position of somatic SNVs, also known as regional mutational density 
 previously associated with tissue type-specific chromatin states [[Lehner et al. 2012, Nature](https://www.nature.com/articles/nature11273)] 
 and were shown to have strong predictive power for tissue of origin [[Jiao et al. 2020, NatComm](https://www.nature.com/articles/s41467-019-13825-8)].
 
-For CUPPA, we count the number of SNVs in each 500kb bin across the genome for each sample. Chromosome Y is excluded to 
+For Cuppa, we count the number of SNVs in each 500kb bin across the genome for each sample. Chromosome Y is excluded to 
 avoid sex-related effects. We also exclude the mutations characteristic of AID-APOBEC hypermutation (T[C>T]N and 
 T[C>G]N) as we observe them to have a distinct genomic position profile which does not generally match the cancer 
 specific profile (predominantly affecting Lung, Breast and Urothelial cancers).
@@ -459,7 +496,7 @@ specific profile (predominantly affecting Lung, Breast and Urothelial cancers).
 ### SNV96
 The SNV counts in the 96-trinucleotide contexts reflects specific mutagenic effects such as UV radiation, smoking, and 
 background mutational processes. While these trinucleotide contexts are often used for the COSMIC single base 
-substitution (SBS) [signatures](https://cancer.sanger.ac.uk/signatures/sbs/), CUPPA does not use the COSMIC signatures 
+substitution (SBS) [signatures](https://cancer.sanger.ac.uk/signatures/sbs/), Cuppa does not use the COSMIC signatures 
 directly. However, the SNV96 sub-classifier is designed to capture the obvious similarities that can also be observed 
 via signatures.
 
@@ -490,7 +527,7 @@ cervical and head & neck cancers), merkel cell polyomavirus (MCPyV; skin carcino
 cancer), and herpes simplex virus (HSV; various cancer types).
 
 #### Structural variants (SVs)
-CUPPA uses various cancer type specific SV types as features:
+Cuppa uses various cancer type specific SV types as features:
 - LINE: Long interspersed nuclear elements. Often found in esophageal, head & neck, and colorectal cancers [[Roderiguez-Martin et al. 2020, NatGen](https://www.nature.com/articles/s41588-019-0562-0)]
 - SIMPLE_DEL_20KB_1MB: Simple structural deletions, 10kb to 1Mb in size
 - SIMPLE_DUP_32B_200B: Simple structural duplications, 30bp to 200bp in size
@@ -501,7 +538,7 @@ CUPPA uses various cancer type specific SV types as features:
 #### Tumor mutational burden (TMB)
 Certain cancer types have an extremely high number of mutations, such as skin and lung cancers (due to UV radiation and 
 smoking respectively), while other have very few mutations, such as medulloblastomas and pilocytic astrocytomas (due to 
-typically being pediatric cancers). CUPPA thus uses the total number of SNVs and indels as features.
+typically being pediatric cancers). Cuppa thus uses the total number of SNVs and indels as features.
 
 #### Whole genome duplication (WGD)
 The rate of WGD varies by cancer type [[Priestley et al. 2019, Nature](https://www.nature.com/articles/s41586-019-1689-y)].
@@ -509,11 +546,11 @@ The rate of WGD varies by cancer type [[Priestley et al. 2019, Nature](https://w
 #### Sex
 Cancers of the reproductive organs are exclusively male (e.g. prostate cancer) or female (e.g. ovarian, uterine, 
 cervical cancers). Sex (male/female) is determined using the copy number of the sex chromosomes and is used as a feature 
-in CUPPA.
+in Cuppa.
 
 ### GENE_EXP
 Genes are differentially expressed across tissue types and can thus be used for CUP classification. Normalized 
-transcript counts for each gene in `log(transcripts per million + 1)` are used as input for CUPPA.
+transcript counts for each gene in `log(transcripts per million + 1)` are used as input for Cuppa.
 
 ### ALT_SJ
 A novel splice junction is defined in this context as any splice junction that is not annotated in ENSEMBL. A set of 
@@ -522,11 +559,11 @@ supporting a novel site in 2 or more samples. Intronic splice sites were exclude
 was then formed by calculating the average fragment count per cancer cohort at each of these novel sites.
 
 # Classifier structure
-This section provides details on each component of the CUPPA classifier. CamelCase headings refer to the class name of 
+This section provides details on each component of the Cuppa classifier. CamelCase headings refer to the class name of 
 the respective component.
 
 ### CuppaClassifier
-CUPPA is composed of 2 main layers of multinomial logistic regressions, and a final post-processing layer:
+Cuppa is composed of 2 main layers of multinomial logistic regressions, and a final post-processing layer:
 - **Sub-classifier layer**: Each of the 5 feature types (GEN_POS, SNV96, EVENT, GENE_EXP, ALT_SJ) is passed 
 as input to a sub-classifier for the corresponding feature type. Each sub-classifier performs some feature 
 transformations, after which a logistic regression weighs the importance of each transformed feature.
@@ -538,7 +575,7 @@ followed by some post-processing steps.
 
 ### LogisticRegression
 The [logistic regressions](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html)
-in all CUPPA classifiers share the following arguments:
+in all Cuppa classifiers share the following arguments:
 
 - `multi_class="multinomial"`: A multinomial regression is used as our task is to classify multiple cancer types ('classes')
 - `solver="saga"`: The SAGA (Stochastic Average Gradient Accelerated) solver is used as it is the only one that 
@@ -827,21 +864,21 @@ Additionally, two special operators are used:
 
 ### Cancer subtype groups
 Grouping of subtypes are made based on molecular/histological supertypes (e.g. Lung cancer) but also by organ type 
-(Bone/Soft tissue cancers) for the visualization of CUPPA.
+(Bone/Soft tissue cancers) for the visualization of Cuppa.
 
 The cancer subtype group is simply the prefix before the first colon (":"). For example, 
 "Bone/Soft tissue: GIST" maps to the "Bone/Soft tissue" group. Subtypes with no prefix (i.e. no ":") belong to their own 
 standalone group. For example, "Anogenital" maps to the "Anogenital" supertype.
 
-CUPPA internally predicts subtype probabilities. Group probabilities are simply the sum of the subtype probabilities 
+Cuppa internally predicts subtype probabilities. Group probabilities are simply the sum of the subtype probabilities 
 of a particular group.
 
 ### Training procedure
-The training data for CUPPA includes: i) a dataframe containing the features (columns) per sample (rows), and ii) an 
-array of known cancer type labels for each sample. All samples from the training set are used to train the final CUPPA 
+The training data for Cuppa includes: i) a dataframe containing the features (columns) per sample (rows), and ii) an 
+array of known cancer type labels for each sample. All samples from the training set are used to train the final Cuppa 
 classifier.
 
-10-fold cross-validation was used to assess the performance of CUPPA. Here, the training data was split into 10 parts, 
+10-fold cross-validation was used to assess the performance of Cuppa. Here, the training data was split into 10 parts, 
 training was performed on 90% of samples, and tested on the remaining 10% of samples. This was repeated for the 10 
 different 'folds', each yielding cancer type probabilities for a different 10% subset of samples, and ultimately for 
 every sample in the training set. These probabilities were then used to calculate various performance metrics (e.g. 
@@ -851,5 +888,5 @@ number of samples correctly predicted per cancer type).
 
 ### Performance
 Performance stats and confusion matrices as determined by cross-validation can be found at the below links:
-- [GRCh37 CUPPA model](https://console.cloud.google.com/storage/browser/hmf-public/HMFtools-Resources/cuppa/37/performance)
-- [GRCh38 CUPPA model](https://console.cloud.google.com/storage/browser/hmf-public/HMFtools-Resources/cuppa/38/performance)
+- [GRCh37 Cuppa model](https://console.cloud.google.com/storage/browser/hmf-public/HMFtools-Resources/cuppa/37/performance)
+- [GRCh38 Cuppa model](https://console.cloud.google.com/storage/browser/hmf-public/HMFtools-Resources/cuppa/38/performance)

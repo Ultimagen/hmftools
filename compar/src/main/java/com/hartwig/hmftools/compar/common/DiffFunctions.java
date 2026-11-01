@@ -14,7 +14,7 @@ public final class DiffFunctions
 {
     public static final String FILTER_DIFF = "filter";
 
-    public static boolean checkDiff(final List<String> diffs, final String name, int value1, int value2, final DiffThresholds thresholds)
+    public static boolean checkDiff(final List<String> diffs, final String name, long value1, long value2, final DiffThresholds thresholds)
     {
         if(!thresholds.isFieldRegistered(name))
             return checkDiff(diffs, name, value1, value2);
@@ -40,7 +40,7 @@ public final class DiffFunctions
         return false;
     }
 
-    public static boolean checkDiff(final List<String> diffs, final String name, int value1, int value2)
+    public static boolean checkDiff(final List<String> diffs, final String name, long value1, long value2)
     {
         if(value1 != value2)
         {
@@ -69,7 +69,7 @@ public final class DiffFunctions
         return true;
     }
 
-    public static void checkFilterDiffs(Set<String> refFilters, final Set<String> otherFilters, final List<String> diffs)
+    public static void checkFilterDiffs(final Set<String> refFilters, final Set<String> otherFilters, final List<String> diffs)
     {
         Set<String> refFilterDiffs = refFilters.stream().filter(x -> !otherFilters.contains(x)).collect(Collectors.toSet());
         Set<String> newFilterDiffs = otherFilters.stream().filter(x -> !refFilters.contains(x)).collect(Collectors.toSet());

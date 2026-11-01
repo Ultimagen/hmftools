@@ -1,6 +1,10 @@
 package com.hartwig.hmftools.linx;
 
-import static com.hartwig.hmftools.common.purple.ChromosomeArm.asStr;
+import static com.hartwig.hmftools.common.linx.LinxCommonTypes.generateVisExonFilename;
+import static com.hartwig.hmftools.common.linx.LinxCommonTypes.generateVisFusionFilename;
+import static com.hartwig.hmftools.common.linx.LinxCommonTypes.generateVisProteinFilename;
+import static com.hartwig.hmftools.common.linx.LinxCommonTypes.generateVisSegmentFilename;
+import static com.hartwig.hmftools.common.linx.LinxCommonTypes.generateVisSvFilename;
 import static com.hartwig.hmftools.common.purple.Gender.MALE;
 import static com.hartwig.hmftools.common.utils.Strings.appendStr;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
@@ -33,7 +37,7 @@ import com.hartwig.hmftools.common.linx.LinxGermlineDisruption;
 import com.hartwig.hmftools.common.linx.LinxLink;
 import com.hartwig.hmftools.common.linx.LinxSvAnnotation;
 import com.hartwig.hmftools.common.perf.PerformanceCounter;
-import com.hartwig.hmftools.common.purple.ChromosomeArm;
+import com.hartwig.hmftools.common.segmentation.Arm;
 import com.hartwig.hmftools.common.sv.StructuralVariantData;
 import com.hartwig.hmftools.common.utils.Doubles;
 import com.hartwig.hmftools.linx.analysis.ClusterAnalyser;
@@ -42,6 +46,7 @@ import com.hartwig.hmftools.linx.chaining.SvChain;
 import com.hartwig.hmftools.linx.cn.CnDataLoader;
 import com.hartwig.hmftools.linx.cn.CnSegmentBuilder;
 import com.hartwig.hmftools.linx.cn.SvCNData;
+import com.hartwig.hmftools.linx.cohort.CohortDataWriter;
 import com.hartwig.hmftools.linx.drivers.DriverGeneAnnotator;
 import com.hartwig.hmftools.linx.fusion.FusionDisruptionAnalyser;
 import com.hartwig.hmftools.linx.fusion.FusionResources;
@@ -51,7 +56,6 @@ import com.hartwig.hmftools.linx.types.LinkedPair;
 import com.hartwig.hmftools.linx.types.SvBreakend;
 import com.hartwig.hmftools.linx.types.SvCluster;
 import com.hartwig.hmftools.linx.types.SvVarData;
-import com.hartwig.hmftools.linx.visualiser.file.VisCopyNumber;
 import com.hartwig.hmftools.linx.visualiser.file.VisFusion;
 import com.hartwig.hmftools.linx.visualiser.file.VisGeneExon;
 import com.hartwig.hmftools.linx.visualiser.file.VisProteinDomain;
@@ -211,7 +215,7 @@ public class SampleAnalyser implements Callable<Void>
 
         List<StructuralVariantData> svRecords = loadVariantsFromVcf(mConfig, mCurrentSampleId);
 
-        final List<SvVarData> svDataList = createSvData(svRecords, mConfig);
+        List<SvVarData> svDataList = createSvData(svRecords, mConfig);
 
         if(!mConfig.IsGermline)
             mCnDataLoader.loadSampleData(mCurrentSampleId, svRecords);
@@ -262,10 +266,10 @@ public class SampleAnalyser implements Callable<Void>
         LNX_LOGGER.info("sample({}) procesed {} SVs", sampleId, svDataList.size());
     }
 
-    public final List<SvVarData> getVariants() { return mAllVariants; }
+    public List<SvVarData> getVariants() { return mAllVariants; }
 
     public boolean inValidState() { return mIsValid; }
-    public final Map<String, List<SvBreakend>> getChrBreakendMap() { return mAnalyser.getState().getChrBreakendMap(); }
+    public Map<String, List<SvBreakend>> getChrBreakendMap() { return mAnalyser.getState().getChrBreakendMap(); }
 
     public void setSampleSVs(final List<SvVarData> variants)
     {
@@ -344,9 +348,9 @@ public class SampleAnalyser implements Callable<Void>
 
         List<SvCluster> allClusters = mAnalyser.getAllClusters();
 
-        final List<LinxSvAnnotation> linxSvData = prepareSampleData ? generateSvDataOutput() : null;
-        final List<LinxCluster> clusterData = prepareSampleData ? generateClusterOutput(allClusters) : null;
-        final List<LinxLink> linksData = prepareSampleData ? generateLinksOutput() : null;
+        List<LinxSvAnnotation> linxSvData = prepareSampleData ? generateSvDataOutput() : null;
+        List<LinxCluster> clusterData = prepareSampleData ? generateClusterOutput(allClusters) : null;
+        List<LinxLink> linksData = prepareSampleData ? generateLinksOutput() : null;
 
         if(mCohortDataWriter.writeCohortFiles())
         {
@@ -384,10 +388,10 @@ public class SampleAnalyser implements Callable<Void>
 
                 if(!mConfig.IsGermline)
                 {
-                    final String driverCatalogFile = LinxDriver.generateCatalogFilename(mConfig.OutputDataPath, mCurrentSampleId, true);
+                    String driverCatalogFile = LinxDriver.generateCatalogFilename(mConfig.OutputDataPath, mCurrentSampleId, true);
                     DriverCatalogFile.write(driverCatalogFile, driverCatalogs);
 
-                    final String driversFile = LinxDriver.generateFilename(mConfig.OutputDataPath, mCurrentSampleId);
+                    String driversFile = LinxDriver.generateFilename(mConfig.OutputDataPath, mCurrentSampleId);
                     LinxDriver.write(driversFile, linxDrivers);
                 }
             }
@@ -433,11 +437,11 @@ public class SampleAnalyser implements Callable<Void>
                 LinxFusion.write(LinxFusion.generateFilename(mConfig.OutputDataPath, mCurrentSampleId), Collections.EMPTY_LIST);
                 LinxDriver.write(LinxDriver.generateFilename(mConfig.OutputDataPath, mCurrentSampleId), Collections.EMPTY_LIST);
 
-                VisSvData.write(VisSvData.generateFilename(mConfig.OutputDataPath, mCurrentSampleId, mConfig.IsGermline), Collections.EMPTY_LIST);
-                VisGeneExon.write(VisGeneExon.generateFilename(mConfig.OutputDataPath, mCurrentSampleId, mConfig.IsGermline), Collections.EMPTY_LIST);
-                VisSegment.write(VisSegment.generateFilename(mConfig.OutputDataPath, mCurrentSampleId, mConfig.IsGermline), Collections.EMPTY_LIST);
-                VisFusion.write(VisFusion.generateFilename(mConfig.OutputDataPath, mCurrentSampleId, mConfig.IsGermline), Collections.EMPTY_LIST);
-                VisProteinDomain.write(VisProteinDomain.generateFilename(mConfig.OutputDataPath, mCurrentSampleId, mConfig.IsGermline), Collections.EMPTY_LIST);
+                VisSvData.write(generateVisSvFilename(mConfig.OutputDataPath, mCurrentSampleId, mConfig.IsGermline), Collections.EMPTY_LIST);
+                VisGeneExon.write(generateVisExonFilename(mConfig.OutputDataPath, mCurrentSampleId, mConfig.IsGermline), Collections.EMPTY_LIST);
+                VisSegment.write(generateVisSegmentFilename(mConfig.OutputDataPath, mCurrentSampleId, mConfig.IsGermline), Collections.EMPTY_LIST);
+                VisFusion.write(generateVisFusionFilename(mConfig.OutputDataPath, mCurrentSampleId, mConfig.IsGermline), Collections.EMPTY_LIST);
+                VisProteinDomain.write(generateVisProteinFilename(mConfig.OutputDataPath, mCurrentSampleId, mConfig.IsGermline), Collections.EMPTY_LIST);
             }
         }
         catch(IOException e)
@@ -462,13 +466,13 @@ public class SampleAnalyser implements Callable<Void>
 
             mSvAnnotators.LineElementAnnotator.setKnownLineElements(var);
 
-            ChromosomeArm startArm = getChromosomalArm(var.chromosome(true), var.position(true));
+            Arm startArm = getChromosomalArm(var.chromosome(true), var.position(true));
 
-            ChromosomeArm endArm;
+            Arm endArm;
             if(!var.isSglBreakend())
                 endArm = getChromosomalArm(var.chromosome(false), var.position(false));
             else
-                endArm = ChromosomeArm.P_ARM;
+                endArm = Arm.P;
 
             var.setChromosomalArms(startArm, endArm);
 
@@ -492,15 +496,20 @@ public class SampleAnalyser implements Callable<Void>
                 mCnDataLoader.getSvJcnCalcMap(),
                 mCnDataLoader.getSvIdCnDataMap(),
                 mCnDataLoader.getChrCnDataMap());
+
+        for(SvVarData var : mAllVariants)
+        {
+            var.setJcnRecalcData(1, 1); // assume in 1 of 2 copies
+        }
     }
 
     private List<LinxSvAnnotation> generateSvDataOutput()
     {
-        final List<LinxSvAnnotation> linxSvData = Lists.newArrayList();
+        List<LinxSvAnnotation> linxSvData = Lists.newArrayList();
 
-        for(final SvVarData var : mAllVariants)
+        for(SvVarData var : mAllVariants)
         {
-            final SvCluster cluster = var.getCluster();
+            SvCluster cluster = var.getCluster();
 
             if(cluster == null)
             {
@@ -508,7 +517,7 @@ public class SampleAnalyser implements Callable<Void>
                 continue;
             }
 
-            final ArmCluster armClusterStart = cluster.findArmCluster(var.getBreakend(true));
+            ArmCluster armClusterStart = cluster.findArmCluster(var.getBreakend(true));
 
             if(armClusterStart == null)
             {
@@ -516,15 +525,19 @@ public class SampleAnalyser implements Callable<Void>
                 continue;
             }
 
-            final ArmCluster armClusterEnd = !var.isSglBreakend() ? cluster.findArmCluster(var.getBreakend(false)) : null;
+            ArmCluster armClusterEnd = !var.isSglBreakend() ? cluster.findArmCluster(var.getBreakend(false)) : null;
 
             // suppress SGL-INF artificial SVs, but use their details in place of the SGL
             if(var.getLinkedSVs() != null && var.isSglBreakend())
                 continue;
 
             linxSvData.add(ImmutableLinxSvAnnotation.builder()
-                    .vcfId(var.getSvData().vcfIdStart())
+                    .vcfIdStart(var.getSvData().vcfIdStart())
+                    .vcfIdEnd(var.getSvData().vcfIdEnd())
                     .svId(var.id())
+                    .coordsStart(var.coordsStr(true))
+                    .coordsEnd(var.coordsStr(false))
+                    .type(var.type())
                     .clusterId(cluster.id())
                     .clusterReason(var.getClusterReason())
                     .fragileSiteStart(var.isFragileSite(true))
@@ -550,11 +563,11 @@ public class SampleAnalyser implements Callable<Void>
 
     private List<LinxCluster> generateClusterOutput(final List<SvCluster> allClusters)
     {
-        final List<LinxCluster> clusterData = Lists.newArrayList();
+        List<LinxCluster> clusterData = Lists.newArrayList();
 
-        for(final SvCluster cluster : allClusters)
+        for(SvCluster cluster : allClusters)
         {
-            final String superType = getClusterCategory(cluster);
+            String superType = getClusterCategory(cluster);
 
             clusterData.add(ImmutableLinxCluster.builder()
                     .clusterId(cluster.id())
@@ -571,23 +584,23 @@ public class SampleAnalyser implements Callable<Void>
 
     private List<LinxLink> generateLinksOutput()
     {
-        final List<LinxLink> linksData = Lists.newArrayList();
+        List<LinxLink> linksData = Lists.newArrayList();
 
-        for(final SvCluster cluster : mAnalyser.getClusters())
+        for(SvCluster cluster : mAnalyser.getClusters())
         {
             List<SvChain> chains = cluster.getChains();
 
-            for(final SvChain chain : chains)
+            for(SvChain chain : chains)
             {
                 int chainSvCount = chain.getSvCount();
 
                 List<LinkedPair> uniquePairs = Lists.newArrayList();
-                final List<LinkedPair> chainLinks = chain.getLinkedPairs();
+                List<LinkedPair> chainLinks = chain.getLinkedPairs();
                 boolean isDoubleMinute = chain.isDoubleMinute();
 
                 for(int chainIndex = 0; chainIndex < chainLinks.size(); ++chainIndex)
                 {
-                    final LinkedPair pair = chainLinks.get(chainIndex);
+                    LinkedPair pair = chainLinks.get(chainIndex);
 
                     if(uniquePairs.stream().anyMatch(x -> x.matches(pair)))
                         continue;
@@ -604,10 +617,10 @@ public class SampleAnalyser implements Callable<Void>
                         }
                     }
 
-                    final SvBreakend beStart = pair.getBreakend(true);
-                    final SvBreakend beEnd = pair.getBreakend(false);
+                    SvBreakend beStart = pair.getBreakend(true);
+                    SvBreakend beEnd = pair.getBreakend(false);
 
-                    final String linkArm = beStart.arm() == beEnd.arm() ? asStr(beStart.arm()) : asStr(beStart.arm()) + "_" + asStr(beEnd.arm());
+                    String linkArm = beStart.arm() == beEnd.arm() ? beStart.arm().toString() : beStart.arm().toString() + "_" + beEnd.arm().toString();
 
                     linksData.add(ImmutableLinxLink.builder()
                             .clusterId(cluster.id())

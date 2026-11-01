@@ -7,6 +7,10 @@ import static com.hartwig.hmftools.common.utils.file.CommonFields.FLD_REF;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
+import static com.hartwig.hmftools.common.variant.pon.PonCache.FLD_MAX_READ_COUNT;
+import static com.hartwig.hmftools.common.variant.pon.PonCache.FLD_MULTI_PON_STATUS;
+import static com.hartwig.hmftools.common.variant.pon.PonCache.FLD_SAMPLE_COUNT;
+import static com.hartwig.hmftools.common.variant.pon.PonCache.FLD_TOTAL_READ_COUNT;
 import static com.hartwig.hmftools.pave.PaveConfig.PV_LOGGER;
 import static com.hartwig.hmftools.pave.pon_gen.PonConfig.GERMLINE_CLINVAR_MAX_REPEAT;
 import static com.hartwig.hmftools.pave.pon_gen.PonConfig.GERMLINE_CLINVAR_MIN_SAMPLES;
@@ -21,6 +25,7 @@ import java.util.StringJoiner;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
+import com.hartwig.hmftools.common.variant.pon.MultiPonStatus;
 
 public class PonWriter
 {
@@ -105,11 +110,14 @@ public class PonWriter
             sj.add(FLD_REF);
             sj.add(FLD_ALT);
 
-            sj.add("SampleCount");
-            sj.add("MaxSampleReadCount");
-            sj.add("TotalReadCount");
+            sj.add(FLD_SAMPLE_COUNT);
+            sj.add(FLD_MAX_READ_COUNT);
+            sj.add(FLD_TOTAL_READ_COUNT);
 
-            if(!mConfig.WriteFinal)
+            if(!mConfig.ExistingPonFilename.isEmpty())
+                sj.add(FLD_MULTI_PON_STATUS);
+
+            if(mConfig.WriteDetailed)
             {
                 sj.add("SomaticHotspot");
                 sj.add("GermlineHotspot");
@@ -146,18 +154,24 @@ public class PonWriter
                 sj.add(String.valueOf(variant.maxSampleReadCount()));
                 sj.add(String.valueOf(variant.totalReadCount()));
 
-                if(mConfig.WriteFinal)
+                if(!mConfig.ExistingPonFilename.isEmpty())
                 {
-                    if(filterOutVariant(variant))
-                        continue;
+                    MultiPonStatus ponStatus = variant.multiPonStatus();
+                    sj.add(ponStatus.toString());
                 }
-                else
+
+                if(mConfig.WriteDetailed)
                 {
                     sj.add(String.valueOf(variant.isSomaticHotspot()));
                     sj.add(String.valueOf(variant.isGermlineHotspot()));
                     sj.add(String.valueOf(variant.isClinvarPathogenic()));
                     sj.add(String.valueOf(variant.inCodingRegion()));
                     sj.add(String.valueOf(variant.repeatCount()));
+                }
+                else
+                {
+                    if(filterOutVariant(variant))
+                        continue;
                 }
 
                 mWriter.write(sj.toString());
@@ -173,20 +187,36 @@ public class PonWriter
 
     private boolean filterOutVariant(final VariantPonData variant)
     {
-        // exckude a variant from the PON if either of the following dot points are satisfied:
+        if(variant.inBasePonCache())
+            return false;
+
+        // exclude a variant from the PON if either of the following are satisfied:
         // - somatic hotspot
         // - (germline hotspot OR clinvar pathogenic) AND has sampleCount < 10 AND (has repeatCount < 4 or is NOT an indel)
         if(variant.isSomaticHotspot())
             return true;
 
-        if(variant.sampleCount() < GERMLINE_CLINVAR_MIN_SAMPLES
-        && (variant.isGermlineHotspot() || variant.clinvarPathogenicity().isPathogenic())
-        && (!variant.isIndel() || variant.repeatCount() < GERMLINE_CLINVAR_MAX_REPEAT))
+        if(isGermlineExcludedVariant(variant))
+            return true;
+
+        return false;
+    }
+
+    private boolean isGermlineExcludedVariant(final VariantPonData variant)
+    {
+        if(variant.sampleCount() >= GERMLINE_CLINVAR_MIN_SAMPLES)
+            return false;
+
+        if(!variant.isGermlineHotspot() && !variant.clinvarPathogenicity().isPathogenic())
+            return false;
+
+        if(variant.isIndel())
+        {
+            return variant.repeatCount() < GERMLINE_CLINVAR_MAX_REPEAT;
+        }
+        else
         {
             return true;
         }
-
-        return false;
-
     }
 }

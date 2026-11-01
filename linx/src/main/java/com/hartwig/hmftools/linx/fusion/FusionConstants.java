@@ -19,8 +19,10 @@ public class FusionConstants
 
     // maximum distance from breakend to transcript start for known and other fusions
     public static final int MAX_UPSTREAM_DISTANCE_KNOWN = 100000;
-    public static final int MAX_UPSTREAM_DISTANCE_IG_KNOWN = 250000;
+    public static final int MAX_UPSTREAM_DISTANCE_ENHANCER_KNOWN = 250000;
     public static final int MAX_UPSTREAM_DISTANCE_OTHER = 10000;
+    public static final int MAX_ENHANCER_PARTNER_GENE_DISTANCE_NO_ORIENT = 50000;
+    public static final int MIN_ENHANCER_PARTNER_GENE_DISTANCE = 1_000_000;
 
     public static final int SHORT_UNPHASED_DISTANCE_KNOWN = 1000000;
 
@@ -38,14 +40,30 @@ public class FusionConstants
 
     static
     {
+        // first entries are for V37, second are for V38 in Ensembl
         PROTEINS_REQUIRED_LOST.add("Raf-like Ras-binding");
+        PROTEINS_REQUIRED_LOST.add("RBD");
 
         PROTEINS_REQUIRED_KEPT.add("Ets domain");
+        PROTEINS_REQUIRED_KEPT.add("ETS_DOMAIN_3");
+
         PROTEINS_REQUIRED_KEPT.add("Protein kinase domain");
+        PROTEINS_REQUIRED_KEPT.add("PROTEIN_KINASE_DOM");
+
         PROTEINS_REQUIRED_KEPT.add("Epidermal growth factor-like domain");
+        PROTEINS_REQUIRED_KEPT.add("EGF_3");
+
         PROTEINS_REQUIRED_KEPT.add("Ankyrin repeat-containing domain");
+        PROTEINS_REQUIRED_KEPT.add("ANK_REPEAT");
+        PROTEINS_REQUIRED_KEPT.add("ANK_REP_REGION");
+
         PROTEINS_REQUIRED_KEPT.add("Basic-leucine zipper domain");
+        PROTEINS_REQUIRED_KEPT.add("BZIP");
+
         PROTEINS_REQUIRED_KEPT.add("High mobility group box domain");
+        PROTEINS_REQUIRED_KEPT.add("HMG_BOX_2");
+
         PROTEINS_REQUIRED_KEPT.add("Bromodomain");
+        PROTEINS_REQUIRED_KEPT.add("BROMODOMAIN_2");
     }
 }

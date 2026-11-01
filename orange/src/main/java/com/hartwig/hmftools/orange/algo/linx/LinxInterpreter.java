@@ -1,118 +1,212 @@
 package com.hartwig.hmftools.orange.algo.linx;
 
+import static java.lang.Math.min;
+import static java.lang.Math.round;
+
+import static com.hartwig.hmftools.common.linx.LinxCommonTypes.formVisPlotClusterPrefix;
 import static com.hartwig.hmftools.orange.OrangeApplication.LOGGER;
 
 import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-import com.hartwig.hmftools.common.driver.panel.DriverGene;
-import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
-import com.hartwig.hmftools.common.fusion.KnownFusionCache;
+import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.gene.TranscriptRegionType;
+import com.hartwig.hmftools.common.genome.chromosome.CytoBands;
+import com.hartwig.hmftools.common.linx.FusionLikelihoodType;
 import com.hartwig.hmftools.common.linx.LinxBreakend;
-import com.hartwig.hmftools.common.linx.LinxData;
-import com.hartwig.hmftools.common.linx.LinxFusion;
-import com.hartwig.hmftools.common.sv.StructuralVariant;
+import com.hartwig.hmftools.common.linx.LinxSvAnnotation;
+import com.hartwig.hmftools.common.rna.RnaFusion;
+import com.hartwig.hmftools.datamodel.common.AllelicDepth;
+import com.hartwig.hmftools.datamodel.driver.DriverInterpretation;
+import com.hartwig.hmftools.datamodel.linx.FusionPhasedType;
+import com.hartwig.hmftools.datamodel.linx.ImmutableLinxFusion;
 import com.hartwig.hmftools.datamodel.linx.ImmutableLinxRecord;
+import com.hartwig.hmftools.datamodel.linx.LinxFusion;
+import com.hartwig.hmftools.datamodel.linx.LinxFusionType;
 import com.hartwig.hmftools.datamodel.linx.LinxRecord;
-import com.hartwig.hmftools.orange.conversion.ConversionUtil;
-import com.hartwig.hmftools.orange.conversion.LinxConversion;
+import com.hartwig.hmftools.datamodel.common.ImmutableAllelicDepth;
+import com.hartwig.hmftools.orange.algo.isofox.IsofoxData;
 
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public class LinxInterpreter
 {
-    @NotNull
-    private final List<DriverGene> driverGenes;
-    @NotNull
-    private final KnownFusionCache knownFusionCache;
-    @NotNull
-    private final List<StructuralVariant> allSomaticStructuralVariants;
-    @Nullable
-    private final List<StructuralVariant> allGermlineStructuralVariants;
-    @NotNull
-    private final List<StructuralVariant> allInferredSomaticStructuralVariants;
-    @Nullable
-    private final List<StructuralVariant> allInferredGermlineStructuralVariants;
-    @NotNull
-    private final EnsemblDataCache ensemblDataCache;
+    private final CytoBands mCytoBands;
 
-    public LinxInterpreter(
-            @NotNull final List<DriverGene> driverGenes,
-            @NotNull final KnownFusionCache knownFusionCache,
-            @NotNull final List<StructuralVariant> allSomaticStructuralVariants,
-            @Nullable final List<StructuralVariant> allGermlineStructuralVariants,
-            @NotNull final List<StructuralVariant> allInferredSomaticStructuralVariants,
-            @Nullable final List<StructuralVariant> allInferredGermlineStructuralVariants,
-            @NotNull final EnsemblDataCache ensemblDataCache
-    )
+    public LinxInterpreter(final CytoBands cytoBands)
     {
-        this.driverGenes = driverGenes;
-        this.knownFusionCache = knownFusionCache;
-        this.allSomaticStructuralVariants = allSomaticStructuralVariants;
-        this.allGermlineStructuralVariants = allGermlineStructuralVariants;
-        this.allInferredSomaticStructuralVariants = allInferredSomaticStructuralVariants;
-        this.allInferredGermlineStructuralVariants = allInferredGermlineStructuralVariants;
-        this.ensemblDataCache = ensemblDataCache;
+        mCytoBands = cytoBands;
     }
 
-    @NotNull
-    public LinxRecord interpret(@NotNull LinxData linx)
+    public LinxRecord interpret(final LinxData linx, @Nullable final IsofoxData isofoxData)
     {
-        LOGGER.info("Analysing linx data");
-        List<LinxFusion> additionalSuspectSomaticFusions =
-                DnaFusionSelector.selectInterestingUnreportedFusions(linx.allSomaticFusions(), driverGenes);
-        LOGGER.info(" Found an additional {} suspect somatic fusions that are potentially interesting",
-                additionalSuspectSomaticFusions.size());
+        LOGGER.debug("analysing Linx data");
 
-        List<LinxFusion> additionalViableSomaticFusions =
-                DnaFusionSelector.selectAdditionalViableSomaticFusions(linx.allSomaticFusions(), additionalSuspectSomaticFusions);
-        LOGGER.info(" Found an additional {} viable somatic fusions", additionalViableSomaticFusions.size());
+        List<com.hartwig.hmftools.datamodel.linx.LinxBreakend> somaticBreakends = LinxBreakendInterpreter.buildSomaticBreakends(
+                linx, mCytoBands);
 
-        List<LinxBreakend> additionalSuspectSomaticBreakends =
-                BreakendSelector.selectInterestingUnreportedBreakends(linx.allSomaticBreakends(),
-                        linx.reportableSomaticFusions(),
-                        knownFusionCache);
-        LOGGER.info(" Found an additional {} suspect somatic breakends that are potentially interesting",
-                additionalSuspectSomaticBreakends.size());
-
-        LinxBreakendInterpreter somaticBreakendInterpreter = new LinxBreakendInterpreter(
-                combine(allSomaticStructuralVariants, allInferredSomaticStructuralVariants),
-                linx.allSomaticStructuralVariants(),
-                ensemblDataCache);
-
-        LinxBreakendInterpreter germlineBreakendInterpreter = new LinxBreakendInterpreter(
-                combine(allGermlineStructuralVariants, allInferredGermlineStructuralVariants),
-                Objects.requireNonNullElse(linx.allGermlineStructuralVariants(), List.of()),
-                ensemblDataCache);
+        List<com.hartwig.hmftools.datamodel.linx.LinxBreakend> germlineBreakends = LinxBreakendInterpreter.buildGermlineBreakends(
+                linx, mCytoBands);
 
         return ImmutableLinxRecord.builder()
-                .somaticDrivers(ConversionUtil.mapToIterable(linx.somaticDrivers(), LinxConversion::convert))
-                .allSomaticStructuralVariants(ConversionUtil.mapToIterable(linx.allSomaticStructuralVariants(), LinxConversion::convert))
-                .allSomaticFusions(ConversionUtil.mapToIterable(linx.allSomaticFusions(), LinxConversion::convert))
-                .reportableSomaticFusions(ConversionUtil.mapToIterable(linx.reportableSomaticFusions(), LinxConversion::convert))
-                .additionalSuspectSomaticFusions(ConversionUtil.mapToIterable(additionalSuspectSomaticFusions, LinxConversion::convert))
-                .additionalViableSomaticFusions(ConversionUtil.mapToIterable(additionalViableSomaticFusions, LinxConversion::convert))
-                .allSomaticBreakends(ConversionUtil.mapToIterable(linx.allSomaticBreakends(), somaticBreakendInterpreter::interpret))
-                .reportableSomaticBreakends(ConversionUtil.mapToIterable(linx.reportableSomaticBreakends(), somaticBreakendInterpreter::interpret))
-                .additionalSuspectSomaticBreakends(ConversionUtil.mapToIterable(additionalSuspectSomaticBreakends, somaticBreakendInterpreter::interpret))
-                .somaticHomozygousDisruptions(ConversionUtil.mapToIterable(linx.somaticHomozygousDisruptions(), LinxConversion::convert))
-                .allGermlineStructuralVariants(ConversionUtil.mapToIterable(linx.allGermlineStructuralVariants(), LinxConversion::convert))
-                .allGermlineBreakends(ConversionUtil.mapToIterable(linx.allGermlineBreakends(), germlineBreakendInterpreter::interpret))
-                .reportableGermlineBreakends(ConversionUtil.mapToIterable(linx.reportableGermlineBreakends(), germlineBreakendInterpreter::interpret))
-                .germlineHomozygousDisruptions(ConversionUtil.mapToIterable(linx.germlineHomozygousDisruptions(), LinxConversion::convert))
+                .fusions(buildFusions(linx, isofoxData))
+                .somaticBreakends(somaticBreakends)
+                .germlineBreakends(germlineBreakends)
                 .build();
     }
 
-    @NotNull
-    private List<StructuralVariant> combine(@Nullable List<StructuralVariant> svList1, @Nullable List<StructuralVariant> svList2)
+    private static LinxBreakend findBreakend(final int breakendId, final List<LinxBreakend> breakends)
     {
-        return Stream.concat(
-                        Optional.ofNullable(svList1).orElse(List.of()).stream(),
-                        Optional.ofNullable(svList2).orElse(List.of()).stream())
-                .collect(Collectors.toList());
+        return breakends.stream().filter(x -> x.id() == breakendId).findFirst().orElse(null);
+    }
+
+    private static LinxSvAnnotation findSvAnnotation(final LinxBreakend breakend, final List<LinxSvAnnotation> svAnnotations)
+    {
+        return svAnnotations.stream().filter(x -> x.svId() == breakend.svId()).findFirst().orElse(null);
+    }
+
+    public static String findReportableLinxPlot(final List<String> linxPlots, final int clusterId)
+    {
+        String plotPrefix = formVisPlotClusterPrefix(String.valueOf(clusterId));
+        return linxPlots.stream().filter(x -> x.contains(plotPrefix)).findFirst().orElse(null);
+    }
+
+    private static List<LinxFusion> buildFusions(final LinxData linx, @Nullable final IsofoxData isofoxData)
+    {
+        List<LinxFusion> convertedFusions = Lists.newArrayListWithCapacity(linx.fusions().size());
+
+        for(com.hartwig.hmftools.common.linx.LinxFusion fusion : linx.fusions())
+        {
+            LinxBreakend breakendUp = findBreakend(fusion.fivePrimeBreakendId(), linx.somaticBreakends());
+            LinxBreakend breakendDown = findBreakend(fusion.threePrimeBreakendId(), linx.somaticBreakends());
+
+            if(breakendUp == null || breakendDown == null)
+            {
+                LOGGER.error("fusion({}) missing corresponding breakends", fusion);
+                continue;
+            }
+
+            LinxSvAnnotation svAnnotation = findSvAnnotation(breakendUp, linx.somaticSvAnnotations());
+
+            if(svAnnotation == null)
+            {
+                LOGGER.error("fusion({}) missing corresponding svAnnotation", fusion);
+                continue;
+            }
+
+            String plotFilename = findReportableLinxPlot(linx.reportableEventPlots(), svAnnotation.clusterId());
+
+            LinxFusionType fusionType = LinxFusionType.valueOf(fusion.reportedType().toString());
+
+            String geneUp = breakendUp.gene();
+            String geneDown = breakendDown.gene();
+
+            if(fusionType == LinxFusionType.ENHANCER_KNOWN_PAIR || fusionType == LinxFusionType.ENHANCER_PROMISCUOUS)
+            {
+                geneUp = breakendUp.transcriptId(); // to use the IG / TC name
+            }
+
+            String contextUp = buildContextStr(breakendUp.regionType(), fusionType, fusion.fusedExonUp());
+            String contextDown = buildContextStr(breakendDown.regionType(), fusionType, fusion.fusedExonDown());
+
+            double avgJcn = (breakendUp.undisruptedCopyNumber() + breakendDown.undisruptedCopyNumber()) * 0.5;
+
+            AllelicDepth rnaSupport = findRnaSupport(fusion, isofoxData);
+
+            LinxFusion convertedFusion = ImmutableLinxFusion.builder()
+                    .geneUp(geneUp)
+                    .clusterId(svAnnotation.clusterId())
+                    .contextUp(contextUp)
+                    .transcriptUp(breakendUp.transcriptId())
+                    .geneDown(geneDown)
+                    .contextDown(contextDown)
+                    .transcriptDown(breakendDown.transcriptId())
+                    .reportedType(LinxFusionType.valueOf(fusion.reportedType()))
+                    .phased(FusionPhasedType.valueOf(fusion.phased().name()))
+                    .driverInterpretation(fromFusionLikelihood(fusion.likelihood()))
+                    .fusedExonUp(fusion.fusedExonUp())
+                    .fusedExonDown(fusion.fusedExonDown())
+                    .chainLinks(fusion.chainLinks())
+                    .chainTerminated(fusion.chainTerminated())
+                    .domainsKept(fusion.domainsKept())
+                    .domainsLost(fusion.domainsLost())
+                    .junctionCopyNumber(avgJcn)
+                    .rnaSupport(rnaSupport)
+                    .plotFilename(plotFilename)
+                    .build();
+
+            convertedFusions.add(convertedFusion);
+        }
+
+        return convertedFusions;
+    }
+
+    private static AllelicDepth findRnaSupport(com.hartwig.hmftools.common.linx.LinxFusion fusion, final IsofoxData isofoxData)
+    {
+        if(isofoxData == null)
+            return null;
+
+        int totalCoverage = 0;
+        int totalFragments = 0;
+        boolean matched = false;
+
+        for(RnaFusion rnaFusion : isofoxData.fusions())
+        {
+            if(rnaFusion.name().equals(fusion.name()))
+            {
+                matched = true;
+
+                int fragments = rnaFusion.splitFragments() + rnaFusion.discordantFrags() + rnaFusion.realignedFrags();
+                int averageDepth = min((int)round((rnaFusion.depthUp() + rnaFusion.depthDown()) * 0.5), fragments);
+                totalCoverage += averageDepth;
+                totalFragments += fragments;
+            }
+        }
+
+        if(!matched)
+            return null;
+
+        return ImmutableAllelicDepth.builder()
+                .alleleReadCount(totalFragments)
+                .totalReadCount(totalCoverage)
+                .build();
+    }
+
+    private static DriverInterpretation fromFusionLikelihood(final FusionLikelihoodType fusionLikelihoodType)
+    {
+        switch(fusionLikelihoodType)
+        {
+            case HIGH: return DriverInterpretation.HIGH;
+            case LOW: return DriverInterpretation.LOW;
+            default: return DriverInterpretation.UNKNOWN;
+        }
+    }
+
+    private static String buildContextStr(final TranscriptRegionType regionType, final LinxFusionType knownType, int fusedExon)
+    {
+        switch(regionType)
+        {
+            case UPSTREAM:
+                return "Promoter Region";
+            case DOWNSTREAM:
+                return "Post-coding";
+            case IG:
+                return "IG";
+            case EXONIC:
+            case INTRONIC:
+                return String.format("Exon %d", fusedExon);
+            case UNKNOWN:
+            {
+                if(knownType == LinxFusionType.PROMISCUOUS_ENHANCER_TARGET)
+                {
+                    return "Unknown";
+                }
+                else
+                {
+                    return String.format("ERROR: %s", regionType);
+                }
+            }
+        }
+
+        throw new IllegalStateException("TranscriptRegionType not supported in determination of fusion context: " + regionType);
     }
 }

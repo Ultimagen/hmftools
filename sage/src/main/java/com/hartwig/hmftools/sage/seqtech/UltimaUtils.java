@@ -1,0 +1,507 @@
+package com.hartwig.hmftools.sage.seqtech;
+
+import static java.lang.Math.abs;
+import static java.lang.Math.max;
+import static java.lang.Math.min;
+import static java.util.stream.Collectors.toList;
+
+import static com.hartwig.hmftools.common.codon.Nucleotides.isValidDnaBase;
+import static com.hartwig.hmftools.common.sequencing.UltimaBamUtils.HALF_PHRED_SCORE_SCALING;
+import static com.hartwig.hmftools.common.sequencing.UltimaBamUtils.ULTIMA_INVALID_QUAL;
+import static com.hartwig.hmftools.common.sequencing.UltimaBamUtils.ULTIMA_MAX_HP_LEN;
+import static com.hartwig.hmftools.common.sequencing.UltimaBamUtils.extractTpValues;
+import static com.hartwig.hmftools.sage.SageCommon.SG_LOGGER;
+import static com.hartwig.hmftools.sage.SageConstants.DEFAULT_FLANK_LENGTH;
+import static com.hartwig.hmftools.sage.SageConstants.GERMLINE_STRAND_BIAS_ADJUST;
+import static com.hartwig.hmftools.sage.SageConstants.GERMLINE_STRAND_BIAS_ADJUST_FACTOR;
+import static com.hartwig.hmftools.sage.SageConstants.MIN_CORE_DISTANCE;
+import static com.hartwig.hmftools.sage.SageConstants.GERMLINE_HET_MIN_EXPECTED_VAF;
+import static com.hartwig.hmftools.sage.filter.FilterConfig.ULTIMA_CANDIDATE_HIGH_BQ_REPEAT_MIN;
+import static com.hartwig.hmftools.sage.filter.VariantFilters.isPanelIndelRepeatVariant;
+import static com.hartwig.hmftools.sage.seqtech.UltimaQualModelBuilder.canSkipRealignedModels;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Maps;
+import com.hartwig.hmftools.common.variant.SimpleVariant;
+import static com.hartwig.hmftools.sage.filter.VariantFilters.STRAND_BIAS_CALCS;
+
+import com.hartwig.hmftools.sage.common.VariantReadContext;
+import com.hartwig.hmftools.sage.evidence.ReadContextCounter;
+
+import htsjdk.samtools.SAMRecord;
+
+public final class UltimaUtils
+{
+    protected static final int MAX_HOMOPOLYMER = ULTIMA_MAX_HP_LEN;
+
+    protected static final byte INVALID_BASE = -1;
+    private static final byte TP_ZERO_BASE_QUAL = 0;
+
+    private static final byte T0_EXPECTED_QUAL_THRESHOLD_SIMPLE = 18;
+    private static final byte T0_EXPECTED_QUAL_THRESHOLD_COMPLEX = 24;
+
+    private static final int MSI_SAMPLE_REPEAT_LENGTH_MAX = 8;
+
+    public static final double GERMLINE_VAF_INDEL_REPEAT_THRESHOLD = 2.5;
+    public static final double GERMLINE_VAF_INDEL_REPEAT_MIN_THRESHOLD_FACTOR = 4;
+    public static final double GERMLINE_VAF_REL_QUAL_RATIO_THRESHOLD = 0.17;
+
+    protected static final UltimaQualRecalibration BQR_CACHE = new UltimaQualRecalibration();
+
+    public static void loadBqrCache(final String filename)
+    {
+        List<String> lines = null;
+
+        if(filename != null)
+        {
+            try
+            {
+                lines = Files.readAllLines(new File(filename).toPath());
+            }
+            catch(Exception e)
+            {
+                SG_LOGGER.error("failed to read Ultima base-qual recalibration file({}): {}", filename, e.toString());
+            }
+        }
+        else
+        {
+            InputStream inputStream = UltimaUtils.class.getResourceAsStream("/seqtech/ultima_qual_recalibration.tsv");
+            lines = new BufferedReader(new InputStreamReader(inputStream)).lines().collect(toList());
+        }
+
+        BQR_CACHE.loadRecalibrationData(lines);
+    }
+
+    public static void setMaxRawQual(final byte qual) { BQR_CACHE.setMaxRawQual(qual); }
+    public static byte maxRawQual() { return BQR_CACHE.maxRawQual(); }
+
+    public static byte safeQualLookup(final byte[] qualityArray, int index)
+    {
+        if(index < 0 || index >= qualityArray.length)
+            return ULTIMA_INVALID_QUAL;
+
+        return qualityArray[index];
+    }
+
+    public static byte calcTpBaseQual(final SAMRecord record, int indexStart, int indexEnd, int tpSearchValue)
+    {
+        if(indexStart < 0 || indexStart >= record.getReadBases().length)
+            return ULTIMA_INVALID_QUAL;
+
+        byte[] tpValues = extractTpValues(record);
+
+        byte qualValue1 = -1;
+        byte qualValue2 = -1;
+
+        for(int i = indexStart; i <= min(indexEnd, tpValues.length - 1); ++i)
+        {
+            if(tpValues[i] == tpSearchValue)
+            {
+                if(qualValue1 < 0)
+                {
+                    qualValue1 = record.getBaseQualities()[i];
+                }
+                else
+                {
+                    qualValue2 = record.getBaseQualities()[i];
+                    break;
+                }
+            }
+        }
+
+        int homopolymerLength = indexEnd - indexStart + 1;
+        char homopolymerBase = (char)record.getReadBases()[indexStart];
+        boolean isReverse = record.getReadNegativeStrandFlag();
+
+        // check quals vs BQR
+        qualValue1 = BQR_CACHE.calcTpRecalibratedQual(qualValue1, homopolymerLength, homopolymerBase, false, isReverse);
+        qualValue2 = BQR_CACHE.calcTpRecalibratedQual(qualValue2, homopolymerLength, homopolymerBase, false, isReverse);
+
+        if(qualValue1 < 0)
+        {
+            // if bases aren't found, use middle base(s) as: min(40, Q + 6 * abs(required_tp – T))
+            int middleIndex = indexStart + (indexEnd - indexStart) / 2;
+            final byte[] baseQualities = record.getBaseQualities();
+            if(middleIndex < 0 || middleIndex >= baseQualities.length)
+            {
+                return ULTIMA_INVALID_QUAL;
+            }
+
+            qualValue1 = baseQualities[middleIndex];
+            byte tpValue = tpValues[middleIndex];
+
+            if(tpValue == TP_ZERO_BASE_QUAL)
+                return BQR_CACHE.calcTpRecalibratedQual(qualValue1, homopolymerLength, homopolymerBase, true, isReverse);
+
+            qualValue1 = BQR_CACHE.calcTpRecalibratedQual(qualValue1, homopolymerLength, homopolymerBase, false, isReverse);
+
+            byte bqrValue = BQR_CACHE.calcTpRecalibratedQual(
+                    BQR_CACHE.maxRawQual(), homopolymerLength, homopolymerBase, false, isReverse);
+
+            return (byte)min(bqrValue, qualValue1 + HALF_PHRED_SCORE_SCALING * 2 * abs(tpSearchValue - tpValue));
+        }
+
+        if(qualValue2 < 0)
+            return qualValue1;
+
+        return (byte)(qualValue1 - HALF_PHRED_SCORE_SCALING);
+    }
+
+    protected static int findHomopolymerLength(final byte[] refBases, final byte compareBase, int startIndex, boolean searchUp)
+    {
+        int repeatCount = 0;
+
+        int i = startIndex;
+
+        while(i >= 0 && i < refBases.length)
+        {
+            if(refBases[i] != compareBase)
+                return repeatCount;
+
+            ++repeatCount;
+
+            if(searchUp)
+                ++i;
+            else
+                --i;
+        }
+
+        return repeatCount;
+    }
+
+    @VisibleForTesting
+    public static boolean isCleanSnv(final VariantReadContext readContext)
+    {
+        if(!readContext.variant().isSNV())
+        {
+            return false;
+        }
+
+        if(readContext.coreLength() != readContext.refBasesBytes().length)
+        {
+            return false;
+        }
+
+        for(int i = readContext.CoreIndexStart; i <= readContext.CoreIndexEnd; ++i)
+        {
+            if(i == readContext.VarIndex)
+            {
+                continue;  // the SNV base
+            }
+
+            byte readBase = readContext.readBasesBytes()[i];
+            byte refBase = readContext.refBasesBytes()[i - readContext.CoreIndexStart];
+            if(readBase != refBase)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    @VisibleForTesting
+    public static boolean isMsiIndelOfType(final SimpleVariant variant, final List<String> units)
+    {
+        if(!variant.isIndel())
+            return false;
+
+        String indelBases = variant.isInsert() ? variant.alt().substring(1) : variant.ref().substring(1);
+        for(String unit : units)
+        {
+            int numRepeats = indelBases.length() / unit.length();
+            String expectedIndelBases = unit.repeat(numRepeats);
+            if(indelBases.equals(expectedIndelBases))
+                return true;
+        }
+
+        return false;
+    }
+
+    @VisibleForTesting
+    public static boolean isAdjacentToLongHomopolymer(final SAMRecord read, int varIndexInRead, int longLength)
+    {
+        byte[] readBases = read.getReadBases();
+        boolean roomOnRight = varIndexInRead + longLength < read.getReadBases().length;
+        if(roomOnRight)
+        {
+            int startIndex = varIndexInRead + 1;
+            int endIndex = varIndexInRead + longLength;
+            if(isDnaBaseHomopolymer(readBases, startIndex, endIndex))
+                return true;
+        }
+
+        boolean roomOnLeft = varIndexInRead >= longLength;
+        if(roomOnLeft)
+        {
+            int startIndex = varIndexInRead - longLength;
+            int endIndex = varIndexInRead - 1;
+            if(isDnaBaseHomopolymer(readBases, startIndex, endIndex))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static boolean isDnaBaseHomopolymer(final byte[] bases, int startIndex, int endIndex)
+    {
+        if(!isValidDnaBase(bases[startIndex]))
+            return false;
+
+        for(int i = startIndex + 1; i <= endIndex; i++)
+        {
+            if(bases[i - 1] != bases[i])
+                return false;
+        }
+
+        return true;
+    }
+
+    public static boolean hasLongHomopolymerInContext(final SimpleVariant variant, final SAMRecord read, final int varReadIndex)
+    {
+        int standardLength = MIN_CORE_DISTANCE + DEFAULT_FLANK_LENGTH;
+        int coreStartIndex = max(varReadIndex - standardLength + (variant.isIndel() ? 1 : 0), 0);
+        int coreEndIndex = min(varReadIndex + (variant.altLength() - 1) + standardLength, read.getReadBases().length - 1);
+        return hasLongHomopolymerInRange(coreStartIndex, coreEndIndex, ULTIMA_CANDIDATE_HIGH_BQ_REPEAT_MIN, read);
+    }
+
+    public static boolean hasLongHomopolymerInRange(final int startIndex, final int endIndex, final int longRepeatLength, final SAMRecord read)
+    {
+        byte lastBase = read.getReadBases()[startIndex];
+        int repeatCount = 1;
+        for(int i = startIndex + 1; i <= endIndex; ++i)
+        {
+            byte nextBase = read.getReadBases()[i];
+            if(nextBase == lastBase)
+            {
+                ++repeatCount;
+
+                if(repeatCount >= longRepeatLength)
+                    return true;
+            }
+            else
+            {
+                lastBase = nextBase;
+                repeatCount = 1;
+            }
+        }
+
+        return false;
+    }
+
+    public static boolean lowQualInReadCore(final SimpleVariant variant, int variantReadIndex, final List<Integer> lowQualIndices)
+    {
+        if(lowQualIndices == null || lowQualIndices.isEmpty())
+            return false;
+
+        int coreIndexStart = variantReadIndex - MIN_CORE_DISTANCE + (variant.isIndel() ? 1 : 0);
+        int coreIndexEnd = variantReadIndex + variant.alt().length() - 1 + MIN_CORE_DISTANCE;
+
+        for(int index = coreIndexStart; index <= coreIndexEnd; ++index)
+        {
+            if(lowQualIndices.contains(index))
+                return true;
+        }
+
+        return false;
+    }
+
+    public static boolean lowQualInReadContextCore(int variantReadIndex, final List<Integer> lowQualIndices, final VariantReadContext readContext)
+    {
+        if(lowQualIndices == null || lowQualIndices.isEmpty())
+            return false;
+
+        // exclude from checking if the variant has a long homopolymer
+        if(readContext.MaxRepeat != null && readContext.MaxRepeat.repeatLength() == 1
+        && readContext.MaxRepeat.Count >= ULTIMA_CANDIDATE_HIGH_BQ_REPEAT_MIN)
+        {
+            return false;
+        }
+
+        // check for a sufficiently long single-base repeat anywhere in the read bases
+        byte lastBase = readContext.ReadBases[0];
+        int repeatCount = 1;
+        for(int i = 1; i < readContext.ReadBases.length; ++i)
+        {
+            byte nextBase = readContext.ReadBases[i];
+            if(nextBase == lastBase)
+            {
+                ++repeatCount;
+
+                if(repeatCount >= ULTIMA_CANDIDATE_HIGH_BQ_REPEAT_MIN)
+                    return false;
+            }
+            else
+            {
+                lastBase = nextBase;
+                repeatCount = 1;
+            }
+        }
+
+        int coreIndexStart = variantReadIndex - readContext.leftCoreLength();
+        int coreIndexEnd = variantReadIndex + readContext.rightCoreLength();
+
+        for(int index = coreIndexStart; index <= coreIndexEnd; ++index)
+        {
+            if(lowQualIndices.contains(index))
+                return true;
+        }
+
+        return false;
+    }
+
+    // variant filters
+    private static final Map<Integer,Double> MIN_HP_QUAL_MAP = Maps.newHashMap();
+
+    static
+    {
+        MIN_HP_QUAL_MAP.put(1, 21.5);
+        MIN_HP_QUAL_MAP.put(2, 20.0);
+        MIN_HP_QUAL_MAP.put(3, 18.5);
+        MIN_HP_QUAL_MAP.put(4, 17.0);
+        MIN_HP_QUAL_MAP.put(5, 15.5);
+        MIN_HP_QUAL_MAP.put(6, 14.0);
+        MIN_HP_QUAL_MAP.put(7, 12.0);
+    }
+
+    private static final double MIN_HP_QUAL_MAP_DEFAULT = 10;
+
+    private static final Map<Integer,Double> PANEL_REPEAT_HP_QUAL_MAP = Maps.newHashMap();
+
+    static
+    {
+        PANEL_REPEAT_HP_QUAL_MAP.put(1, 19.5);
+        PANEL_REPEAT_HP_QUAL_MAP.put(2, 17.5);
+        PANEL_REPEAT_HP_QUAL_MAP.put(3, 15.5);
+        PANEL_REPEAT_HP_QUAL_MAP.put(4, 14.0);
+        PANEL_REPEAT_HP_QUAL_MAP.put(5, 13.5);
+        PANEL_REPEAT_HP_QUAL_MAP.put(6, 10.0);
+    }
+
+    private static final double PANEL_REPEAT_HP_QUAL_MAP_DEFAULT = 6;
+
+    private static final int HP_MAX_LENGTHS = 5;
+    private static final double HP_THRESHOLD_NON_INDEL_DEDUCTION = 2.5;
+
+    public static boolean belowExpectedHpQuals(final ReadContextCounter primaryTumor, boolean isGermline)
+    {
+        if(primaryTumor.isSnv() && !primaryTumor.readContext().hasIndelInCore())
+            return false;
+
+        UltimaVariantData ultimaData = primaryTumor.ultimaData();
+        List<Integer> homopolymerLengths = ultimaData.paddedHomopolymerLengths();
+
+        if(primaryTumor.isLongIndel() && Collections.max(homopolymerLengths) < HP_MAX_LENGTHS)
+            return false;
+
+        if(!isGermline && (double) primaryTumor.strongAltSupport() / primaryTumor.depth() >= GERMLINE_HET_MIN_EXPECTED_VAF)
+            return false;
+
+        int repeatLength = primaryTumor.readContext().maxRepeatCount();
+
+        boolean isPanelIndelRepeat;
+
+        if(isGermline)
+        {
+            isPanelIndelRepeat = false;
+        }
+        else
+        {
+            isPanelIndelRepeat = isPanelIndelRepeatVariant(
+                    primaryTumor.tier(), primaryTumor.phredQual(), primaryTumor.variant().isIndel(), repeatLength);
+        }
+
+        double strandBiasThresholdAdjustment = 0;
+
+        if(isGermline)
+        {
+            double altStrandBias = primaryTumor.readStrandBiasAlt().bias();
+            double nonAltStrandBias = primaryTumor.readStrandBiasNonAlt().bias();
+
+            double lowerVafLimit = GERMLINE_HET_MIN_EXPECTED_VAF;
+            double upperVafLimit = 1 - GERMLINE_HET_MIN_EXPECTED_VAF;
+
+            strandBiasThresholdAdjustment = GERMLINE_STRAND_BIAS_ADJUST;
+
+            if(altStrandBias < lowerVafLimit)
+            {
+                if(nonAltStrandBias >= lowerVafLimit)
+                {
+                    strandBiasThresholdAdjustment += (lowerVafLimit - altStrandBias) * GERMLINE_STRAND_BIAS_ADJUST_FACTOR;
+                }
+            }
+            else if(altStrandBias > upperVafLimit)
+            {
+                if(nonAltStrandBias <= upperVafLimit)
+                {
+                    strandBiasThresholdAdjustment += (altStrandBias - upperVafLimit) * GERMLINE_STRAND_BIAS_ADJUST_FACTOR;
+                }
+            }
+        }
+
+        /* for germline, calculate an offset to add to the threshold that we test read core homopolymer quals against based on the variant's strand bias.
+            it starts at 5, and increases by 5 per 0.1 pts the alt RSB is below 40% or above 60%.
+            if the alt and non-alt RSBs are both <40% or >60% we just keep the basic offset of 5. some examples:
+            non-alt RSB 0.45, alt RSB 0.3 -> offset = 5 + 50 * (0.4 - 0.3) = 10
+            non-alt RSB 0.35, alt RSB 0.3 -> offset = 5
+            non-alt RSB 0.35, alt RSB 0.8 -> offset = 5 + 50 * (0.8 - 0.6) = 15
+        */
+
+        for(int i = 0; i < homopolymerLengths.size(); i++)
+        {
+            int length = homopolymerLengths.get(i);
+
+            double threshold;
+
+            if(isPanelIndelRepeat)
+            {
+                threshold = PANEL_REPEAT_HP_QUAL_MAP.getOrDefault(length, PANEL_REPEAT_HP_QUAL_MAP_DEFAULT);
+            }
+            else
+            {
+                threshold = MIN_HP_QUAL_MAP.getOrDefault(length, MIN_HP_QUAL_MAP_DEFAULT);
+
+                if(!primaryTumor.isIndel())
+                    threshold -= HP_THRESHOLD_NON_INDEL_DEDUCTION;
+            }
+
+            threshold += strandBiasThresholdAdjustment;
+
+            if(primaryTumor.qualCache().isMsiSampleAndVariant() && primaryTumor.readContext().MaxRepeat != null
+            &&primaryTumor.readContext().MaxRepeat.repeatLength() == 1 && repeatLength >= MSI_SAMPLE_REPEAT_LENGTH_MAX
+            && primaryTumor.variant().indelLengthAbs() > 1 && length >= MSI_SAMPLE_REPEAT_LENGTH_MAX)
+            {
+                continue;
+            }
+
+            double avgQual = ultimaData.homopolymerAvgQuals().get(i);
+
+            if(avgQual < threshold)
+                return true;
+        }
+
+        return false;
+    }
+
+    public static boolean belowExpectedT0Quals(final ReadContextCounter primaryTumor)
+    {
+        boolean isSimple = canSkipRealignedModels(primaryTumor.readContext());
+
+        if(primaryTumor.variant().isMNV())
+            isSimple = !STRAND_BIAS_CALCS.allOneSide(
+                    primaryTumor.readStrandBiasAlt()) && !primaryTumor.ultimaData().getQualModels().mOriginalQualModel.canCompute();
+
+        int threshold = isSimple ? T0_EXPECTED_QUAL_THRESHOLD_SIMPLE : T0_EXPECTED_QUAL_THRESHOLD_COMPLEX;
+
+        return Collections.min(primaryTumor.ultimaData().t0AvgQuals()) < threshold;
+    }
+}

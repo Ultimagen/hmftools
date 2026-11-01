@@ -9,6 +9,8 @@ import static com.hartwig.hmftools.common.sv.SvVcfTags.ALTALN;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.ALTALN_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.ASM_ID;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.ASM_ID_DESC;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.ASM_INFO;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.ASM_INFO_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.ASM_LENGTH;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.ASM_LENGTH_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.ASM_SEG_INDEX;
@@ -40,8 +42,18 @@ import static com.hartwig.hmftools.common.sv.SvVcfTags.MATE_ID;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.MATE_ID_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.MAX_LOCAL_REPEAT;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.MAX_LOCAL_REPEAT_DESC;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.PROX_JUNC_READ_RATIO;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.PROX_JUNC_READ_RATIO_DESC;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SAGA_INFERRED_BREAKEND;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SAGA_INFERRED_BREAKEND_DESC;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SAGA_VARIANT;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SAGA_VARIANT_DESC;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SUPP_REMOTE_REGION_RATIO;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SUPP_REMOTE_REGION_RATIO_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.SV_ID;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.SV_ID_DESC;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.THREE_PRIME_RANGE;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.THREE_PRIME_RANGE_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.UNIQUE_FRAG_POSITIONS;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.UNIQUE_FRAG_POSITIONS_DESC;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.VCF_ITEM_DELIM;
@@ -89,7 +101,10 @@ import com.hartwig.hmftools.esvee.assembly.alignment.AssemblyAlignment;
 import com.hartwig.hmftools.esvee.assembly.alignment.Breakend;
 import com.hartwig.hmftools.esvee.assembly.alignment.BreakendSegment;
 import com.hartwig.hmftools.esvee.assembly.alignment.BreakendSupport;
+import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 import com.hartwig.hmftools.esvee.common.FilterType;
+import com.hartwig.hmftools.esvee.common.saga.SagaSequenceMatch;
+import com.hartwig.hmftools.esvee.common.WriteType;
 
 import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.variant.variantcontext.Allele;
@@ -191,6 +206,7 @@ public class VcfWriter implements AutoCloseable
         metaData.add(new VCFInfoHeaderLine(LINE_SITE, 1, VCFHeaderLineType.Flag, LINE_SITE_DESC));
 
         metaData.add(new VCFInfoHeaderLine(ASM_ID, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.Integer, ASM_ID_DESC));
+        metaData.add(new VCFInfoHeaderLine(ASM_INFO, 1, VCFHeaderLineType.String, ASM_INFO_DESC));
         metaData.add(new VCFInfoHeaderLine(ASM_LENGTH, 1, VCFHeaderLineType.Integer, ASM_LENGTH_DESC));
         metaData.add(new VCFInfoHeaderLine(ASM_SEG_INDEX, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.Integer, ASM_SEG_INDEX_DESC));
         metaData.add(new VCFInfoHeaderLine(BE_ASM_POS, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.Integer, BE_ASM_POS_DESC));
@@ -204,7 +220,12 @@ public class VcfWriter implements AutoCloseable
         metaData.add(new VCFInfoHeaderLine(SEG_REPEAT_LENGTH, 1, VCFHeaderLineType.Integer, SEG_REPEAT_LENGTH_DESC));
 
         metaData.add(new VCFInfoHeaderLine(UNIQUE_FRAG_POSITIONS, 1, VCFHeaderLineType.Integer, UNIQUE_FRAG_POSITIONS_DESC));
+        metaData.add(new VCFInfoHeaderLine(THREE_PRIME_RANGE, 2, VCFHeaderLineType.Integer, THREE_PRIME_RANGE_DESC));
         metaData.add(new VCFInfoHeaderLine(MAX_LOCAL_REPEAT, 1, VCFHeaderLineType.Integer, MAX_LOCAL_REPEAT_DESC));
+        metaData.add(new VCFInfoHeaderLine(PROX_JUNC_READ_RATIO, 1, VCFHeaderLineType.Float, PROX_JUNC_READ_RATIO_DESC));
+        metaData.add(new VCFInfoHeaderLine(SUPP_REMOTE_REGION_RATIO, 1, VCFHeaderLineType.Float, SUPP_REMOTE_REGION_RATIO_DESC));
+        metaData.add(new VCFInfoHeaderLine(SAGA_VARIANT, 1, VCFHeaderLineType.String, SAGA_VARIANT_DESC));
+        metaData.add(new VCFInfoHeaderLine(SAGA_INFERRED_BREAKEND, 1, VCFHeaderLineType.Flag, SAGA_INFERRED_BREAKEND_DESC));
 
         for(FilterType filter : FilterType.values())
         {
@@ -319,6 +340,7 @@ public class VcfWriter implements AutoCloseable
         AssemblyAlignment assemblyAlignment = breakend.assembly();
 
         builder.attribute(ASM_ID, assemblyAlignment.id());
+        builder.attribute(ASM_INFO, assemblyAlignment.info(10));
         builder.attribute(ASM_LENGTH, assemblyAlignment.fullSequenceLength());
 
         if(assemblyAlignment.assemblies().stream().anyMatch(x -> x.hasLineSequence())
@@ -350,16 +372,49 @@ public class VcfWriter implements AutoCloseable
         builder.attribute(SEG_REPEAT_LENGTH, segments.stream().mapToInt(x -> x.Alignment.adjustedAlignment()).max().orElse(0));
 
         builder.attribute(UNIQUE_FRAG_POSITIONS, breakend.uniqueFragmentPositionCount());
+        builder.attribute(THREE_PRIME_RANGE, breakend.readOrientationRange());
 
         if(breakend.maxLocalRepeat() > 0)
             builder.attribute(MAX_LOCAL_REPEAT, breakend.maxLocalRepeat());
+
+        double minProximateJuncRatio = -1;
+        double minSuppRemoteRegionRatio = -1;
+
+        for(JunctionAssembly assembly : assemblyAlignment.assemblies())
+        {
+            if(assembly.junction().softClipBased())
+            {
+                if(minProximateJuncRatio < 0 || assembly.stats().ProximateJuncReadRatio < minProximateJuncRatio)
+                    minProximateJuncRatio = assembly.stats().ProximateJuncReadRatio;
+
+                double suppRemoteRegionRatio = assembly.stats().suppRemoteRegionRatio();
+                if(minSuppRemoteRegionRatio < 0 || suppRemoteRegionRatio < minSuppRemoteRegionRatio)
+                    minSuppRemoteRegionRatio = suppRemoteRegionRatio;
+            }
+        }
+
+        if(minProximateJuncRatio >= 0)
+            builder.attribute(PROX_JUNC_READ_RATIO, minProximateJuncRatio);
+
+        if(minSuppRemoteRegionRatio >= 0)
+            builder.attribute(SUPP_REMOTE_REGION_RATIO, minSuppRemoteRegionRatio);
+
+        SagaSequenceMatch sagaMatch = assemblyAlignment.sagaMatch();
+        if(sagaMatch != null)
+        {
+            builder.attribute(SAGA_VARIANT, sagaMatch.variant().noSpaceString());
+        }
+        if(breakend.isSagaInferred())
+        {
+            builder.attribute(SAGA_INFERRED_BREAKEND, true);
+        }
 
         VariantContext variantContext = builder.make();
 
         mVariants.add(variantContext);
     }
 
-    private Genotype buildGenotype(final String sampleId, final BreakendSupport breakendSupport)
+    public static Genotype buildGenotype(final String sampleId, final BreakendSupport breakendSupport)
     {
         GenotypeBuilder builder = new GenotypeBuilder(sampleId);
 

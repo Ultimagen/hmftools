@@ -2,7 +2,7 @@ package com.hartwig.hmftools.linx.fusion;
 
 import static com.hartwig.hmftools.common.fusion.FusionCommon.FS_DOWN;
 import static com.hartwig.hmftools.common.fusion.FusionCommon.FS_UP;
-import static com.hartwig.hmftools.common.fusion.KnownFusionType.IG_PROMISCUOUS;
+import static com.hartwig.hmftools.common.fusion.KnownFusionType.ENHANCER_PROMISCUOUS;
 import static com.hartwig.hmftools.common.fusion.KnownFusionType.NONE;
 import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
 import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
@@ -33,7 +33,7 @@ import com.hartwig.hmftools.common.perf.PerformanceCounter;
 import com.hartwig.hmftools.common.linx.LinxBreakend;
 import com.hartwig.hmftools.common.linx.LinxFusion;
 import com.hartwig.hmftools.linx.LinxConfig;
-import com.hartwig.hmftools.linx.CohortDataWriter;
+import com.hartwig.hmftools.linx.cohort.CohortDataWriter;
 import com.hartwig.hmftools.linx.chaining.SvChain;
 import com.hartwig.hmftools.linx.fusion.rna.RnaFusionMapper;
 import com.hartwig.hmftools.linx.types.LinkedPair;
@@ -91,7 +91,7 @@ public class FusionDisruptionAnalyser
         mUniqueFusions = Lists.newArrayList();
         mInvalidFusions = Maps.newHashMap();
 
-        mSpecialFusions = new SpecialFusions(mGeneDataCache, mFusionFinder, mFusionConfig);
+        mSpecialFusions = new SpecialFusions(mGeneDataCache, mFusionFinder);
 
         mRnaFusionMapper = null;
 
@@ -139,7 +139,7 @@ public class FusionDisruptionAnalyser
         // mark any transcripts as not disruptive prior to running any fusion logic
         mDisruptionFinder.markTranscriptsDisruptive(svList);
 
-        for(final SvVarData var : svList)
+        for(SvVarData var : svList)
         {
             // now that transcripts have been marked as disruptive it is safe to purge any which cannot make viable fusions
             if(purgeInvalidTranscripts)
@@ -214,7 +214,7 @@ public class FusionDisruptionAnalyser
 
         final List<LinxBreakend> breakends = Lists.newArrayList();
         final List<LinxFusion> fusions = Lists.newArrayList();
-        convertBreakendsAndFusions(mUniqueFusions, transcripts, fusions, breakends);
+        convertBreakendsAndFusions(mUniqueFusions, mConfig.DriverGenes, transcripts, fusions, breakends);
 
         if(mConfig.isSingleSample())
         {
@@ -246,7 +246,7 @@ public class FusionDisruptionAnalyser
 
             if(LNX_LOGGER.isDebugEnabled())
             {
-                for(final GeneFusion fusion : mUniqueFusions)
+                for(GeneFusion fusion : mUniqueFusions)
                 {
                     if(fusion.knownType() != KnownFusionType.NONE)
                     {
@@ -254,7 +254,7 @@ public class FusionDisruptionAnalyser
                                 fusion.id(), fusion.name(), fusion.reportable(),
                                 fusion.knownTypeStr(), fusion.getAnnotations().clusterId(), fusion.getAnnotations().clusterCount(),
                                 fusion.getAnnotations().chainInfo() != null ? fusion.getAnnotations().chainInfo().chainId() : -1,
-                                fusion.upstreamTrans().gene().id(), fusion.downstreamTrans().gene().id());
+                                fusion.upstreamTrans().breakendGeneData().varId(), fusion.downstreamTrans().breakendGeneData().varId());
                     }
                 }
             }
@@ -287,7 +287,7 @@ public class FusionDisruptionAnalyser
     private void findSingleSVFusions(final List<SvVarData> svList)
     {
         // always report SVs by themselves
-        for(final SvVarData var : svList)
+        for(SvVarData var : svList)
         {
             if(var.isSglBreakend() && var.getSglMappings().isEmpty())
                 continue;
@@ -296,15 +296,15 @@ public class FusionDisruptionAnalyser
             if(var.getCluster().getSvCount() > 1 && var.getCluster().findChain(var) != null)
             {
                 boolean igCandidate = !var.isSglBreakend()
-                        && (mFusionFinder.getKnownFusionCache().withinIgRegion(var.chromosome(true), var.position(true))
-                        != mFusionFinder.getKnownFusionCache().withinIgRegion(var.chromosome(false), var.position(false)));
+                        && (mFusionFinder.getKnownFusionCache().withinEnhancerRegion(var.chromosome(true), var.position(true))
+                        != mFusionFinder.getKnownFusionCache().withinEnhancerRegion(var.chromosome(false), var.position(false)));
 
                 if(!igCandidate)
                     continue;
             }
 
-            final List<BreakendGeneData> genesListStart = getBreakendGeneList(var, true);
-            final List<BreakendGeneData> genesListEnd =  getBreakendGeneList(var, false);
+            List<BreakendGeneData> genesListStart = getBreakendGeneList(var, true);
+            List<BreakendGeneData> genesListEnd =  getBreakendGeneList(var, false);
 
             if(genesListStart.isEmpty() || genesListEnd.isEmpty())
                 continue;
@@ -332,7 +332,7 @@ public class FusionDisruptionAnalyser
             final SvCluster cluster = var.getCluster();
 
             // check transcript disruptions
-            for(final GeneFusion fusion : fusions)
+            for(GeneFusion fusion : fusions)
             {
                 FusionAnnotations annotations = ImmutableFusionAnnotations.builder()
                         .clusterId(cluster.id())
@@ -352,7 +352,7 @@ public class FusionDisruptionAnalyser
     private void findChainedFusions(final List<SvCluster> clusters)
     {
         // for now only consider simple SVs and resolved small clusters
-        for(final SvCluster cluster : clusters)
+        for(SvCluster cluster : clusters)
         {
             if(cluster.getSvCount() == 1) // simple clusters already checked
                 continue;
@@ -363,7 +363,7 @@ public class FusionDisruptionAnalyser
             final List<GeneFusion> chainFusions = Lists.newArrayList();
             final List<ValidTraversalData> validPairs = Lists.newArrayList();
 
-            for(final SvChain chain : cluster.getChains())
+            for(SvChain chain : cluster.getChains())
             {
                 findChainedFusions(cluster, chain, chainFusions, validPairs);
             }
@@ -550,11 +550,11 @@ public class FusionDisruptionAnalyser
                 {
                     // if the fusion from the upstream gene is on the positive strand, then it will have a fusion direction of +1
                     // whenever it goes through a subsequent linked pair by joining to the first (lower) breakend in the pair
-                    int upGeneStrand = fusion.upstreamTrans().gene().strand();
+                    int upGeneStrand = fusion.upstreamTrans().breakendGeneData().strand();
                     boolean isPrecodingUpstream = fusion.upstreamTrans().preCoding();
-                    boolean fusionLowerToUpper = fusion.upstreamTrans().gene().position() == lowerBreakendPos;
+                    boolean fusionLowerToUpper = fusion.upstreamTrans().breakendGeneData().position() == lowerBreakendPos;
 
-                    final List<BreakendGeneData> downstreamGenes = lowerBreakendPos == fusion.downstreamTrans().gene().position()
+                    final List<BreakendGeneData> downstreamGenes = lowerBreakendPos == fusion.downstreamTrans().breakendGeneData().position()
                             ? genesListLower : genesListUpper;
 
                     boolean nonDisruptiveChain = !traversedPairs.isEmpty() && !downstreamGenes.isEmpty() ?
@@ -612,7 +612,7 @@ public class FusionDisruptionAnalyser
                     for(int fs = FS_UP; fs <= FS_DOWN; ++fs)
                     {
                         BreakendTransData transcript = fs == FS_UP ? fusion.upstreamTrans() : fusion.downstreamTrans();
-                        BreakendGeneData gene = fs == FS_UP ? fusion.upstreamTrans().gene() : fusion.downstreamTrans().gene();
+                        BreakendGeneData gene = fs == FS_UP ? fusion.upstreamTrans().breakendGeneData() : fusion.downstreamTrans().breakendGeneData();
 
                         boolean isLowerBreakend = lowerBreakendPos == gene.position();
 
@@ -735,10 +735,10 @@ public class FusionDisruptionAnalyser
     {
         for(GeneFusion fusion : fusions)
         {
-            if(newFusion.upstreamTrans().gene().id() != fusion.upstreamTrans().gene().id())
+            if(newFusion.upstreamTrans().breakendGeneData().varId() != fusion.upstreamTrans().breakendGeneData().varId())
                 continue;
 
-            if(newFusion.downstreamTrans().gene().id() != fusion.downstreamTrans().gene().id())
+            if(newFusion.downstreamTrans().breakendGeneData().varId() != fusion.downstreamTrans().breakendGeneData().varId())
                 continue;
 
             if(!newFusion.upstreamTrans().transName().equals(fusion.upstreamTrans().transName()))
@@ -764,7 +764,7 @@ public class FusionDisruptionAnalyser
             final List<BreakendGeneData> genesList = var.getGenesList(false);
 
             // take the genes if any are in an IG region
-            if(var.getSglMappings().stream().anyMatch(x -> mFusionFinder.getKnownFusionCache().withinIgRegion(x.Chromosome, x.Position)))
+            if(var.getSglMappings().stream().anyMatch(x -> mFusionFinder.getKnownFusionCache().withinEnhancerRegion(x.Chromosome, x.Position)))
                 return genesList;
 
             // otherwise check known pairs (including IG pair 3' genes)
@@ -836,7 +836,7 @@ public class FusionDisruptionAnalyser
         if(!fusion.validChainTraversal() && !allowSuspectChains(fusion.knownType()))
             return false;
 
-        if(!fusion.isIG() && fusion.downstreamTrans().hasNegativePrevSpliceAcceptorDistance())
+        if(!fusion.isEnhancer() && fusion.downstreamTrans().hasNegativePrevSpliceAcceptorDistance())
             return false;
 
         return true;
@@ -848,7 +848,7 @@ public class FusionDisruptionAnalyser
         final Map<String,List<GeneFusion>> genePairFusions = Maps.newHashMap();
 
         // allocate fusions to unique SV pairings
-        for(final GeneFusion fusion : mFusions)
+        for(GeneFusion fusion : mFusions)
         {
             if(!persistFusion(fusion))
                 continue;
@@ -870,7 +870,7 @@ public class FusionDisruptionAnalyser
 
             // IG promiscuous fusions are not reportable but need to all be recorded
             List<GeneFusion> candidates = similarFusions.stream()
-                    .filter(x -> x.knownType() == IG_PROMISCUOUS)
+                    .filter(x -> x.knownType() == ENHANCER_PROMISCUOUS)
                     .filter(x -> x.downstreamTrans().TransData.IsCanonical)
                     .collect(Collectors.toList());
 
@@ -954,11 +954,11 @@ public class FusionDisruptionAnalyser
             if(transcript.undisruptedCopyNumberSet())
                 continue;
 
-            SvVarData var = svList.stream().filter(x -> x.id() == transcript.gene().id()).findFirst().orElse(null);
+            SvVarData var = svList.stream().filter(x -> x.id() == transcript.breakendGeneData().varId()).findFirst().orElse(null);
 
             if(var != null)
             {
-                final SvBreakend breakend = var.getBreakend(transcript.gene().isStart());
+                final SvBreakend breakend = var.getBreakend(transcript.breakendGeneData().isStart());
 
                 if(breakend != null)
                     transcript.setUndisruptedCopyNumber(getUndisruptedCopyNumber(breakend));
@@ -973,9 +973,9 @@ public class FusionDisruptionAnalyser
         if(mVisSampleData == null || !mConfig.Output.writeVisualisationData())
             return;
 
-        final List<VisFusion> visFusions = Lists.newArrayList();
+        List<VisFusion> visFusions = Lists.newArrayList();
 
-        for(final GeneFusion fusion : fusionList)
+        for(GeneFusion fusion : fusionList)
         {
             if(fusion.reportable() || mFusionConfig.WriteAllVisFusions)
             {
@@ -984,18 +984,18 @@ public class FusionDisruptionAnalyser
                 final BreakendTransData transUp = fusion.upstreamTrans();
                 final BreakendTransData transDown = fusion.downstreamTrans();
 
-                mVisSampleData.addGeneExonData(clusterId, transUp.gene().geneId(), transUp.geneName(),
-                        transUp.transName(), transUp.transId(), transUp.gene().chromosome(), FUSION);
+                mVisSampleData.addGeneExonData(clusterId, transUp.breakendGeneData().geneId(), transUp.geneName(),
+                        transUp.transName(), transUp.transId(), transUp.breakendGeneData().chromosome(), FUSION);
 
-                mVisSampleData.addGeneExonData(clusterId, transDown.gene().geneId(), transDown.geneName(),
-                        transDown.transName(), transDown.transId(), transDown.gene().chromosome(), FUSION);
+                mVisSampleData.addGeneExonData(clusterId, transDown.breakendGeneData().geneId(), transDown.geneName(),
+                        transDown.transName(), transDown.transId(), transDown.breakendGeneData().chromosome(), FUSION);
 
                 visFusions.add(new VisFusion(
                         mSampleId, clusterId, fusion.reportable(),
-                        transUp.geneName(), transUp.transName(), transUp.gene().chromosome(), transUp.gene().position(),
-                        transUp.gene().strand(), transUp.regionType().toString(), fusion.getFusedExon(true),
-                        transDown.geneName(), transDown.transName(), transDown.gene().chromosome(), transDown.gene().position(),
-                        transDown.gene().strand(), transDown.regionType().toString(), fusion.getFusedExon(false)));
+                        transUp.geneName(), transUp.transName(), transUp.breakendGeneData().chromosome(), transUp.breakendGeneData().position(),
+                        transUp.breakendGeneData().strand(), transUp.regionType().toString(), fusion.getFusedExon(true),
+                        transDown.geneName(), transDown.transName(), transDown.breakendGeneData().chromosome(), transDown.breakendGeneData().position(),
+                        transDown.breakendGeneData().strand(), transDown.regionType().toString(), fusion.getFusedExon(false)));
             }
         }
 

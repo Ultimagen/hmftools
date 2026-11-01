@@ -1,5 +1,7 @@
 package com.hartwig.hmftools.purple;
 
+import static com.hartwig.hmftools.common.perf.TaskExecutor.addThreadOptions;
+import static com.hartwig.hmftools.common.perf.TaskExecutor.parseThreads;
 import static com.hartwig.hmftools.common.region.SpecificRegions.addSpecificChromosomesRegionsConfig;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.REFERENCE;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.REFERENCE_DESC;
@@ -8,19 +10,14 @@ import static com.hartwig.hmftools.common.utils.config.CommonConfig.TUMOR;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.TUMOR_DESC;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.OUTPUT_DIR;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDirSeparator;
-import static com.hartwig.hmftools.common.perf.TaskExecutor.addThreadOptions;
-import static com.hartwig.hmftools.common.perf.TaskExecutor.parseThreads;
 import static com.hartwig.hmftools.purple.PurpleUtils.PPL_LOGGER;
 
 import java.io.File;
-import java.util.Map;
 
-import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig;
 import com.hartwig.hmftools.common.purple.RunMode;
 import com.hartwig.hmftools.common.region.SpecificRegions;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
-import com.hartwig.hmftools.common.variant.VariantTier;
 
 public class PurpleConfig
 {
@@ -37,21 +34,23 @@ public class PurpleConfig
     public final SomaticFitConfig SomaticFitting;
     public final ChartConfig Charting;
     public final boolean TargetRegionsMode;
-    public final Map<VariantTier,Integer> TierQualFilters;
+    public final boolean IgnorePlotErrors;
+    public final int SvQualFilter;
     public final int Threads;
 
     // debug only
-    public final boolean FilterSomaticsOnGene;
     public final boolean WriteAllSomatics;
+    public final boolean SkipCircosGenes;
     public final SpecificRegions SpecificChrRegions;
 
     private boolean mIsValid;
 
     public static final String SAMPLE_DIR = "sample_dir";
 
-    public static String FILTER_SOMATICS_ON_GENE = "filter_somatics_on_gene";
-    public static final String TIER_FILTERS = "tier_filters";
     public static final String WRITE_ALL_SOMATICS = "write_all_somatics";
+    public static final String IGNORE_PLOT_ERRORS = "ignore_plot_errors";
+    public static final String SKIP_CIRCOS_GENES = "skip_circos_genes";
+    public static final String SV_QUAL_FILTER = "sv_qual_filter";
 
     public PurpleConfig(final String version, final ConfigBuilder configBuilder)
     {
@@ -63,13 +62,13 @@ public class PurpleConfig
         ReferenceId = configBuilder.getValue(REFERENCE);
         TumorId = tumorId != null ? tumorId : ReferenceId;
 
-        if(TumorId == null && ReferenceId == null)
+        if(TumorId == null)
         {
             mIsValid = false;
         }
 
         String outputDir = configBuilder.getValue(OUTPUT_DIR);
-        String sampleDir = "";
+        String sampleDir;
 
         if(configBuilder.hasValue(SAMPLE_DIR))
         {
@@ -92,7 +91,9 @@ public class PurpleConfig
             if(!Charting.Disabled)
             {
                 if(Charting.CircosBinary != null)
+                {
                     mIsValid &= createDirectory(Charting.CircosDirectory);
+                }
 
                 mIsValid &= createDirectory(Charting.PlotDirectory);
             }
@@ -104,36 +105,40 @@ public class PurpleConfig
         Threads = parseThreads(configBuilder);
 
         RunDrivers = DriverGenePanelConfig.isConfigured(configBuilder);
-        FilterSomaticsOnGene = configBuilder.hasFlag(FILTER_SOMATICS_ON_GENE);
+        IgnorePlotErrors = configBuilder.hasFlag(IGNORE_PLOT_ERRORS);
+        SkipCircosGenes = configBuilder.hasFlag(SKIP_CIRCOS_GENES);
+        SvQualFilter = configBuilder.getInteger(SV_QUAL_FILTER);
+
         WriteAllSomatics = configBuilder.hasFlag(WRITE_ALL_SOMATICS);
-
-        TierQualFilters = Maps.newHashMap();
-
-        if(configBuilder.hasFlag(TIER_FILTERS))
-        {
-            String[] tierFilterStrings = configBuilder.getValue(TIER_FILTERS).split(";", -1);
-
-            for(String tierFilter : tierFilterStrings)
-            {
-                String[] tierItems = tierFilter.split("=",-1);
-                TierQualFilters.put(VariantTier.valueOf(tierItems[0]), Integer.parseInt(tierItems[1]));
-            }
-        }
 
         SpecificChrRegions = SpecificRegions.from(configBuilder);
 
         if(SpecificChrRegions == null)
+        {
             mIsValid = false;
+        }
     }
 
-    public boolean isValid() { return mIsValid; }
-
-    public boolean tumorOnlyMode() { return ReferenceId == null; }
-    public boolean germlineMode() { return TumorId.equals(ReferenceId); }
-
-    public boolean runTumor() { return !germlineMode(); }
-    public boolean runGermline() { return !tumorOnlyMode(); }
-
+    public boolean isValid()
+    {
+        return mIsValid;
+    }
+    public boolean tumorOnlyMode()
+    {
+        return ReferenceId == null;
+    }
+    public boolean germlineMode()
+    {
+        return TumorId.equals(ReferenceId);
+    }
+    public boolean runTumor()
+    {
+        return !germlineMode();
+    }
+    public boolean runGermline()
+    {
+        return !tumorOnlyMode();
+    }
     public RunMode runMode()
     {
         return tumorOnlyMode() ? RunMode.TUMOR : (germlineMode() ? RunMode.GERMLINE : RunMode.TUMOR_GERMLINE);
@@ -149,8 +154,9 @@ public class PurpleConfig
                 "Path to the output directory. If <sample_dir> is set, then is sample_dir/output_dir/.");
 
         configBuilder.addFlag(WRITE_ALL_SOMATICS, "Write all variants regardless of filters");
-        configBuilder.addFlag(FILTER_SOMATICS_ON_GENE, "Only load and enrich somatic variants with a gene impact");
-        configBuilder.addConfigItem(TIER_FILTERS, "Variant qual filters by tier, format: TIER_A=QUAL;TIER_A=QUAL etc");
+        configBuilder.addFlag(IGNORE_PLOT_ERRORS, "Run to completion if plotting fails");
+        configBuilder.addFlag(SKIP_CIRCOS_GENES, "Skip plotting driver genes on Circos");
+        configBuilder.addInteger(SV_QUAL_FILTER, "Min SV qual, 0 is disabled", 0);
 
         FittingConfig.addConfig(configBuilder);
         SomaticFitConfig.addConfig(configBuilder);
@@ -164,10 +170,14 @@ public class PurpleConfig
     public boolean excludeOnSpecificRegion(final String chromosome, final int position)
     {
         if(!SpecificChrRegions.hasFilters())
+        {
             return false;
+        }
 
         if(!SpecificChrRegions.Regions.isEmpty())
+        {
             return SpecificChrRegions.excludePosition(chromosome, position);
+        }
 
         return SpecificChrRegions.excludeChromosome(chromosome);
     }

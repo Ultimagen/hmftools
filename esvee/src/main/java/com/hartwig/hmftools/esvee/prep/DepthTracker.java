@@ -2,8 +2,11 @@ package com.hartwig.hmftools.esvee.prep;
 
 import static java.lang.Math.ceil;
 import static java.lang.Math.floor;
+import static java.lang.Math.max;
+import static java.lang.Math.min;
 
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 
 import com.hartwig.hmftools.common.region.BaseRegion;
 
@@ -13,7 +16,7 @@ public class DepthTracker
 {
     private final BaseRegion mRegion;
     private final int mWindowSize;
-    private final int[] mWindowDepth;
+    private final long[] mWindowDepth;
 
     public DepthTracker(final BaseRegion region, final int windowSize)
     {
@@ -23,29 +26,57 @@ public class DepthTracker
         int regionLength = mRegion.baseLength();
         int windows = (int)ceil(regionLength / mWindowSize);
 
-        mWindowDepth = new int[windows];
+        mWindowDepth = new long[windows];
     }
 
-    public int calcDepth(int position)
+    public double calcDepth(int position)
     {
         int index = windowIndex(position);
-
-        return index != INVALID_INDEX && index < mWindowDepth.length ? mWindowDepth[index] : 0;
+        return index != INVALID_INDEX && index < mWindowDepth.length ? mWindowDepth[index] / (double)mWindowSize : 0;
     }
 
     public void processRead(final SAMRecord read)
     {
-        int indexStart = windowIndex(read.getAlignmentStart());
-
-        if(indexStart == INVALID_INDEX || indexStart >= mWindowDepth.length)
+        if(read.getReadUnmappedFlag())
             return;
 
-        ++mWindowDepth[indexStart];
+        int readStart = read.getAlignmentStart();
+        int readEnd = read.getAlignmentEnd();
 
-        int indexEnd = windowIndex(read.getAlignmentEnd());
+        int windowIndex = windowIndex(readStart);
 
-        if(indexEnd > indexStart && indexEnd < mWindowDepth.length)
-            ++mWindowDepth[indexEnd];
+        if(windowIndex == INVALID_INDEX || windowIndex >= mWindowDepth.length)
+            return;
+
+        // apply the read's bases across all applicable windows
+        // int windowStart = readStart;
+        int windowStart = mRegion.start() + windowIndex * mWindowSize;;
+        int windowEnd = windowStart + mWindowSize - 1;
+
+        while(true)
+        {
+            int windowRange = min(windowEnd, readEnd) - max(readStart, windowStart) + 1;
+
+            if(windowRange < 0 || windowRange > mWindowSize)
+            {
+                SV_LOGGER.error("depth range failed: read({}-{}) window(idx={} {}-{}) read range({})",
+                        readStart, readEnd, windowIndex, windowStart, windowEnd, windowRange);
+                return;
+            }
+
+            mWindowDepth[windowIndex] += windowRange;
+
+            if(readEnd <= windowEnd)
+                break;
+
+            ++windowIndex;
+
+            if(windowIndex >= mWindowDepth.length)
+                break;
+
+            windowStart = windowEnd + 1;
+            windowEnd = windowStart + mWindowSize - 1;
+        }
     }
 
     private static final int INVALID_INDEX = -1;

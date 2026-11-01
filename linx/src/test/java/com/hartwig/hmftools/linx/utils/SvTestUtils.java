@@ -1,6 +1,6 @@
 package com.hartwig.hmftools.linx.utils;
 
-import static com.hartwig.hmftools.common.purple.CopyNumberMethod.BAF_WEIGHTED;
+import static com.hartwig.hmftools.common.segmentation.Arm.P;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.BND;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DEL;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DUP;
@@ -8,23 +8,25 @@ import static com.hartwig.hmftools.common.sv.StructuralVariantType.INF;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.INS;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.INV;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.SGL;
-import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS_FILTER;
 import static com.hartwig.hmftools.linx.analysis.SvUtilities.getChromosomalArm;
-import static com.hartwig.hmftools.common.purple.ChromosomeArm.P_ARM;
 
 import com.hartwig.hmftools.common.driver.DriverCatalog;
 import com.hartwig.hmftools.common.driver.DriverCategory;
 import com.hartwig.hmftools.common.driver.DriverType;
 import com.hartwig.hmftools.common.driver.ImmutableDriverCatalog;
 import com.hartwig.hmftools.common.driver.LikelihoodMethod;
+import com.hartwig.hmftools.common.purple.CopyNumberMethod;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
-import com.hartwig.hmftools.common.purple.ImmutableGeneCopyNumber;
+import com.hartwig.hmftools.common.purple.ReportedStatus;
 import com.hartwig.hmftools.common.purple.SegmentSupport;
+import com.hartwig.hmftools.common.segmentation.Arm;
 import com.hartwig.hmftools.common.sv.ImmutableStructuralVariantData;
 import com.hartwig.hmftools.common.sv.StructuralVariantData;
 import com.hartwig.hmftools.common.sv.StructuralVariantType;
-import com.hartwig.hmftools.common.purple.ChromosomeArm;
 import com.hartwig.hmftools.linx.types.SvVarData;
+
+import org.apache.logging.log4j.util.Strings;
 
 public class SvTestUtils
 {
@@ -104,7 +106,7 @@ public class SvTestUtils
     {
         return createTestSv(
                 varId, chrStart, chrEnd, posStart, posEnd, orientStart, orientEnd, type,
-                cnStart, cnEnd, cnChgStart, cnChgEnd, ploidy, insertSeq, PASS, "", "");
+                cnStart, cnEnd, cnChgStart, cnChgEnd, ploidy, insertSeq, PASS_FILTER, "", "");
     }
 
     public static SvVarData createTestSv(
@@ -177,13 +179,13 @@ public class SvTestUtils
 
     public static void initialiseSV(SvVarData var)
     {
-        ChromosomeArm startArm = getChromosomalArm(var.chromosome(true), var.position(true));
+        Arm startArm = getChromosomalArm(var.chromosome(true), var.position(true));
 
-        ChromosomeArm endArm;
+        Arm endArm;
         if(!var.isSglBreakend())
             endArm = getChromosomalArm(var.chromosome(false), var.position(false));
         else
-            endArm = P_ARM;
+            endArm = P;
 
         var.setChromosomalArms(startArm, endArm);
 
@@ -191,34 +193,17 @@ public class SvTestUtils
         var.setJcnRecalcData(var.getSvData().junctionCopyNumber(), var.getSvData().junctionCopyNumber());
     }
 
-    public static GeneCopyNumber createGeneCopyNumber(final String gene, final String chromosome,
-            double minCopyNumber, int posStart, int posEnd)
+    public static GeneCopyNumber createGeneCopyNumber(
+            final String gene, final String chromosome, double minCopyNumber, int posStart, int posEnd)
     {
-        return ImmutableGeneCopyNumber.builder()
-                .chromosome(chromosome)
-                .chromosomeBand("")
-                .start(posStart)
-                .end(posEnd)
-                .geneName(gene)
-                .maxCopyNumber(minCopyNumber)
-                .minCopyNumber(minCopyNumber)
-                .somaticRegions(0)
-                .minRegions(0)
-                .minRegionStart(0)
-                .minRegionEnd(0)
-                .minRegionStartSupport(SegmentSupport.BND)
-                .minRegionEndSupport(SegmentSupport.BND)
-                .minRegionMethod(BAF_WEIGHTED)
-                .minMinorAlleleCopyNumber(0)
-                .transName("")
-                .isCanonical(true)
-                .depthWindowCount(0)
-                .gcContent(1.0)
-                .build();
+        return new GeneCopyNumber(chromosome, posStart, posEnd, gene, Strings.EMPTY, true,
+                Strings.EMPTY, minCopyNumber , minCopyNumber, 0, 1, 1,
+                0, 0, 0, 1.0,
+                SegmentSupport.BND, SegmentSupport.BND, CopyNumberMethod.BAF_WEIGHTED, minCopyNumber / 2);
     }
 
-    public static DriverCatalog createDriver(final String gene, final String chromosome, DriverType type, DriverCategory category,
-            boolean biallelic, double minCopyNumber)
+    public static DriverCatalog createDriver(
+            final String gene, final String chromosome, DriverType type, DriverCategory category, boolean biallelic, double minCopyNumber)
     {
         LikelihoodMethod method;
         if(type == DriverType.AMP || type == DriverType.PARTIAL_AMP)
@@ -238,6 +223,7 @@ public class SvTestUtils
                 .chromosomeBand("")
                 .driver(type)
                 .driverLikelihood(1.0)
+                .reportedStatus(ReportedStatus.REPORTED)
                 .likelihoodMethod(method)
                 .minCopyNumber(minCopyNumber)
                 .maxCopyNumber(minCopyNumber)

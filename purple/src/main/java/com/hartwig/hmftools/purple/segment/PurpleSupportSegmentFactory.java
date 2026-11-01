@@ -10,6 +10,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
@@ -29,8 +30,8 @@ public class PurpleSupportSegmentFactory
     private final Map<Chromosome, GenomePosition> mLengths;
     private final Map<Chromosome, GenomePosition> mCentromeres;
 
-    public PurpleSupportSegmentFactory(final int windowSize, final Map<Chromosome, GenomePosition> centromeres,
-            final Map<Chromosome, GenomePosition> lengths)
+    public PurpleSupportSegmentFactory(
+            final int windowSize, final Map<Chromosome, GenomePosition> centromeres, final Map<Chromosome,GenomePosition> lengths)
     {
         mWindowSize = windowSize;
         mCentromeres = centromeres;
@@ -42,67 +43,65 @@ public class PurpleSupportSegmentFactory
             final Map<Chromosome,List<CobaltRatio>> ratios)
     {
         ClusterFactory clusterFactory = new ClusterFactory(mWindowSize);
-        final Multimap<Chromosome, Cluster> clusterMap = clusterFactory.cluster(variants, pcfPositions, ratios);
-        return segmentCluster(clusterMap);
-    }
+        Multimap<Chromosome, Cluster> clusterMap = clusterFactory.cluster(variants, pcfPositions, ratios);
 
-    private List<PurpleSupportSegment> segmentCluster(final Multimap<Chromosome, Cluster> clusters)
-    {
-        final List<PurpleSupportSegment> results = Lists.newArrayList();
-        results.addAll(segmentMap(clusters).values());
-        Collections.sort(results);
-        return results;
-    }
-
-    private Multimap<Chromosome, PurpleSupportSegment> segmentMap(final Multimap<Chromosome, Cluster> clusters)
-    {
-        final Multimap<Chromosome, PurpleSupportSegment> segments = ArrayListMultimap.create();
-        for(Chromosome chromosome : clusters.keySet())
+        Multimap<Chromosome, PurpleSupportSegment> segments = ArrayListMultimap.create();
+        for(Chromosome chromosome : clusterMap.keySet())
         {
             GenomePosition length = mLengths.get(chromosome);
             GenomePosition centromere = mCentromeres.get(chromosome);
 
-            final Collection<Cluster> cluster = clusters.containsKey(chromosome) ? clusters.get(chromosome) : Collections.emptyList();
-            segments.putAll(chromosome, create(centromere, length, cluster));
+            Collection<Cluster> cluster = clusterMap.containsKey(chromosome) ? clusterMap.get(chromosome) : Collections.emptyList();
+
+            List<PurpleSupportSegment> chrSegments = createChromosomeSegments(centromere, length, cluster);
+            segments.putAll(chromosome, chrSegments);
         }
 
-        return segments;
+        List<PurpleSupportSegment> supportSegments = Lists.newArrayList();
+        segments.values().stream().forEach(x -> supportSegments.add(x));
+        Collections.sort(supportSegments);
+
+        return supportSegments;
     }
 
     @VisibleForTesting
-    static List<PurpleSupportSegment> create(final GenomePosition centromere, final GenomePosition length, final Collection<Cluster> clusters)
+    static List<PurpleSupportSegment> createChromosomeSegments(
+            final GenomePosition centromere, final GenomePosition length, final Collection<Cluster> clusters)
     {
-        final List<PurpleSupportSegment> segments = create(length, clusters);
+        List<PurpleSupportSegment> segments = createClusterSegments(length, clusters);
 
         for(int i = 1; i < segments.size(); ++i)
         {
             PurpleSupportSegment prevSegment = segments.get(i - 1);
             PurpleSupportSegment segment = segments.get(i);
 
-            segment.MinStart = max(segment.MinStart, prevSegment.End + 1);
+            segment.setMinStart(max(segment.minStart(), prevSegment.end() + 1));
         }
 
         return addCentromere(centromere, segments);
     }
 
-    private static List<PurpleSupportSegment> create(final GenomePosition length, final Collection<Cluster> clusters)
+    private static List<PurpleSupportSegment> createClusterSegments(final GenomePosition length, final Collection<Cluster> clusters)
     {
-        final List<PurpleSupportSegment> result = Lists.newArrayList();
-        PurpleSupportSegment segment = create(length.chromosome());
+        List<PurpleSupportSegment> result = Lists.newArrayList();
+
+        PurpleSupportSegment segment = new PurpleSupportSegment(
+                length.chromosome(), 1, 0, true, SegmentSupport.NONE, false, 1, 1);
+
         segment.Support = SegmentSupport.TELOMERE;
 
-        for(final Cluster cluster : clusters)
+        for(Cluster cluster : clusters)
         {
             boolean ratioSupport = !cluster.ratios().isEmpty();
 
-            final List<SVSegment> variants = cluster.Variants;
+            List<SvPosition> variants = cluster.Variants;
             if(!variants.isEmpty())
             {
-                for(final SVSegment variant : variants)
+                for(SvPosition variant : variants)
                 {
                     if(variant.position() != segment.start())
                     {
-                        segment.End = variant.position() - 1;
+                        segment.setEnd(variant.position() - 1);
                         result.add(segment);
                         segment = createFromCluster(cluster, variant, ratioSupport);
                     }
@@ -117,27 +116,24 @@ public class PurpleSupportSegmentFactory
             else
             {
 
-                final List<PCFPosition> pcfPositions = cluster.PcfPositions;
+                List<PCFPosition> pcfPositions = cluster.PcfPositions;
 
                 // DO FIRST
-                final GenomePosition firstRatioBreak = pcfPositions.get(0);
-                segment.End = firstRatioBreak.position() - 1;
+                GenomePosition firstRatioBreak = pcfPositions.get(0);
+
+                segment.setEnd(firstRatioBreak.position() - 1);
+
                 result.add(segment);
-                segment = create(firstRatioBreak.chromosome(), firstRatioBreak.position(), pcfPositions);
+                segment = createPcfSegment(firstRatioBreak.chromosome(), firstRatioBreak.position(), pcfPositions);
             }
         }
 
-        segment.End = length.position();
+        segment.setEnd(length.position());
         result.add(segment);
         return result;
     }
 
-    private static PurpleSupportSegment create(String chromosome)
-    {
-        return new PurpleSupportSegment(chromosome, 1, 0, true, SegmentSupport.NONE, false, 1, 1);
-    }
-
-    private static PurpleSupportSegment create(String chromosome, int start, final List<PCFPosition> pcfPositions)
+    private static PurpleSupportSegment createPcfSegment(final String chromosome, int start, final List<PCFPosition> pcfPositions)
     {
         int minStart = pcfPositions.stream()
                 .filter(x -> x.Source == PCFSource.TUMOR_RATIO)
@@ -154,7 +150,7 @@ public class PurpleSupportSegmentFactory
         return new PurpleSupportSegment(chromosome, start, 0, true, SegmentSupport.NONE, false, minStart, maxStart);
     }
 
-    private static PurpleSupportSegment createFromCluster(Cluster cluster, SVSegment variant, boolean ratioSupport)
+    private static PurpleSupportSegment createFromCluster(Cluster cluster, SvPosition variant, boolean ratioSupport)
     {
         return new PurpleSupportSegment(
                 cluster.chromosome(), variant.Position, 0, ratioSupport, SegmentSupport.fromVariant(variant.Type),
@@ -163,7 +159,7 @@ public class PurpleSupportSegmentFactory
 
     private static List<PurpleSupportSegment> addCentromere(final GenomePosition centromere, final List<PurpleSupportSegment> segments)
     {
-        final List<PurpleSupportSegment> result = Lists.newArrayList();
+        List<PurpleSupportSegment> result = Lists.newArrayList();
 
         for(PurpleSupportSegment segment : segments)
         {
@@ -171,21 +167,21 @@ public class PurpleSupportSegmentFactory
             {
                 if(segment.start() == centromere.position())
                 {
-                    final PurpleSupportSegment start = PurpleSupportSegment.from(segment);
+                    PurpleSupportSegment start = PurpleSupportSegment.from(segment);
                     start.Support = SegmentSupport.CENTROMERE;
                     result.add(start);
                 }
                 else
                 {
-                    final PurpleSupportSegment start = PurpleSupportSegment.from(segment);
-                    start.End = centromere.position() - 1;
-                    start.MaxStart = min(start.MaxStart, start.End);
+                    PurpleSupportSegment start = PurpleSupportSegment.from(segment);
+                    start.setEnd(centromere.position() - 1);
+                    start.setMaxStart(min(start.maxStart(), start.end()));
 
-                    final PurpleSupportSegment end = PurpleSupportSegment.from(segment);
+                    PurpleSupportSegment end = PurpleSupportSegment.from(segment);
                     end.Support = SegmentSupport.CENTROMERE;
-                    end.Start = centromere.position();
-                    end.MinStart = centromere.position();
-                    end.MaxStart = centromere.position();
+                    end.setStart(centromere.position());
+                    end.setMinStart(centromere.position());
+                    end.setMaxStart(centromere.position());
 
                     result.add(start);
                     result.add(end);
@@ -208,11 +204,10 @@ public class PurpleSupportSegmentFactory
         {
             PurpleSupportSegment segment = segments.get(i);
 
-            if(!positionsWithin(segment.MinStart, segment.MaxStart, segment.start(), segment.end()))
+            if(!positionsWithin(segment.minStart(), segment.maxStart(), segment.start(), segment.end()))
             {
                 PPL_LOGGER.error("purple segment({}:{}-{}) has invalid min/maxStart({}-{})",
-                        segment.chromosome(), segment.start(), segment.end(),
-                        segment.MinStart, segment.MaxStart);
+                        segment.chromosome(), segment.start(), segment.end(), segment.minStart(), segment.maxStart());
 
                 isValid = false;
             }

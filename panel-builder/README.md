@@ -1,0 +1,484 @@
+# PanelBuilder
+
+PanelBuilder is a tool to easily create custom panel designs based on simple input features.
+You input the genomic features you are interested in, and PanelBuilder creates the best set of probes for you.
+
+Releases of PanelBuilder can be found [here under GitHub releases](https://github.com/hartwigmedical/hmftools/releases?q=panel-builder&expanded=true).
+
+Resource files specific to PanelBuilder are [available here](https://console.cloud.google.com/storage/browser/hmf-public/HMFtools-Resources/panel-builder) (requires Google login).
+
+## Supported Features
+
+- Genes (coding, promoter, UTR, flanks)
+- Genes RNA (exon-aware transcript probes)
+- Copy number backbone
+- CDR3
+- Sample variants from WiGiTS analysis
+- Custom regions
+- Custom small variants
+- Custom structural variants
+
+## Configuration
+
+### Required Arguments
+
+| Argument              | Type | Description                                                      |
+|-----------------------|------|------------------------------------------------------------------|
+| ref_genome            | Path | Reference genome FASTA file.                                     |
+| bwa_index_image       | Path | BWA-MEM index file for the references genome.                    |
+| probe_quality_profile | Path | Probe quality resource file. May be GZIP'd.                      |
+| output_dir            | Path | Directory in which to store output. Created if it doesn't exist. |
+
+### Optional Arguments
+
+| Argument              | Type                         | Default                     | Description                                                                                                                              |
+|-----------------------|------------------------------|-----------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
+| ensembl_data_dir      | Path                         | (none)                      | Ensembl cache directory.                                                                                                                 |
+| bwa_lib               | Path                         | Search in current directory | Path to BWA-MEM shared library object.                                                                                                   |
+| genes                 | Path                         | (none)                      | Path to TSV file containing desired gene features. If not specified, gene probes are not produced.                                       |
+| genes_rna             | Path                         | (none)                      | Path to TSV file containing desired RNA gene features. If not specified, RNA gene probes are not produced.                               |
+| cn_backbone           | Flag                         | (none)                      | If specified, include copy number backbone probes in the panel.                                                                          |
+| cn_backbone_res_kb    | Integer                      | 1000                        | Approximate spacing between copy number backbone probes, in kb.                                                                          |
+| cn_backbone_res_kb_chromosomes | Comma-separated list of `chr:kb` | (none)          | Per-chromosome overrides of the copy number backbone spacing, e.g. `7:500,Y:2000`. Chromosomes not listed use `cn_backbone_res_kb`.      |
+| het_sites             | Path                         | (none)                      | Path to heterozygous SNP sites TSV file for copy number backbone. May be GZIP'd.                                                         |
+| cdr3                  | Flag                         | (none)                      | If specified, include CDR3 regions in the panel.                                                                                         |
+| sample                | String                       | (none)                      | ID of sample for sample variant probes. If not specified, sample variant probes are not produced.                                        |
+| linx_dir              | Path                         | (none)                      | Path to Linx somatic output for sample variant probes.                                                                                   |
+| linx_germline_dir     | Path                         | (none)                      | Path to Linx germline output for sample variant probes.                                                                                  |
+| purple_dir            | Path                         | (none)                      | Path to Purple output for sample variant probes.                                                                                         |
+| sample_probes         | Integer                      | 500                         | Maximum number of sample variant probes to produce.                                                                                      |
+| prefer_small_indel    | Flag                         | (none)                      | If specified, when selecting nondriver sample variants, prefer variants with lower `IndelLength`.                                        | 
+| custom_regions        | Comma-separated list of path | (none)                      | Path(s) to TSV file containing desired custom regions. If not specified, custom region probes are not produced.                          |
+| custom_small_variants | Path                         | (none)                      | Path to TSV file containing the desired custom small variants. If not specified, custom small variant probes are not produced.           |
+| custom_svs            | Path                         | (none)                      | Path to TSV file containing the desired custom structural variants. If not specified, custom structural variant probes are not produced. |
+| threads               | Integer                      | 1                           | Number of threads to use for some parts of the application which support multithreading.                                                 |
+| output_id             | String                       | (none)                      | Prefix for output files.                                                                                                                 |
+| verbose_output        | Flag                         | (none)                      | If specified, output more information which may be useful for investigation or debugging. Increases run time.                            |
+| log_level             | String                       | `error`                     | `all`/`trace`/`debug`/`info`/`warn`/`error`/`fatal`/`off`                                                                                |
+
+## Example Usage
+
+```shell
+java -jar panel-builder.jar \
+  -ref_genome Homo_sapiens.GRCh37.GATK.illumina.fasta \
+  -ensembl_data_dir ensembl_data_cache/37 \
+  -bwa_index_image Homo_sapiens.GRCh37.GATK.illumina.fasta.img \
+  -probe_quality_profile panelbuilder_resources/probe_quality_profile.37.tsv.gz \
+  -cdr3 \
+  -het_sites panelbuilder_resources/het_sites.37.tsv.gz \
+  -cn_backbone \
+  -genes genes_features.tsv \
+  -custom_regions custom_regions.tsv \
+  -custom_small_variants custom_small_variants.tsv \
+  -custom_svs custom_svs.tsv \
+  -sample COLO829T \
+  -linx_dir COLO829T/linx \
+  -linx_germline_dir COLO829T/linx_germline \
+  -purple_dir COLO829T/purple \
+  -output_dir output
+```
+
+## Core Concepts
+
+### Target
+
+"Target" refers to a genome region or sequence which we intend to cover with a probe.
+Note that since the probe size is fixed, a probe may cover a larger region than the target region.
+
+### Probe Quality Score
+
+A core feature of PanelBuilder is how it intelligently selects probes which we think will give us good results.
+To do so, probes are evaluated with a "quality score" (QS), which quantifies how likely a probe is to hybridise with unintended genome regions.
+If a probe sequence (or part of the sequence) occurs in many places in the genome, then the probe may hybridise there, reducing coverage of the intended region.
+For example, if a probe significantly overlaps an Alu region, it is likely to match to the millions of other Alu regions.
+The quality score is roughly reciprocal with the number of effective exact matches in the genome.
+For example, QS=1 means only one match, the on-target match. QS=0.1 means ten matches, nine of which will be off-target.
+
+The quality score is calculated by aligning the probe sequence with BWA-MEM. The more high-similarity alignments, the lower the quality score.
+Since alignment is slow, we have precomputed quality scores across the whole genome, using 40b windows at 20b spacing.
+This data is stored in a "probe quality profile" resource file.
+The quality score of a probe region can be quickly calculated by taking the minimum of the scores of the windows which overlap (with some interpolation to handle partial overlap).
+We have shown that the quality score of a probe calculated from the profile correlates strongly with the quality score calculated from alignment of the full probe.
+For cases where the probe is not entirely based off the reference genome (e.g. variants), the application falls back to computing the quality score with alignment of the full probe sequence.
+
+### Accepted/Rejected
+
+All probes produced by PanelBuilder are evaluated against criteria for:
+
+- Quality score
+- GC content
+
+(Note the criteria differ between feature types. Some features have no GC constraints while others have strict GC constraints.)
+
+If a probe passes the criteria, then we deem it to be a good probe. The probe is referred to as "accepted" or "acceptable".
+Regions which are covered by accepted probes are "accepted" regions.
+
+Probes which do not pass their criteria are referred to as "rejected".
+This means we believe these probes do not meet our requirements and likely won't give us good results.
+Regions which are not covered by accepted probes are "rejected" regions.
+
+It is important to note that when you request a particular feature, PanelBuilder may not produce probes which (completely) cover that feature, because they are rejected.
+You should check the output to see which probes/regions were rejected and determine if that is acceptable for your use case.
+
+## Feature Details & Probe Generation
+
+Features are for DNA probes except where specified.
+
+### Genes
+
+Probes generated to capture different features of genes. Features can be enabled/disabled on a per-gene basis.
+
+Feature methodology:
+
+| Gene feature               | Probe generation                                                                                                                               | Probe evaluation criteria                               |
+|----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
+| Promoter                   | Cover whole region from transcription start to 500b upstream.                                                                                  | `QS>=0.05`                                              |
+| UTR                        | One probe covering centre of noncoding exon.                                                                                                   | `QS>=0.05`                                              |
+| Coding                     | Cover whole region of coding exons + 10b of splice region.                                                                                     | `QS>=0.05`                                              |
+| Exon flanks                | Small intron (3-5kb): one probe in 1kb region centered between probes.<br>Large intron (>5kb): probe in each 1-5kb region 1kb away from exons. | `QS>=0.5`, `0.4<=GC<=0.5`. Select closest to `GC=0.45`  |
+| Upstream/downstream flanks | One probe in the 2kb region 1kb upstream/downstream of the gene.                                                                               | `QS>=0.5`, `0.4<=GC<=0.5`. Select closest to `GC=0.45`. |
+
+The canonical transcript of a gene (according to Ensembl) is always included. Additional transcripts may be requested (see input file format below).
+If multiple transcripts are requested, they are merged together into a superset of exons from which probes are generated.
+
+We recommend specifying these additional transcripts of clinical interest:
+
+- CDKN2A: ENST00000579755
+
+#### Gene Feature Input File
+
+TSV file with these columns:
+
+| Column            | Type                 | Description                                                                                |
+|-------------------|----------------------|--------------------------------------------------------------------------------------------|
+| GeneName          | String               | Ensembl gene name.                                                                         |
+| IncludeCoding     | Boolean              | Produce coding exon probes?                                                                |
+| IncludeUTR        | Boolean              | Produce UTR probes?                                                                        |
+| IncludeExonFlank  | Boolean              | Produce exon flank probes?                                                                 |
+| IncludeUpstream   | Boolean              | Produce upstream flank probes?                                                             |
+| IncludeDownstream | Boolean              | Produce downstream flank probes?                                                           |
+| IncludePromoter   | Boolean              | Produce promoter region probes?                                                            |
+| ExtraTransNames   | Comma separated list | Ensembl names of additional transcripts to cover. Canonical transcript is always included. |
+
+Example:
+
+```text
+GeneName	IncludeCoding	IncludeUTR	IncludeExonFlank	IncludeUpstream	IncludeDownstream	IncludePromoter	ExtraTransNames
+ABCB1	TRUE	FALSE	FALSE	FALSE	FALSE	FALSE	
+CDKN2A	TRUE	FALSE	TRUE	TRUE	TRUE	FALSE	ENST00000579755
+```
+
+### Copy Number Backbone
+
+A fixed set of probes aimed at improving purity estimation and copy number variation at a genome-wide scale.
+These probes are included if you specify the `cn_backbone` argument.
+
+Methodology for all chromosomes except Y:
+
+1. Divide the chromosome into partitions of size `cn_backbone_res_kb`. Exclude 3Mb either side of the centromere.
+2. Enumerate heterozygous sites (from `het_sites` file) within each partition.
+3. Filter sites with `0.3<=GNOMAD_FREQ<=0.7`. This ensures the site is likely heterozygous for any individual.
+4. Consider all probes centered on the sites.
+5. Select the acceptable probe with GC closest to 0.45.
+
+Probe evaluation criteria:
+
+- `QS>=0.8`
+- `0.4<=GC<=0.5`.
+
+The methodology for the Y chromosome is similar, except:
+
+- Rather than considering probes on heterozygous sites, it considers all probes in the partition. This is because there are no heterozygous sites on the Y chromosome.
+- QS criteria: `QS=1`.
+
+The strict QS and GC criteria aim to eliminate bias from amplification and hybridisation efficiency, yielding more accurate copy number determination.
+
+The partition spacing defaults to `cn_backbone_res_kb` for all chromosomes. It can be overridden per chromosome with `cn_backbone_res_kb_chromosomes` (minimum 1kb).
+Note that non-uniform probe density across the genome may bias downstream copy number and purity estimation, which assume roughly even genome-wide sampling.
+
+### CDR3 Regions
+
+A fixed set of probes aimed at capturing all VDJ rearrangements in IG and TCR regions. These probes are included if you specify the `cdr3` argument.
+```
+NOTE - In the case of IG somatic hypermutation some CDR3 rearrangements may fail to enrich properly if the mutation rate is too high (~10% or higher)
+```
+Methodology:
+
+1. Consider all V and J IG/TCR genes.
+2. For each V gene, place one probe aligned to the anchor point, closest to the J gene.
+3. For each J gene, place one probe aligned to the anchor point, closest to the V gene.
+
+Probe evaluation criteria:
+
+- `QS>=0.01`.
+
+The QS threshold is low because many of the V/J regions are similar. We have manually determined that this probe set is acceptable.  
+
+The list of IG/TCR genes is an embedded resource curated by Hartwig.
+
+With the probes aligned to the anchor of V and J, when recombination occurs, part of the D region will be captured too (which is normally too small to fit a probe).
+This allows capturing of the full V+D+J sequence present in the sample.
+
+### Sample Variants
+
+If provided, Linx and Purple output can be used to generate probes covering variants identified in a sample.
+
+Since there may be many variants in a sample, only a subset of variants is selected.
+Variants are selected to fill a maximum number of probes, controlled by the `sample_probes` argument.
+
+1. Variants are filtered based on the criteria in the table below. Only variants which pass the filters are selected for probe generation.
+2. The selected variants are prioritised. Drivers are given the highest priority, followed by nondrivers.
+3. Generate probes from the selected variants, in order of priority, until the maximum number of accepted probes is reached, or there are no more selected variants. Note that a variant may be selected but its probe rejected.
+
+Methodology per variant category:
+
+| Variant category                | Variant selection criteria                                                                                                                                              | Probe evaluation criteria |
+|---------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------|
+| Somatic SV fusion driver        | `InsSeqLength<=60`                                                                                                                                                      | `QS>=0.05`                |
+| Somatic SV amplification driver | `InsSeqLength<=60`, highest JCN variant in cluster only                                                                                                                 | `QS>=0.05`                |
+| Somatic SV deletion driver      | `InsSeqLength<=60`, breakends that flank minimum copy number region                                                                                                     | `QS>=0.05`                |
+| Somatic SV disruption driver    | `InsSeqLength<=60`, `VAF>=0.05`, `AD>=11`                                                                                                                               | `QS>=0.05`                |
+| Somatic SNV/INDEL driver        | (none)                                                                                                                                                                  | `QS>=0.05`                |
+| Germline SV driver              | `InsSeqLength<=60`                                                                                                                                                      | `QS>=0.05`                |
+| Germline SNV/INDEL driver       | (none)                                                                                                                                                                  | `QS>=0.05`                |
+| Somatic SNV/INDEL nondriver     | `AD>=11`, `AF>=0.05`, `RC<=3`, `GermlineStatus=DIPLOID`, `IndelLength<=31`. Prioritise lower `IndelLength` (only if configured), then coding, then clonal, then random. | `QS>=0.1`, `0.3<=GC<=0.6` |
+
+Additionally, for all somatic SV drivers, limit variant selection to five breakends per gene.
+
+For each selected variant, one probe is generated that targets the alternate sequence created by the variant. The details are given below:
+
+| Variant type | Probe layout                                                                                                                                                                                                                           |
+|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| SNV          | The reference sequenced is altered by substituting in the variant base. A probe is centered on the resulting sequence.                                                                                                                 |
+| MNV/INDEL    | The reference sequence is altered by replacing the reference base(s) with the variant bases. A probe is centered on the resulting sequence.                                                                                            |
+| SV           | The reference sequence up to the first breakend, then the insert sequence (if any), then the reference sequence from the second breakend. (Breakend orientation is taken into account.) A probe is centered on the resulting sequence. |
+
+### Custom Regions
+
+Arbitrary regions of the reference genome which are completely covered by probes.
+Regions are covered with the whole region tiling algorithm described in a subsequent section.
+
+Probe evaluation criteria:
+
+- `QS>=QualityScoreMin` (see the file format below)
+
+#### Custom Regions Input File
+
+TSV file with these columns:
+
+| Column          | Type    | Default if null | Description                                           |
+|-----------------|---------|-----------------|-------------------------------------------------------|
+| Chromosome      | String  | (N/A)           | Chromosome name as matching the reference genome.     |
+| PositionStart   | Integer | (N/A)           | 1-indexed inclusive start of the region.              |
+| PositionEnd     | Integer | (N/A)           | 1-indexed inclusive end of the region.                |
+| ExtraInfo       | String  | (N/A)           | Arbitrary label which will be included in the output. |
+| QualityScoreMin | Number  | 0.1             | Minimum quality score for probe evaluation criteria.  |
+
+Acceptable null values are `null` and `NULL`. If N/A then that column may not be null.
+
+Example:
+```text
+Chromosome	PositionStart	PositionEnd	ExtraInfo	QualityScoreMin
+17	7433101	7469631	custom1	0
+1	30429900	30429950	custom2	NULL
+```
+
+### Custom Small Variants
+
+Arbitrary small variants (SNV/MNV/INDEL), for which probes are generated in the same manner as described in "Sample Variants".
+
+Probe evaluation criteria:
+
+- `QS>=QualityScoreMin` (see the file format below)
+
+#### Custom Small Variants Input File
+
+TSV file with these columns:
+
+| Column          | Type    | Default if null | Description                                                                                                                |
+|-----------------|---------|-----------------|----------------------------------------------------------------------------------------------------------------------------|
+| Chromosome      | String  | (N/A)           | Chromosome name as matching the reference genome.                                                                          |
+| Position        | Integer | (N/A)           | 1-indexed inclusive position of the first reference base to alter.                                                         |
+| RefSequence     | String  | (N/A)           | Reference genome nucleotide sequence starting at `Position`, which is to be altered. This must match the reference genome. |
+| AltSequence     | String  | (N/A)           | Nucleotide sequence which replaces `RefSequence` in the variant.                                                           |
+| ExtraInfo       | String  | (N/A)           | Arbitrary label which will be included in the output.                                                                      |
+| QualityScoreMin | Number  | 0.1             | Minimum quality score for probe evaluation criteria.                                                                       |
+
+Acceptable null values are `null` and `NULL`. If N/A then that column may not be null.
+
+Example:
+```text
+Chromosome	Position	RefSequence	AltSequence	ExtraInfo	QualityScoreMin
+1	80000000	G	C	SNV	NULL
+1	80000200	GCT	CTA	MNV	NULL
+1	80000400	A	TTTA	INS	0.1
+1	80000600	GAAA		DEL	NULL
+```
+
+### Custom Structural Variants
+
+Arbitrary structural variants, for which probes are generated in the same manner as described in "Sample Variants".
+
+Probe evaluation criteria:
+
+- `QS>=QualityScoreMin` (see the file format below)
+
+#### Custom Structural Variants Input File
+
+TSV file with these columns:
+
+| Column           | Type        | Default if null | Description                                                      |
+|------------------|-------------|-----------------|------------------------------------------------------------------|
+| ChromosomeStart  | String      | (N/A)           | Chromosome name of breakend 1, as matching the reference genome. |
+| PositionStart    | Integer     | (N/A)           | 1-indexed position of breakend 1.                                |
+| OrientationStart | `1` or `-1` | (N/A)           | Orientation of breakend 1.                                       |
+| ChromosomeEnd    | String      | (N/A)           | Chromosome name of breakend 2, as matching the reference genome. |
+| PositionEnd      | Integer     | (N/A)           | 1-indexed position of breakend 2.                                |
+| OrientationEnd   | `1` or `-1` | (N/A)           | Orientation of breakend 2.                                       |
+| InsertSequence   | String      | (N/A)           | Nucleotide sequence inserted in between the two breakends.       |
+| ExtraInfo        | String      | (N/A)           | Arbitrary label which will be included in the output.            |
+| QualityScoreMin  | Number      | 0.1             | Minimum quality score for probe evaluation criteria.             |
+
+Acceptable null values are `null` and `NULL`. If N/A then that column may not be null.
+
+Example:
+
+```text
+ChromosomeStart	PositionStart	OrientationStart	ChromosomeEnd	PositionEnd	OrientationEnd	InsertSequence	ExtraInfo	QualityScoreMin
+1	30510000	1	1	30510020	-1		DEL	0.05
+1	30600000	-1	1	30600020	1		DUP	0
+1	30700000	1	1	30700020	1		INV	NULL
+1	30800000	1	2	30800000	-1		TRANS	NULL
+1	30900000	1	1	30900100	-1	AGGCTGAC	INDEL	NULL
+```
+
+### Genes RNA
+
+Probes covering the transcribed (exonic) sequence of selected genes, for RNA panels.
+Coding sequence is always covered; the 5' and 3' UTRs are optional per gene.
+This is separate from the DNA gene feature above and is written to separate output files (see "Output" section).
+
+Probes are placed in an exon-aware manner designed to maximise performance for both known transcripts and novel splices/fusions.
+This is done by ensuring probes are constrained to be within exon boundaries where possible. See "Exon-aware Tiling (RNA)" section for more details.
+
+Probe evaluation criteria:
+
+- `QS>=0.05`
+
+Notes:
+
+- **Transcript selection.** If no transcripts are specified, the gene's canonical transcript is used. Otherwise the listed Ensembl transcripts are used, with their exons merged.
+- **Strand.** Probe sequences are output genome-forward, regardless of gene strand.
+
+#### RNA Gene Feature Input File
+
+TSV file with these columns:
+
+| Column      | Type                 | Description                                                                                   |
+|-------------|----------------------|-----------------------------------------------------------------------------------------------|
+| GeneName    | String               | Ensembl gene name.                                                                            |
+| Include5UTR | Boolean              | Produce probes in 5' UTR regions?                                                             |
+| Include3UTR | Boolean              | Produce probes in 3' UTR regions?                                                             |
+| TransNames  | Comma separated list | Ensembl names of the transcripts to cover. If empty, the gene's canonical transcript is used. |
+
+Example:
+
+```text
+GeneName	Include5UTR	Include3UTR	TransNames
+EGFR	FALSE	FALSE	
+TP53	TRUE	TRUE	ENST00000269305
+```
+
+### Whole Region Tiling
+
+This section describes the algorithm used when a large region is to be fully covered with probes.
+This algorithm is applicable for features referring to "cover whole region" or similar wording.
+
+Algorithm:
+
+1. Split the target region into uncovered subregions which do not overlap existing probes.
+2. Split the uncovered subregions into acceptable regions where probes may be placed.
+This identifies all subregions where overlap with a probe would cause that probe to be rejected according to the probe evaluation criteria, and discards those regions.
+3. For each acceptable subregion, generate probes to evenly cover ("tile") the subregion. The tiling follows these rules:
+    - The tiling always has the minimum number of probes to cover the subregion.
+    - Up to 10b on each edge of the subregion may be uncovered before "adding" another probe. This avoids huge probe overlap if the subregion is slightly larger than a multiple of the probe size. (And the probe sequencing is likely to capture these edges anyway).
+    - Probes are approximately evenly spaced.
+    - The tiling is approximately centered on the subregion.
+    - Probes may overlap somewhat.
+    - Probes may extend somewhat past the ends of the subregion, as long as this does not place the probe into a rejected region.
+    - If the probes cover more bases than the subregion size, the "extra" bases are allocated equally between probe overlap and extension outside the subregion.
+4. Subregions of the target region which are not covered by the resulting set of probes (and are not the 10b of allowable uncovered edge) are marked as rejected.
+
+### Exon-aware Tiling (RNA)
+
+This section describes how probes are tiled for RNA gene features (see "Genes RNA").
+It extends the "Whole Region Tiling" algorithm so that probes cover only exonic (transcribed) sequence.
+
+Goals:
+
+- Probes cover only exonic bases, never intronic bases, so they hybridise to spliced RNA.
+- The sequence right at each splice junction is covered well, and prefer containing probes within the exon, so probes capture both the known transcript and novel splices/fusions through that junction.
+- Aside from these constraints, coverage and overlap behave like whole region tiling.
+
+Each target region (a coding or UTR part of an exon) is tiled according to its length:
+
+1. **Longer than a probe:** tiled as in whole region tiling, except the outermost probes are pinned flush to the exon boundaries instead of leaving the usual edge gap. Interior probes are evenly spaced.
+2. **About one probe long:** a single probe centred in the range, with a small edge gap allowed (as in whole region tiling).
+3. **Shorter than a probe:** a probe cannot fit within the exon, so a single probe is centred and padded across the splice junction(s) into the adjacent exon(s) if possible.
+
+Two further cases follow from the above:
+
+- **Rejected region within an exon:** as in whole region tiling, the exon is split at the rejected region into acceptable sub-ranges, each tiled by the rules above.
+- **Not coverable:** if no acceptable, in-bounds probe can be formed, then no probe is produced and the range is marked rejected.
+
+### Probe Overlap Handling
+
+Probes are generated in this order, with probes generated first having priority over subsequent probes:
+
+1. Genes
+2. Custom regions
+3. Custom structural variants
+4. Custom small variants
+5. Copy number backbone
+6. CDR3
+7. Sample variants
+
+In general, if a probe's target region is already covered by an existing probe, the new probe is not included in the panel.
+
+Exceptions:
+
+- Whole region tiling: The algorithm attempts to avoid overlapping existing probes, although it is not guaranteed.
+- Variant probes: If the variant introduces at least 5b of difference to the reference genome, the probe is always included, no matter the amount of overlap with existing probes.
+
+RNA probes are completely separate from DNA probes.
+
+## Output
+
+The DNA and RNA panels produce the same set of per-panel files, distinguished by a `dna_` or `rna_` prefix, indicated with `{dna,rna}` below.
+
+Main outputs:
+
+| File                     | Description                                                                                                                                                                        |
+|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| {dna,rna}_probes.tsv     | Full information for each probe in the panel.                                                                                                                                      |
+| {dna,rna}_probes.fasta   | Base sequences of probes in the panel.                                                                                                                                             |
+| {dna,rna}_rejections.tsv | Full information for each uncovered region or rejected probe.                                                                                                                      |
+| {dna,rna}_panel.bed      | Probe regions, merged and deduplicated. These are the reference genome regions which the panel covers and are expected to be captured. This is NOT the same as the target regions. |
+
+Informational/visualisation/debugging outputs:
+
+| File                               | Description                                                                                                               |
+|------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| {dna,rna}_probes.bed               | Individual probe regions. Similar to `dna_panel.bed` but regions are not merged.                                          |
+| {dna,rna}_targets.bed              | Individual regions which the probes are targeting (subset of `_probes.bed`).                                              |
+| {dna,rna}_rejections.bed           | Regions which were rejected. Excludes variant probes.                                                                     |
+| {dna,rna}_gene_stats.tsv           | Statistics on probes on a per-gene basis. Only produced if gene features were requested.                                  |
+| {dna,rna}_candidate_targets.bed.gz | All target regions evaluated for suitability.                                                                             |
+| {dna,rna}_candidate_probes.tsv.gz  | All probes evaluated for suitability. Only produced if `verbose_output` is specified.                                     |
+| sample_variant_info.tsv            | Additional information used in processing on a per-variant basis. Only produced if sample variants probes were requested. |
+
+The probe region/sequence columns are different between DNA and RNA due to differing possibilities:
+- DNA: `StartRegion`, `MiddleSequence`, `EndRegion`.
+- RNA: `Segment` - list of regions or sequences.
+
+All output files will be prefixed by `output_id` if specified.

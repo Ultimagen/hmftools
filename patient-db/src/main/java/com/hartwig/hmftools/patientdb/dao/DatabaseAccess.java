@@ -13,8 +13,10 @@ import com.hartwig.hmftools.common.cider.Cdr3Sequence;
 import com.hartwig.hmftools.common.cuppa.CuppaPredictions;
 import com.hartwig.hmftools.common.linx.LinxGermlineDisruption;
 import com.hartwig.hmftools.common.metrics.BamFlagStats;
-import com.hartwig.hmftools.common.metrics.BamMetricsSummary;
+import com.hartwig.hmftools.common.metrics.BamMetricSummary;
+import com.hartwig.hmftools.common.purple.GermlineAmpDel;
 import com.hartwig.hmftools.common.teal.TelomereLength;
+import com.hartwig.hmftools.common.variant.SmallVariant;
 import com.hartwig.hmftools.patientdb.amber.AmberMapping;
 import com.hartwig.hmftools.patientdb.amber.AmberPatient;
 import com.hartwig.hmftools.patientdb.amber.AmberSample;
@@ -33,14 +35,12 @@ import com.hartwig.hmftools.common.linx.LinxSvAnnotation;
 import com.hartwig.hmftools.common.peach.PeachGenotype;
 import com.hartwig.hmftools.common.purple.FittedPurity;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
-import com.hartwig.hmftools.common.purple.GermlineDeletion;
 import com.hartwig.hmftools.common.purple.PurityContext;
 import com.hartwig.hmftools.common.purple.PurpleCopyNumber;
 import com.hartwig.hmftools.common.purple.PurpleQC;
 import com.hartwig.hmftools.common.sigs.SignatureAllocation;
 import com.hartwig.hmftools.common.sv.StructuralVariantData;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
-import com.hartwig.hmftools.common.variant.SomaticVariant;
 import com.hartwig.hmftools.common.variant.VariantType;
 import com.hartwig.hmftools.common.virus.AnnotatedVirus;
 import com.hartwig.hmftools.common.virus.VirusBreakend;
@@ -326,13 +326,13 @@ public class DatabaseAccess implements AutoCloseable
     @NotNull
     public List<GeneCopyNumber> readGeneCopynumbers(final String sample, final List<String> genes)
     {
-        return geneCopyNumberDAO.readCopyNumbers(sample, genes);
+        return geneCopyNumberDAO.readGeneCopyNumbers(sample, genes);
     }
 
     @NotNull
-    public List<GermlineDeletion> readGermlineDeletions(final String sample)
+    public List<GermlineAmpDel> readGermlineCopyNumbers(final String sample)
     {
-        return geneCopyNumberDAO.readGermlineDeletions(sample);
+        return geneCopyNumberDAO.readGermlineCopyNumbers(sample);
     }
 
     @NotNull
@@ -342,7 +342,7 @@ public class DatabaseAccess implements AutoCloseable
     }
 
     @NotNull
-    public List<SomaticVariant> readSomaticVariants(final String sample, VariantType type)
+    public List<SmallVariant> readSomaticVariants(final String sample, VariantType type)
     {
         return somaticVariantDAO.read(sample, type);
     }
@@ -471,7 +471,7 @@ public class DatabaseAccess implements AutoCloseable
     }
 
     @NotNull
-    public BufferedWriter<SomaticVariant> somaticVariantWriter(final String sampleId)
+    public BufferedWriter<SmallVariant> somaticVariantWriter(final String sampleId)
     {
         return somaticVariantDAO.writer(sampleId);
     }
@@ -501,6 +501,11 @@ public class DatabaseAccess implements AutoCloseable
         structuralVariantClusterDAO.writeDrivers(sample, drivers);
     }
 
+    public void writeBreakendsAndFusions(final String sampleId, final List<LinxBreakend> breakends, final List<LinxFusion> fusions)
+    {
+        structuralVariantFusionDAO.writeBreakendsAndFusions(sampleId, breakends, fusions);
+    }
+
     public void writeGermlineSVs(final String sample, final List<LinxGermlineDisruption> germlineSvs)
     {
         germlineVariantDAO.writeGermlineSVs(sample, germlineSvs);
@@ -518,12 +523,12 @@ public class DatabaseAccess implements AutoCloseable
 
     public void writeGeneCopyNumbers(final String sample, final List<GeneCopyNumber> geneCopyNumbers)
     {
-        geneCopyNumberDAO.writeCopyNumber(sample, geneCopyNumbers);
+        geneCopyNumberDAO.writeGeneCopyNumbers(sample, geneCopyNumbers);
     }
 
-    public void writeGermlineDeletions(final String sample, final List<GermlineDeletion> deletions)
+    public void writeGermlineDeletions(final String sample, final List<GermlineAmpDel> deletions)
     {
-        geneCopyNumberDAO.writeGermlineDeletions(sample, deletions);
+        geneCopyNumberDAO.writeGermlineCopyNumbers(sample, deletions);
     }
 
     public void writeLinxDriverCatalog(
@@ -538,7 +543,7 @@ public class DatabaseAccess implements AutoCloseable
         driverCatalogDAO.writePurpleDrivers(sample, somaticCatalog, germlineCatalog);
     }
 
-    public void writeMetrics(final String sample, final BamMetricsSummary tumorMetrics, final BamMetricsSummary referenceMetrics)
+    public void writeMetrics(final String sample, final BamMetricSummary tumorMetrics, final BamMetricSummary referenceMetrics)
     {
         metricDAO.writeMetrics(sample, tumorMetrics, referenceMetrics);
     }
@@ -631,7 +636,7 @@ public class DatabaseAccess implements AutoCloseable
 
         LOGGER.info("Deleting gene copy numbers for sample: {}", sample);
         geneCopyNumberDAO.deleteGeneCopyNumberForSample(sample);
-        geneCopyNumberDAO.deleteGermlineDeletionsForSample(sample);
+        geneCopyNumberDAO.deleteGermlineCopyNumbersForSample(sample);
 
         LOGGER.info("Deleting somatic variants for sample: {}", sample);
         somaticVariantDAO.deleteSomaticVariantForSample(sample);

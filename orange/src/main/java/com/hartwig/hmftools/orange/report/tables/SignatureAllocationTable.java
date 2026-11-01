@@ -1,58 +1,81 @@
 package com.hartwig.hmftools.orange.report.tables;
 
+import static java.lang.String.format;
+
 import static com.hartwig.hmftools.orange.OrangeApplication.LOGGER;
-import static com.hartwig.hmftools.orange.report.ReportResources.formatPercentage;
-import static com.hartwig.hmftools.orange.report.ReportResources.formatSingleDigitDecimal;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.formatPercentage;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.addEntry;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.stringArray;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.createStandardTable;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.createEmptyTable;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.toPercentages;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.intToFloatArray;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Lists;
 import com.hartwig.hmftools.datamodel.sigs.SignatureAllocation;
 import com.hartwig.hmftools.orange.report.ReportResources;
 import com.hartwig.hmftools.orange.report.util.Cells;
-import com.hartwig.hmftools.orange.report.util.Tables;
-import com.itextpdf.layout.element.Cell;
-import com.itextpdf.layout.element.Table;
+
+import be.quodlibet.boxable.BaseTable;
+
+import com.hartwig.hmftools.orange.report.DocumentContext;
+
+import java.io.IOException;
 
 import org.apache.logging.log4j.util.Strings;
-import org.jetbrains.annotations.NotNull;
 
 public final class SignatureAllocationTable
 {
     static final String MISALLOC_SIGNATURE = "MISALLOC";
 
-    @NotNull
-    public static Table build(@NotNull String title, float width, @NotNull List<SignatureAllocation> signatureAllocations,
-            @NotNull ReportResources reportResources)
+    public static BaseTable build(final DocumentContext docCtx,
+            final String title, float width, final List<SignatureAllocation> signatureAllocations, final ReportResources reportResources)
+            throws IOException
     {
         if(signatureAllocations.isEmpty())
         {
-            return new Tables(reportResources).createEmpty(title, width);
+            return createEmptyTable(docCtx, title, width, reportResources);
         }
 
         Cells cells = new Cells(reportResources);
-        Table table = Tables.createContent(width,
-                new float[] { 10, 23, 10, 10, 10 },
-                new Cell[] { cells.createHeader("Signature"), cells.createHeader("Etiology"), cells.createHeader("Allocation"),
-                        cells.createHeader("Percent"),
-                        cells.createHeader(Strings.EMPTY) });
+
+        List<Integer> widths = Lists.newArrayList();
+        List<String> headers = Lists.newArrayList();
+
+        addEntry(widths, headers, 1, "Signature");
+        addEntry(widths, headers, 2, "Etiology");
+        addEntry(widths, headers, 1, "Allocation");
+        addEntry(widths, headers, 1, "Percent");
+        addEntry(widths, headers, 4, Strings.EMPTY); // to space things out
+
+        BaseTable table = createStandardTable(docCtx, title, width, intToFloatArray(widths), stringArray(headers), reportResources);
+        float[] pcts = toPercentages(intToFloatArray(widths));
 
         for(SignatureAllocation signatureAllocation : sort(signatureAllocations))
         {
-            table.addCell(cells.createContent(signatureAllocation.signature()));
-            table.addCell(cells.createContent(signatureAllocation.etiology()));
-            table.addCell(cells.createContent(formatSingleDigitDecimal(signatureAllocation.allocation())));
-            table.addCell(cells.createContent(formatPercentage(signatureAllocation.percent())));
-            table.addCell(cells.createContent(Strings.EMPTY));
+            List<String> rowValues = Lists.newArrayList();
+            if(signatureAllocation.percent() < 0.01)
+            {
+                continue;
+            }
+
+            rowValues.add(signatureAllocation.signature());
+            rowValues.add(signatureAllocation.etiology());
+            rowValues.add(format("%.0f", signatureAllocation.allocation()));
+            rowValues.add(formatPercentage(signatureAllocation.percent()));
+            rowValues.add(Strings.EMPTY);
+            cells.addRow(table, pcts, rowValues);
         }
 
-        return new Tables(reportResources).createWrapping(table, title);
+        return table;
     }
 
-    @NotNull
     @VisibleForTesting
-    static List<SignatureAllocation> sort(@NotNull List<SignatureAllocation> signatureAllocations)
+    static List<SignatureAllocation> sort(final List<SignatureAllocation> signatureAllocations)
     {
         return signatureAllocations.stream().sorted((allocation1, allocation2) ->
         {

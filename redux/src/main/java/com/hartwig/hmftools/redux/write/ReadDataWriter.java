@@ -4,12 +4,14 @@ import static java.lang.Math.abs;
 
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.MATE_CIGAR_ATTRIBUTE;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.SUPPLEMENTARY_ATTRIBUTE;
-import static com.hartwig.hmftools.common.bam.SamRecordUtils.UMI_TYPE_ATTRIBUTE;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.CONSENSUS_TYPE_ATTRIBUTE;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.UNMAP_ATTRIBUTE;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.redux.ReduxConfig.RD_LOGGER;
+import static com.hartwig.hmftools.redux.ReduxConfig.isIllumina;
+import static com.hartwig.hmftools.redux.ReduxConfig.isSbx;
 import static com.hartwig.hmftools.redux.common.FragmentStatus.DUPLICATE;
 import static com.hartwig.hmftools.redux.common.FragmentStatus.UNSET;
 import static com.hartwig.hmftools.redux.write.ReadOutput.DUPLICATES;
@@ -21,9 +23,10 @@ import java.io.IOException;
 import java.util.StringJoiner;
 
 import com.hartwig.hmftools.common.bam.SupplementaryReadData;
-import com.hartwig.hmftools.common.bam.UmiReadType;
+import com.hartwig.hmftools.common.bam.ConsensusType;
 import com.hartwig.hmftools.redux.ReduxConfig;
 import com.hartwig.hmftools.redux.common.FragmentStatus;
+import com.hartwig.hmftools.redux.duplicate.FragmentCoords;
 
 import htsjdk.samtools.SAMRecord;
 
@@ -32,9 +35,13 @@ public class ReadDataWriter
     private final ReduxConfig mConfig;
     private BufferedWriter mWriter;
 
+    // calculate per read frag coords where jitter allowances mean they may differ from their duplicate group's frag coords
+    private final boolean mRecomputeFragCoords;
+
     public ReadDataWriter(final ReduxConfig config)
     {
         mConfig = config;
+        mRecomputeFragCoords = (isSbx() && mConfig.DuplicateConfig.SbxMaxDuplicateDistance> 0) || (isIllumina() && config.UMIs.Duplex);
         mWriter = initialiseReadWriter();
     }
 
@@ -53,6 +60,9 @@ public class ReadDataWriter
             StringJoiner sj = new StringJoiner(TSV_DELIM);
             sj.add("ReadId").add("Chromosome").add("PosStart").add("PosEnd").add("Cigar");
             sj.add("InsertSize").add("MateChr").add("MatePosStart").add("Duplicate").add("CalcDuplicate").add("MateCigar").add("Coords");
+
+            if(mRecomputeFragCoords)
+                sj.add("OrigCoords");
 
             if(mConfig.UMIs.Enabled)
                 sj.add("Umi").add("UmiType");
@@ -81,7 +91,7 @@ public class ReadDataWriter
     }
 
     public synchronized void writeReadData(
-            final SAMRecord read, final FragmentStatus fragmentStatus, final String fragmentCoordinates, final String umiId)
+            final SAMRecord read, final FragmentStatus fragmentStatus, final String fragCoordinates, final String umiId)
     {
         if(mWriter == null)
             return;
@@ -120,13 +130,20 @@ public class ReadDataWriter
             sj.add(String.valueOf(read.getDuplicateReadFlag()));
             sj.add(fragmentStatus.toString());
             sj.add(mateCigar != null ? mateCigar : "");
-            sj.add(fragmentCoordinates);
+
+            sj.add(fragCoordinates);
+
+            if(mRecomputeFragCoords)
+            {
+                String originalFragCoords = FragmentCoords.fromRead(read, mConfig.UMIs.Duplex).Key;
+                sj.add(originalFragCoords.equals(fragCoordinates) ? "" : originalFragCoords);
+            }
 
             if(mConfig.UMIs.Enabled)
             {
-                String umiType = read.getStringAttribute(UMI_TYPE_ATTRIBUTE);
+                String umiType = read.getStringAttribute(CONSENSUS_TYPE_ATTRIBUTE);
                 sj.add(umiId != null ? umiId : "");
-                sj.add(umiType != null ? umiType : UmiReadType.NONE.toString());
+                sj.add(umiType != null ? umiType : ConsensusType.NONE.toString());
             }
 
             sj.add(String.valueOf(read.getMappingQuality()));

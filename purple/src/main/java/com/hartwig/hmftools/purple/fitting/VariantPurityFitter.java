@@ -64,19 +64,27 @@ public class VariantPurityFitter
                 config.Fitting.MinPurity, config.Fitting.MaxPurity);
     }
 
-    public boolean hasTumor() { return mHasTumor; }
-    public List<SomaticVariant> fittingSomatics() { return mFittingSomatics; }
+    public boolean hasTumor()
+    {
+        return mHasTumor;
+    }
+
+    public List<SomaticVariant> fittingSomatics()
+    {
+        return mFittingSomatics;
+    }
 
     public void setState(final List<ObservedRegion> observedRegions)
     {
-        mFittingSomatics.addAll(SomaticPurityFitter.findFittingVariants(mConfig.tumorOnlyMode(), mSampleData.SomaticCache.variants(), observedRegions));
+        mFittingSomatics.addAll(SomaticPurityFitter.findFittingVariants(
+                mConfig.tumorOnlyMode(), mSampleData.SomaticCache.variants(), observedRegions));
 
         if(!mFittingSomatics.isEmpty())
         {
             PPL_LOGGER.debug("somatic fitting variants({})", mFittingSomatics.size());
         }
 
-        setSvSummary(mSampleData.SvCache.variants());
+        setSvSummary(mSampleData.SvCache.somaticVariants());
         setSomaticSummary(mFittingSomatics);
 
         if(mSomaticHotspotCount > 0 || mAlleleReadCountTotal >= MIN_TOTAL_SOMATIC_VAR_ALLELE_READ_COUNT)
@@ -119,7 +127,7 @@ public class VariantPurityFitter
 
     public FittedPurity calcSomaticOnlyFit(final List<FittedPurity> allCandidates)
     {
-        return mSomaticPurityFitter.fitFromSomaticsOnly(mReferenceData.DriverGenes, mFittingSomatics, allCandidates);
+        return mSomaticPurityFitter.fitFromSomaticsOnly(mReferenceData.DriverGenes, mFittingSomatics, allCandidates, mConfig.tumorOnlyMode());
     }
 
     public static boolean somaticFitIsWorse(final FittedPurity lowestScore, final FittedPurity somaticFit, final SomaticFitConfig config)
@@ -128,8 +136,8 @@ public class VariantPurityFitter
         double somaticPurity = somaticFit.purity();
 
         return Doubles.lessThan(lowestPurity, config.MinSomaticPurity)
-            && Doubles.lessThan(somaticPurity, config.MinSomaticPurity)
-            && Doubles.greaterThan( somaticPurity, lowestPurity);
+                && Doubles.lessThan(somaticPurity, config.MinSomaticPurity)
+                && Doubles.greaterThan(somaticPurity, lowestPurity);
     }
 
     private void setSvSummary(final List<StructuralVariant> variants)
@@ -137,7 +145,9 @@ public class VariantPurityFitter
         for(StructuralVariant variant : variants)
         {
             if(variant.isFiltered())
+            {
                 continue;
+            }
 
             if(variant.hotspot() && variant.end() != null)
             {
@@ -158,10 +168,14 @@ public class VariantPurityFitter
         for(SomaticVariant variant : somatics)
         {
             if(!variant.isPass())
+            {
                 continue;
+            }
 
             if(variant.isHotspotType())
+            {
                 mSomaticHotspotCount++;
+            }
 
             if(variant.type() == VariantType.SNP) // they all should be
             {

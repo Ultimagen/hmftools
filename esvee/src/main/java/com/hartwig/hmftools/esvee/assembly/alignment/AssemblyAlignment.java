@@ -11,6 +11,7 @@ import static com.hartwig.hmftools.esvee.assembly.phase.AssemblyLinker.isAssembl
 import static com.hartwig.hmftools.esvee.assembly.types.AssemblyOutcome.LINKED;
 import static com.hartwig.hmftools.esvee.assembly.types.AssemblyOutcome.LOCAL_INDEL;
 import static com.hartwig.hmftools.esvee.assembly.types.LinkType.FACING;
+import static com.hartwig.hmftools.esvee.common.SvConstants.ASSEMBLY_INFO_DELIM;
 
 import static htsjdk.samtools.CigarOperator.D;
 import static htsjdk.samtools.CigarOperator.I;
@@ -20,6 +21,7 @@ import static htsjdk.samtools.CigarOperator.S;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
@@ -31,6 +33,9 @@ import com.hartwig.hmftools.esvee.assembly.types.AssemblyLink;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 import com.hartwig.hmftools.esvee.assembly.types.PhaseSet;
 import com.hartwig.hmftools.esvee.assembly.types.SupportRead;
+import com.hartwig.hmftools.esvee.common.saga.SagaSequenceMatch;
+
+import org.jetbrains.annotations.Nullable;
 
 import htsjdk.samtools.CigarElement;
 import htsjdk.samtools.CigarOperator;
@@ -53,6 +58,9 @@ public class AssemblyAlignment
 
     // local map to ensure reads from same fragment get the same assembly coords
     private final Map<String,List<SupportRead>> mFragmentReadsMap;
+
+    @Nullable
+    private SagaSequenceMatch mSagaMatch;
 
     public AssemblyAlignment(final JunctionAssembly assembly) { this(assembly, null); }
 
@@ -91,6 +99,8 @@ public class AssemblyAlignment
         }
 
         mFullSequenceLength = mFullSequence != null ? mFullSequence.length() : 0;
+
+        mSagaMatch = null;
     }
 
     public void setId(int id) { mId = id; }
@@ -120,12 +130,24 @@ public class AssemblyAlignment
         return mAssemblies.stream().map(x -> String.valueOf(x.id())).collect(Collectors.joining(ITEM_DELIM));
     }
 
-    public String info()
+    public String info() { return info(-1); }
+
+    public String info(int limit)
     {
         if(mAssemblies.size() == 1)
             return mAssemblies.get(0).junction().coordsTyped(true);
 
-        return mAssemblies.stream().map(x -> x.junction().coordsTyped(true)).collect(Collectors.joining("_"));
+        StringJoiner sj = new StringJoiner(ASSEMBLY_INFO_DELIM);
+
+        for(int i = 0; i < mAssemblies.size(); ++i)
+        {
+            if(limit > 0 && i >= limit)
+                break;
+
+            sj.add(mAssemblies.get(i).junction().coordsTyped(true));
+        }
+
+        return sj.toString();
     }
 
     private enum LinkType
@@ -456,8 +478,14 @@ public class AssemblyAlignment
                 // use junction reads over discordant reads, use earlier junction reads over later, and use the discordant
                 // read closest to a junction
                 boolean useMatchedReadInfo;
+                boolean updateMatchedReadInfo = true;
 
-                if(read.type() == matchedRead.type() && !read.type().isSplitSupport())
+                if(read.trimCountStart() != matchedRead.trimCountStart() || read.trimCountEnd() != matchedRead.trimCountEnd())
+                {
+                    useMatchedReadInfo = false;
+                    updateMatchedReadInfo = false;
+                }
+                else if(read.type() == matchedRead.type() && !read.type().isSplitSupport())
                 {
                     useMatchedReadInfo = juncReadStartDistance > matchedRead.junctionReadStartDistance();
                 }
@@ -470,7 +498,7 @@ public class AssemblyAlignment
                 {
                     fullSeqIndex = matchedRead.fullAssemblyIndexStart();
                 }
-                else
+                else if(updateMatchedReadInfo)
                 {
                     matchedRead.setFullAssemblyInfo(fullSeqIndex, fullSeqOrientation);
                 }
@@ -553,5 +581,20 @@ public class AssemblyAlignment
     public static boolean isLocalIndelAssembly(final AssemblyAlignment assemblyAlignment)
     {
         return assemblyAlignment.assemblies().size() == 2 && assemblyAlignment.assemblies().stream().allMatch(x -> x.outcome() == LOCAL_INDEL);
+    }
+
+    public SagaSequenceMatch sagaMatch()
+    {
+        return mSagaMatch;
+    }
+
+    public boolean isSagaMatched()
+    {
+        return mSagaMatch != null;
+    }
+
+    public void setSagaMatch(final SagaSequenceMatch match)
+    {
+        mSagaMatch = match;
     }
 }

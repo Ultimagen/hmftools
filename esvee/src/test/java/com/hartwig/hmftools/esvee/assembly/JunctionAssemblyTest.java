@@ -1,11 +1,15 @@
 package com.hartwig.hmftools.esvee.assembly;
 
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.MISMATCHES_AND_DELETIONS_ATTRIBUTE;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.NUM_MUTATONS_ATTRIBUTE;
+import static com.hartwig.hmftools.common.codon.Nucleotides.DNA_BASE_BYTES;
 import static com.hartwig.hmftools.common.genome.region.Orientation.FORWARD;
 import static com.hartwig.hmftools.common.genome.region.Orientation.REVERSE;
+import static com.hartwig.hmftools.common.redux.BaseQualAdjustment.LOW_BASE_QUAL_THRESHOLD;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_1;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_2;
 import static com.hartwig.hmftools.common.test.MockRefGenome.getNextBase;
+import static com.hartwig.hmftools.common.test.SamRecordTestUtils.buildBaseQuals;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.ASSEMBLY_SPLIT_MIN_READ_SUPPORT;
 import static com.hartwig.hmftools.esvee.TestUtils.READ_ID_GENERATOR;
 import static com.hartwig.hmftools.esvee.TestUtils.REF_BASES_200;
@@ -17,13 +21,18 @@ import static com.hartwig.hmftools.esvee.TestUtils.createRead;
 import static com.hartwig.hmftools.esvee.TestUtils.makeCigarString;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyDeduper.dedupProximateAssemblies;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyUtils.mismatchesPerComparisonLength;
-import static com.hartwig.hmftools.esvee.assembly.read.ReadUtils.readSoftClipsAndCrossesJunction;
+import static com.hartwig.hmftools.esvee.assembly.IndelBuilder.calcIndelInferredUnclippedPositions;
+import static com.hartwig.hmftools.esvee.assembly.SequenceDiffType.DELETE;
+import static com.hartwig.hmftools.esvee.assembly.SequenceDiffType.INSERT;
+import static com.hartwig.hmftools.esvee.assembly.types.RepeatInfo.getRepeatCount;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 import com.google.common.collect.Lists;
@@ -32,9 +41,13 @@ import com.hartwig.hmftools.common.test.SamRecordTestUtils;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 import com.hartwig.hmftools.esvee.assembly.types.Junction;
 import com.hartwig.hmftools.esvee.assembly.read.Read;
+import com.hartwig.hmftools.esvee.assembly.types.RepeatInfo;
 import com.hartwig.hmftools.esvee.assembly.types.SupportRead;
 
+import org.jetbrains.annotations.Nullable;
 import org.junit.Test;
+
+import htsjdk.samtools.SAMRecord;
 
 public class JunctionAssemblyTest
 {
@@ -80,6 +93,123 @@ public class JunctionAssemblyTest
         assertEquals(50, assembly.refBaseLength());
         assertEquals(51, assembly.refBasePosition());
         assertEquals(2, assembly.supportCount()); // read counts as support, just doesn't extend the ref bases
+
+        // test again where the second read is not an initial extension read - has the same bases but a different SC position
+        readBases = read1.getBasesString().substring(1);
+        read2 = createRead(READ_ID_GENERATOR.nextId(), 52, readBases, makeCigarString(readBases, 0, extBases.length() - 5));
+
+        reads = List.of(read1, read2);
+
+        assemblies = junctionAssembler.processJunction(reads);
+        assertEquals(1, assemblies.size());
+    }
+
+    @Test
+    public void testJunctionReadTypes()
+    {
+        String refBases = REF_BASES_200.substring(10, 30);
+        String extBases = REF_BASES_200.substring(100, 140);
+
+        Junction junction = new Junction(CHR_1, 29, FORWARD);
+
+        // a read soft-clipping at the junction
+        String readBases = refBases + extBases;
+        Read read1 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length()));
+
+        // a read soft-clipping before the junction
+        Read read2 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length() + 5));
+
+        // a read soft-clipping after the junction
+        Read read3 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length() - 5));
+
+        // a read without soft-clipping but evidence of SNVs
+        Read read4 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases.substring(0, 30), "30M");
+        read4.bamRecord().setAttribute(NUM_MUTATONS_ATTRIBUTE, 2);
+        read4.bamRecord().setAttribute(MISMATCHES_AND_DELETIONS_ATTRIBUTE, "22A1C1A3");
+
+        MockRefGenome refGenome = new MockRefGenome(false);
+        refGenome.RefGenomeMap.put(CHR_1, REF_BASES_200);
+
+        // an indel read inferring a soft-clip
+        Read read5 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, "40M10I20M");
+        calcIndelInferredUnclippedPositions(read5);
+
+        // a read soft-clipping too far from the junction
+        Read read6a = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length() - 21));
+
+        String longerReadBases = REF_BASES_200.substring(10, 55) + extBases.substring(0, 25);
+        Read read6b = createRead(
+                READ_ID_GENERATOR.nextId(), 10, longerReadBases, makeCigarString(longerReadBases, 0, 25));
+
+        // a read without soft-clipping or SNVs
+        String readRefBases = REF_BASES_200.substring(10, 35);
+        Read read7 = createRead(READ_ID_GENERATOR.nextId(), 10, readRefBases, makeCigarString(readRefBases, 0, 0));
+        read7.bamRecord().setAttribute(NUM_MUTATONS_ATTRIBUTE, 2); // assume has SNVs elsewhere in the read
+
+        JunctionReadTypes junctionReadTypes = new JunctionReadTypes(
+                junction, List.of(read1, read2, read3, read4, read5, read6a, read6b, read7), refGenome);
+
+        assertEquals(3, junctionReadTypes.nonJunctionReads().size());
+        List<ReadJunctionInfo> candidateReads = junctionReadTypes.candidateJunctionReads();
+        assertEquals(1, candidateReads.stream().filter(x -> x.MatchesJunction).count());
+        assertEquals(5, candidateReads.size());
+
+        assertTrue(containedCandidateJunctionRead(read1, candidateReads));
+        assertTrue(containedCandidateJunctionRead(read2, candidateReads));
+        assertTrue(containedCandidateJunctionRead(read3, candidateReads));
+        assertTrue(containedCandidateJunctionRead(read4, candidateReads));
+        assertTrue(containedCandidateJunctionRead(read5, candidateReads));
+
+        // repeat for neg orientation
+        junction = new Junction(CHR_1, 40, REVERSE);
+
+        // a read soft-clipping at the junction
+        readBases = extBases + refBases;
+        read1 = createRead(READ_ID_GENERATOR.nextId(), 40, readBases, makeCigarString(readBases, extBases.length(), 0));
+
+        // a read soft-clipping before the junction
+        read2 = createRead(READ_ID_GENERATOR.nextId(), 35, readBases, makeCigarString(readBases, extBases.length() + 5, 0));
+
+        // a read soft-clipping after the junction
+        read3 = createRead(READ_ID_GENERATOR.nextId(), 45, readBases, makeCigarString(readBases, extBases.length() - 5, 0));
+
+        // a read without soft-clipping but evidence of SNVs
+        read4 = createRead(READ_ID_GENERATOR.nextId(), 30, readBases.substring(0, 30), "30M");
+        read4.bamRecord().setAttribute(NUM_MUTATONS_ATTRIBUTE, 2);
+        read4.bamRecord().setAttribute(MISMATCHES_AND_DELETIONS_ATTRIBUTE, "3A1C1A22");
+
+        // an indel read inferring a soft-clip
+        read5 = createRead(READ_ID_GENERATOR.nextId(), 20, readBases, "20M10I40M");
+        calcIndelInferredUnclippedPositions(read5);
+
+        // a read soft-clipping too far from the junction
+        longerReadBases = extBases.substring(0, 25) + REF_BASES_200.substring(10, 55);
+        read6a = createRead(READ_ID_GENERATOR.nextId(), 61, longerReadBases, makeCigarString(longerReadBases, 25, 0));
+
+        read6b = createRead(
+                READ_ID_GENERATOR.nextId(), 19, longerReadBases, makeCigarString(longerReadBases, 15, 0));
+
+        // a read without soft-clipping or SNVs
+        read7 = createRead(READ_ID_GENERATOR.nextId(), 30, readBases, makeCigarString(readBases, 0, 0));
+
+        junctionReadTypes = new JunctionReadTypes(
+                junction, List.of(read1, read2, read3, read4, read5, read6a, read6b, read7), refGenome);
+
+        assertEquals(3, junctionReadTypes.nonJunctionReads().size());
+        candidateReads = junctionReadTypes.candidateJunctionReads();
+        assertEquals(1, candidateReads.stream().filter(x -> x.MatchesJunction).count());
+        assertEquals(5, candidateReads.size());
+
+        assertTrue(containedCandidateJunctionRead(read1, candidateReads));
+        assertTrue(containedCandidateJunctionRead(read2, candidateReads));
+        assertTrue(containedCandidateJunctionRead(read3, candidateReads));
+        assertTrue(containedCandidateJunctionRead(read4, candidateReads));
+        assertTrue(containedCandidateJunctionRead(read5, candidateReads));
+    }
+
+    private static boolean containedCandidateJunctionRead(final Read read, final List<ReadJunctionInfo> candidateReads)
+    {
+        return candidateReads.stream().anyMatch(x -> x.Read == read);
     }
 
     @Test
@@ -108,23 +238,26 @@ public class JunctionAssemblyTest
         refGenome.RefGenomeMap.put(CHR_1, REF_BASES_200);
 
         read4.bamRecord().setAttribute(NUM_MUTATONS_ATTRIBUTE, 2);
-        assertTrue(readSoftClipsAndCrossesJunction(read4, junction, refGenome));
 
         // similar but matches the ref
         readBases = REF_BASES_200.substring(10, 40);
         Read read5 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, 0));
-        assertFalse(readSoftClipsAndCrossesJunction(read5, junction, refGenome));
 
         List<Read> reads = List.of(read1, read2, read3, read4);
 
         ExtensionSeqBuilder extSeqBuilder = new ExtensionSeqBuilder(junction, reads);
 
-        assertTrue(extSeqBuilder.isValid());
-
         String sequence = refBases.substring(19) + extBases;
         assertEquals(sequence, extSeqBuilder.junctionSequence());
 
         assertEquals(4, extSeqBuilder.formAssemblySupport().size());
+
+        // now test adding non-extension reads
+        readBases = read1.getBasesString();
+        Read juncRead = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length()));
+        ReadParseState readInfo = extSeqBuilder.checkAddJunctionRead(juncRead);
+        assertNotNull(readInfo);
+        assertFalse(readInfo.mismatched());
 
         // now test with low qual mismatches in all 3 three reads but still overall agreement
         read2.getBases()[30] = MockRefGenome.getNextBase(read1.getBases()[30]);
@@ -143,9 +276,44 @@ public class JunctionAssemblyTest
         reads = List.of(read1, read2, read3, read4);
         extSeqBuilder = new ExtensionSeqBuilder(junction, reads);
 
-        assertTrue(extSeqBuilder.isValid());
         assertEquals(sequence, extSeqBuilder.junctionSequence());
         assertEquals(3, extSeqBuilder.formAssemblySupport().size());
+
+        // test reads with novel INDELs
+        String newExtBases = extBases.substring(0, 10) + "A" + extBases.substring(10, 20);
+        readBases = refBases + newExtBases;
+        juncRead = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, newExtBases.length()));
+        readInfo = extSeqBuilder.checkAddJunctionRead(juncRead);
+        assertNotNull(readInfo);
+        assertFalse(readInfo.mismatched());
+        SequenceDiffInfo mismatch = readInfo.mismatches().get(0);
+        assertEquals(INSERT, mismatch.Type);
+
+        newExtBases = extBases.substring(0, 10) + extBases.substring(11, 20);
+        readBases = refBases + newExtBases;
+        juncRead = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, newExtBases.length()));
+        readInfo = extSeqBuilder.checkAddJunctionRead(juncRead);
+        assertNotNull(readInfo);
+        assertFalse(readInfo.mismatched());
+        mismatch = readInfo.mismatches().get(0);
+        assertEquals(DELETE, mismatch.Type);
+
+        // test a read with most low qual mismatches
+        juncRead = cloneRead(read1, READ_ID_GENERATOR.nextId());
+
+        int readIndexStart = juncRead.basesLength() - extBases.length() + 5;
+        for(int i = 0; i < 15; ++i)
+        {
+            int readIndex = readIndexStart + i;
+            juncRead.getBases()[readIndex] = MockRefGenome.getNextBase(juncRead.getBases()[readIndex]);
+            juncRead.getBaseQuality()[readIndex] = LOW_BASE_QUAL_THRESHOLD;
+        }
+
+        readInfo = extSeqBuilder.checkAddJunctionRead(juncRead);
+        assertNotNull(readInfo);
+        assertFalse(readInfo.mismatched());
+        assertFalse(extSeqBuilder.sufficientQualMatches(readInfo));
+        assertEquals(17, readInfo.mismatchCount(false));
     }
 
     @Test
@@ -177,12 +345,19 @@ public class JunctionAssemblyTest
 
         ExtensionSeqBuilder extSeqBuilder = new ExtensionSeqBuilder(junction, reads);
 
-        assertTrue(extSeqBuilder.isValid());
-
         String sequence = extBases + refBases.substring(0, 1);
         assertEquals(sequence, extSeqBuilder.junctionSequence());
 
         assertEquals(4, extSeqBuilder.formAssemblySupport().size());
+
+        // now test adding non-extension reads
+        readBases = read1.getBasesString();
+
+        scLength = extBases.length();
+        Read juncRead = createRead(READ_ID_GENERATOR.nextId(), juncPosition, readBases, makeCigarString(readBases, scLength, 0));
+        ReadParseState readParseState = extSeqBuilder.checkAddJunctionRead(juncRead);
+        assertNotNull(readParseState);
+        assertFalse(readParseState.mismatched());
 
         // low qual mismatches in all 3 three reads but still overall agreement
         read2.getBases()[10] = MockRefGenome.getNextBase(read1.getBases()[30]);
@@ -201,21 +376,20 @@ public class JunctionAssemblyTest
         reads = List.of(read1, read2, read3, read4);
         extSeqBuilder = new ExtensionSeqBuilder(junction, reads);
 
-        assertTrue(extSeqBuilder.isValid());
         assertEquals(sequence, extSeqBuilder.junctionSequence());
         assertEquals(3, extSeqBuilder.formAssemblySupport().size());
     }
 
     @Test
-    public void tesHighRepeatExtensionSequence()
+    public void testHighRepeatExtensionSequence()
     {
         String refBases = REF_BASES_200.substring(0, 20);
 
         Junction junction = new Junction(CHR_1, 29, FORWARD);
 
         String bufferBases = "CAGTAGGAGCTTTA";
-        String consensusRead = "AAAAAAAA";
-        String consensusExtBases = bufferBases + consensusRead + bufferBases;
+        String consensusRepeat = "AAAAAAAA";
+        String consensusExtBases = bufferBases + consensusRepeat + bufferBases;
         String readBases = refBases + consensusExtBases;
         Read read1 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, consensusExtBases.length()));
 
@@ -223,34 +397,121 @@ public class JunctionAssemblyTest
         Read read1b = cloneRead(read1, READ_ID_GENERATOR.nextId());
         Read read1c = cloneRead(read1, READ_ID_GENERATOR.nextId());
 
-        String extBases = bufferBases + consensusRead + "A" + bufferBases; // extra A
+        String extBases = bufferBases + consensusRepeat + "A" + bufferBases; // extra A
         readBases = refBases + extBases;
         Read read2 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length()));
-        extBases = bufferBases + consensusRead.substring(3) + bufferBases; // less As
+
+        extBases = bufferBases + consensusRepeat.substring(1) + bufferBases; // 1 less A
         readBases = refBases + extBases;
         Read read3 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length()));
 
-        extBases = bufferBases + consensusRead + "AAA" + bufferBases; // extra As
+        extBases = bufferBases + consensusRepeat.substring(3) + bufferBases; // 3 less As, too many and will mismatch
         readBases = refBases + extBases;
         Read read4 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length()));
 
-        List<Read> reads = List.of(read1, read1b, read1c, read2, read3, read4);
+        extBases = bufferBases + consensusRepeat + "AA" + bufferBases; // 2 extra As
+        readBases = refBases + extBases;
+        Read read5 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length()));
+
+        extBases = bufferBases + consensusRepeat + "AAA" + bufferBases; // 3 extra As
+        readBases = refBases + extBases;
+        Read read6 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length()));
+
+        List<Read> reads = List.of(read1, read1b, read1c, read2, read3, read4, read5, read6);
 
         ExtensionSeqBuilder extSeqBuilder = new ExtensionSeqBuilder(junction, reads);
-
-        assertTrue(extSeqBuilder.isValid());
 
         String consensusSequence = extSeqBuilder.junctionSequence();
         String sequence = refBases.substring(19) + consensusExtBases;
         assertEquals(sequence, consensusSequence);
 
         List<SupportRead> supportReads = extSeqBuilder.formAssemblySupport();
-        assertEquals(4, supportReads.size());
-        assertEquals(4, supportReads.stream().filter(x -> x.extensionBaseMismatches() == 0).count());
+        assertEquals(6, supportReads.size());
+        assertEquals(5, supportReads.stream().filter(x -> x.extensionBaseMismatches() == 0).count());
     }
 
     @Test
-    public void tesRepeatMismatchesExtensionSequence()
+    public void testLongRepeatWithLowQuals()
+    {
+        // first test repeat bases with low quals of differing counts
+        String testBases = "CAG" + "T".repeat(20);
+        byte[] testBytes = testBases.getBytes();
+        byte[] testQuals = buildBaseQuals(testBytes.length, 37);
+
+        byte nonRepeatBase = DNA_BASE_BYTES[0];
+        testBytes[6] = nonRepeatBase;
+        testQuals[6] = 11;
+
+        int repeatCount = getRepeatCount(testBytes, "T", 3, true, 0, testQuals);
+        assertEquals(20, repeatCount);
+
+        // now with too many mismatches so reduces the observed repeat count
+        testBytes[12] = nonRepeatBase;
+        testQuals[12] = 11;
+        testBytes[16] = nonRepeatBase;
+        testQuals[16] = 11;
+
+        repeatCount = getRepeatCount(testBytes, "T", 3, true, 0, testQuals);
+        assertEquals(3, repeatCount);
+
+        String refBases = REF_BASES_200.substring(0, 20);
+
+        Junction junction = new Junction(CHR_1, 29, FORWARD);
+
+        String bufferBases = "CAG";
+        String consensusRepeat = "T".repeat(20);
+        String consensusExtBases = bufferBases + consensusRepeat + bufferBases;
+        String readBases = refBases + consensusExtBases;
+        Read read1 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, consensusExtBases.length()));
+
+        // start with 2 reads agreeing to establish a base-line for repeats
+        Read read1b = cloneRead(read1, READ_ID_GENERATOR.nextId());
+        Read read1c = cloneRead(read1, READ_ID_GENERATOR.nextId());
+
+        String extBases = bufferBases + consensusRepeat.substring(2) + bufferBases; // 2 less As
+        readBases = refBases + extBases;
+        Read read2 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length()));
+
+        // a read with a repeat matching but for an acceptable number of low-qual mismatches
+        extBases = bufferBases + consensusRepeat + "A" + bufferBases; // extra A
+        readBases = refBases + extBases;
+        Read read3 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length()));
+        read3.getBases()[27] = nonRepeatBase;
+        read3.getBases()[40] = nonRepeatBase;
+        read3.getBaseQuality()[27] = 37;
+        read3.getBaseQuality()[40] = 1;
+
+        // a read with too many low-qual mismatches
+        extBases = bufferBases + consensusRepeat + bufferBases;
+        readBases = refBases + extBases;
+        Read read4 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length()));
+        read4.getBases()[30] = nonRepeatBase;
+        read4.getBases()[35] = nonRepeatBase;
+        read4.getBases()[40] = nonRepeatBase;
+        read4.getBaseQuality()[30] = 1;
+        read4.getBaseQuality()[35] = 1;
+        read4.getBaseQuality()[40] = 1;
+
+        extBases = bufferBases + consensusRepeat.substring(3) + bufferBases; // 3 less As, 1 low qual is OK
+        readBases = refBases + extBases;
+        Read read5 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, makeCigarString(readBases, 0, extBases.length()));
+        read5.getBaseQuality()[30] = 1;
+        read5.getBases()[30] = nonRepeatBase;
+
+        List<Read> reads = List.of(read1, read1b, read1c, read2, read3, read4, read5);
+
+        ExtensionSeqBuilder extSeqBuilder = new ExtensionSeqBuilder(junction, reads);
+
+        String consensusSequence = extSeqBuilder.junctionSequence();
+        String sequence = refBases.substring(19) + consensusExtBases;
+        assertEquals(sequence, consensusSequence);
+
+        List<SupportRead> supportReads = extSeqBuilder.formAssemblySupport();
+        assertEquals(6, supportReads.size());
+    }
+
+    @Test
+    public void testRepeatMismatchesExtensionSequence()
     {
         String refBases = REF_BASES_200.substring(0, 20);
 
@@ -272,7 +533,7 @@ public class JunctionAssemblyTest
         readBases = extBases3 + refBases;
         Read read3 = createRead(READ_ID_GENERATOR.nextId(), junctionPosition, readBases, makeCigarString(readBases, extBases3.length(), 0));
 
-        String extBases4 = buffer + caRepeat + "CACA" + buffer; // 2 extra CAs
+        String extBases4 = buffer + caRepeat + "CACA" + buffer; // 2 extra CAs, too many for this number of repeats
         readBases = extBases4 + refBases;
         Read read4 = createRead(READ_ID_GENERATOR.nextId(), junctionPosition, readBases, makeCigarString(readBases, extBases4.length(), 0));
 
@@ -282,8 +543,6 @@ public class JunctionAssemblyTest
 
         ExtensionSeqBuilder extSeqBuilder = new ExtensionSeqBuilder(junction, reads);
 
-        assertTrue(extSeqBuilder.isValid());
-
         String consensusSequence = extSeqBuilder.junctionSequence();
 
         String consensusExtBases = buffer + caRepeat + buffer; // matches read 1
@@ -291,9 +550,43 @@ public class JunctionAssemblyTest
         String sequence = consensusExtBases + refBases.substring(0, 1);
         assertEquals(sequence, consensusSequence);
 
+        RepeatInfo consensusRepeat = extSeqBuilder.repeats().get(0);
+        assertEquals(4, consensusRepeat.Count);
+        assertEquals(12, consensusRepeat.indexStart()); // moved earlier after trimming
+        assertEquals(19, consensusRepeat.indexEnd());
+
         List<SupportRead> supportReads = extSeqBuilder.formAssemblySupport();
-        assertEquals(4, supportReads.size());
+        assertEquals(5, supportReads.size());
         assertEquals(4, supportReads.stream().filter(x -> x.extensionBaseMismatches() == 0).count());
+
+        // now test adding further junction reads with differing repeats
+        Read read1c = cloneRead(read1, READ_ID_GENERATOR.nextId());
+        Read read2b = cloneRead(read2, READ_ID_GENERATOR.nextId());
+        Read read3b = cloneRead(read3, READ_ID_GENERATOR.nextId());
+        Read read4b = cloneRead(read4, READ_ID_GENERATOR.nextId());
+
+        ReadParseState readInfo = extSeqBuilder.checkAddJunctionRead(read1c);
+        assertNotNull(readInfo);
+
+        readInfo = extSeqBuilder.checkAddJunctionRead(read2b);
+        assertNotNull(readInfo);
+        assertEquals(1, readInfo.mismatches().size());
+        SequenceDiffInfo mismatch = readInfo.mismatches().get(0);
+        assertEquals(SequenceDiffType.REPEAT, mismatch.Type);
+        assertEquals(5, mismatch.RepeatCount);
+
+        readInfo = extSeqBuilder.checkAddJunctionRead(read3b);
+        assertNotNull(readInfo);
+        assertEquals(1, readInfo.mismatches().size());
+        mismatch = readInfo.mismatches().get(0);
+        assertEquals(SequenceDiffType.REPEAT, mismatch.Type);
+        assertEquals(3, mismatch.RepeatCount);
+
+        readInfo = extSeqBuilder.checkAddJunctionRead(read4b);
+        assertNotNull(readInfo);
+        assertEquals(2, readInfo.mismatches().size());
+        mismatch = readInfo.mismatches().get(0);
+        assertEquals(SequenceDiffType.BASE, mismatch.Type); // was too many to be considered a repeat diff
     }
 
     @Test
@@ -305,17 +598,17 @@ public class JunctionAssemblyTest
         String refBases = "CAGCAGCAGCAGCAGCAGCAGCAGCAGCAG" + REF_BASES_200.substring(0, 20); // has 10 repeats
         String extraExtBases = "GATCGTAGGATCGTAGGATCGTAGGATC"; // other non-repeated bases
 
-        String extBases1 = extraExtBases + "CAGCAGCAGCAG"; // has 4 repeats
+        String extBases1 = extraExtBases + "CAG".repeat(4); // 4 repeata
         String readBases = extBases1 + refBases;
         Read read1 = createRead(READ_ID_GENERATOR.nextId(), junctionPosition, readBases, makeCigarString(readBases, extBases1.length(), 0));
 
         Read read1b = cloneRead(read1, READ_ID_GENERATOR.nextId());
 
-        String extBases3 = extBases1 + "CAGCAG"; // 2 extra CAGs
+        String extBases3 = extraExtBases + "CAG".repeat(6); // 6 repeats, 2 more than consensus
         readBases = extBases3 + refBases;
         Read read3 = createRead(READ_ID_GENERATOR.nextId(), junctionPosition, readBases, makeCigarString(readBases, extBases3.length(), 0));
 
-        String extBases4 = extraExtBases + "CAGCAG"; // 2 less CAGs
+        String extBases4 = extraExtBases + "CAG".repeat(3); // 1 less CAG
         readBases = extBases4 + refBases;
         Read read4 = createRead(READ_ID_GENERATOR.nextId(), junctionPosition, readBases, makeCigarString(readBases, extBases4.length(), 0));
 
@@ -327,9 +620,9 @@ public class JunctionAssemblyTest
 
         ExtensionSeqBuilder extSeqBuilder = new ExtensionSeqBuilder(junction, reads);
 
-        assertTrue(extSeqBuilder.isValid());
-        assertNotNull(extSeqBuilder.maxRepeat());
-        assertEquals(4, extSeqBuilder.maxRepeat().Count);
+        RepeatInfo maxRepeat = maxRepeat(extSeqBuilder);
+        assertNotNull(maxRepeat);
+        assertEquals(4, maxRepeat.Count);
         assertEquals(10, extSeqBuilder.refBaseRepeatCount());
 
         String consensusSequence = extSeqBuilder.junctionSequence();
@@ -341,28 +634,28 @@ public class JunctionAssemblyTest
 
         List<SupportRead> supportReads = extSeqBuilder.formAssemblySupport();
         assertEquals(4, supportReads.size());
-        assertEquals(4, supportReads.stream().filter(x -> x.extensionBaseMismatches() == 0).count());
+        assertEquals(3, supportReads.stream().filter(x -> x.extensionBaseMismatches() == 0).count());
 
         String buildInfo = extSeqBuilder.buildInformation();
-        assertEquals("5;5;0;true;28:CAG:4:10;2:2:1:0", buildInfo);
+        assertEquals("RC=5;EM=2;LQ=1;OR=1;REP:4xCAG", buildInfo);
 
         // test a forward orientation junction
         junction = new Junction(CHR_1, junctionPosition, FORWARD);
 
         refBases = REF_BASES_200.substring(0, 20) + "CACACACACACACACACACA"; // has 10 repeats
 
-        extBases1 = "CACACACA" + extraExtBases; // has 4 repeats
+        extBases1 = "CA".repeat(4) + extraExtBases; // has 4 repeats
         readBases = refBases + extBases1;
         int readStartPos = junctionPosition - refBases.length() + 1;
         read1 = createRead(READ_ID_GENERATOR.nextId(), readStartPos, readBases, makeCigarString(readBases, 0, extBases1.length()));
 
         read1b = cloneRead(read1, READ_ID_GENERATOR.nextId());
 
-        extBases3 = "CACA" + extBases1; // 2 extra repeats
+        extBases3 = "CA".repeat(2) + extBases1; // 2 extra repeats
         readBases = refBases + extBases3;
         read3 = createRead(READ_ID_GENERATOR.nextId(), readStartPos, readBases, makeCigarString(readBases, 0, extBases3.length()));
 
-        extBases4 = "CACA" + extraExtBases; // 2 less CAs
+        extBases4 = "CA".repeat(3) + extraExtBases; // 1 less CA
         readBases = refBases + extBases4;
         read4 = createRead(READ_ID_GENERATOR.nextId(), readStartPos, readBases, makeCigarString(readBases, 0, extBases4.length()));
 
@@ -374,9 +667,9 @@ public class JunctionAssemblyTest
 
         extSeqBuilder = new ExtensionSeqBuilder(junction, reads);
 
-        assertTrue(extSeqBuilder.isValid());
-        assertNotNull(extSeqBuilder.maxRepeat());
-        assertEquals(4, extSeqBuilder.maxRepeat().Count);
+        maxRepeat = maxRepeat(extSeqBuilder);
+        assertNotNull(maxRepeat);
+        assertEquals(4, maxRepeat.Count);
         assertEquals(10, extSeqBuilder.refBaseRepeatCount());
 
         consensusSequence = extSeqBuilder.junctionSequence();
@@ -388,7 +681,17 @@ public class JunctionAssemblyTest
 
         supportReads = extSeqBuilder.formAssemblySupport();
         assertEquals(4, supportReads.size());
-        assertEquals(4, supportReads.stream().filter(x -> x.extensionBaseMismatches() == 0).count());
+        assertEquals(3, supportReads.stream().filter(x -> x.extensionBaseMismatches() == 0).count());
+    }
+
+    private static RepeatInfo maxRepeat(final ExtensionSeqBuilder extensionSeqBuilder)
+    {
+        if(extensionSeqBuilder.repeats().isEmpty())
+            return null;
+
+        List<RepeatInfo> allRepeats = Lists.newArrayList(extensionSeqBuilder.repeats());
+        Collections.sort(allRepeats, Comparator.comparingInt(x -> -x.Count));
+        return allRepeats.get(0);
     }
 
     @Test
@@ -447,8 +750,11 @@ public class JunctionAssemblyTest
     @Test
     public void testAssemblyNoDedupWithSharedReads()
     {
-        Junction indelJunctionNeg = new Junction(CHR_1, 130, REVERSE, false, true, false);
-        Junction indelJunctionPos = new Junction(CHR_1, 131, FORWARD, false, true, false);
+        Junction indelJunctionNeg = new Junction(
+                CHR_1, 130, REVERSE, false, true, false, 0, null);
+
+        Junction indelJunctionPos = new Junction(
+                CHR_1, 131, FORWARD, false, true, false, 0, null);
 
         String leftExtBases = REF_BASES_400.substring(200, 240);
         String rightExtBases = REF_BASES_400.substring(260, 300);
@@ -640,11 +946,11 @@ public class JunctionAssemblyTest
         assertEquals(2, assemblies.size());
 
         JunctionAssembly assembly = assemblies.get(0);
-        assertEquals(8, assembly.supportCount());
-        assertEquals(100, assembly.refBasePosition());
-
-        assembly = assemblies.get(1);
         assertEquals(7, assembly.supportCount());
         assertEquals(151, assembly.refBasePosition());
+
+        assembly = assemblies.get(1);
+        assertEquals(8, assembly.supportCount());
+        assertEquals(100, assembly.refBasePosition());
     }
 }

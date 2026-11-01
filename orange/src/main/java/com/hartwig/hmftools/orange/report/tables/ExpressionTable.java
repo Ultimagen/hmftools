@@ -1,86 +1,88 @@
 package com.hartwig.hmftools.orange.report.tables;
 
-import static com.hartwig.hmftools.orange.report.ReportResources.formatSingleDigitDecimal;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.formatPercentileField;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.Lists;
 import com.google.common.primitives.Doubles;
-import com.hartwig.hmftools.datamodel.purple.PurpleGeneCopyNumber;
 import com.hartwig.hmftools.datamodel.isofox.GeneExpression;
 import com.hartwig.hmftools.orange.report.ReportResources;
 import com.hartwig.hmftools.orange.report.interpretation.Expressions;
 import com.hartwig.hmftools.orange.report.util.Cells;
-import com.hartwig.hmftools.orange.report.util.Tables;
-import com.itextpdf.layout.element.Cell;
-import com.itextpdf.layout.element.Table;
 
-import static com.hartwig.hmftools.orange.OrangeApplication.LOGGER;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import be.quodlibet.boxable.BaseTable;
+
+import com.hartwig.hmftools.orange.report.DocumentContext;
+
+import java.io.IOException;
+
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.formatTpmField;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.COL_GENE;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.COL_TPM;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.addEntry;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.stringArray;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.createStandardTable;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.createEmptyTable;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.toPercentages;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.intToFloatArray;
+
+import org.apache.logging.log4j.util.Strings;
 
 public final class ExpressionTable
 {
-    @NotNull
-    public static Table build(@NotNull String title, float width, @NotNull List<GeneExpression> expressions, boolean sortAscending,
-            @NotNull List<PurpleGeneCopyNumber> allSomaticGeneCopyNumbers, @NotNull ReportResources reportResources)
+    private static String COL_PERCENTILE = "Percentile";
+    private static String COL_FOLD_CHANGE = "Fold Change";
+
+    public static BaseTable build(final DocumentContext docCtx,
+            final String title, float width, final List<GeneExpression> expressions, boolean sortAscending,
+            final ReportResources reportResources) throws IOException
     {
         if(expressions.isEmpty())
         {
-            return new Tables(reportResources).createEmpty(title, width);
+            return createEmptyTable(docCtx, title, width, reportResources);
         }
 
         Cells cells = new Cells(reportResources);
-        Table table = Tables.createContent(width,
-                new float[] { 1, 1, 1, 1, 1, 1, 1 },
-                new Cell[] { cells.createHeader("Gene"), cells.createHeader("Tumor CN"), cells.createHeader("TPM"),
-                        cells.createHeader("Perc (Type)"), cells.createHeader("FC (Type)"), cells.createHeader("Perc (DB)"),
-                        cells.createHeader("FC (DB)") });
 
-        // TODO Build the expression datamodel table prior to rendering.
+        List<Integer> widths = Lists.newArrayList();
+        List<String> headers = Lists.newArrayList();
+
+        addEntry(widths, headers, 1, COL_GENE);
+        addEntry(widths, headers, 1, COL_TPM);
+        addEntry(widths, headers, 1, COL_PERCENTILE);
+        addEntry(widths, headers, 1, COL_FOLD_CHANGE);
+        addEntry(widths, headers, 3, Strings.EMPTY);
+
+        BaseTable table = createStandardTable(docCtx, title, width, intToFloatArray(widths), stringArray(headers), reportResources);
+        float[] pcts = toPercentages(intToFloatArray(widths));
+
         for(GeneExpression expression : sort(expressions, sortAscending))
         {
-            table.addCell(cells.createContent(expression.gene()));
-            table.addCell(cells.createContent(lookupTumorCN(allSomaticGeneCopyNumbers, expression.gene())));
-            table.addCell(cells.createContent(Expressions.tpm(expression)));
-            table.addCell(cells.createContent(Expressions.percentileType(expression)));
-            table.addCell(cells.createContent(Expressions.foldChangeType(expression)));
-            table.addCell(cells.createContent(Expressions.percentileDatabase(expression)));
-            table.addCell(cells.createContent(Expressions.foldChangeDatabase(expression)));
-        }
+            List<String> rowValues = Lists.newArrayList();
+            rowValues.add(expression.gene());
+            rowValues.add(formatTpmField(expression.tpm()));
 
-        return new Tables(reportResources).createWrapping(table, title);
-    }
-
-    @NotNull
-    private static String lookupTumorCN(@NotNull List<PurpleGeneCopyNumber> geneCopyNumbers, @NotNull String geneToFind)
-    {
-        PurpleGeneCopyNumber geneCopyNumber = findByGene(geneCopyNumbers, geneToFind);
-        if(geneCopyNumber == null)
-        {
-            LOGGER.warn("Could not find gene copy number for '{}'", geneToFind);
-            return ReportResources.NOT_AVAILABLE;
-        }
-
-        return formatSingleDigitDecimal(Math.max(0, geneCopyNumber.minCopyNumber()));
-    }
-
-    @Nullable
-    private static PurpleGeneCopyNumber findByGene(@NotNull List<PurpleGeneCopyNumber> geneCopyNumbers, @NotNull String geneToFind)
-    {
-        for(PurpleGeneCopyNumber geneCopyNumber : geneCopyNumbers)
-        {
-            if(geneCopyNumber.gene().equals(geneToFind))
+            if(expression.percentileCancer() != null && expression.medianTpmCancer() != null)
             {
-                return geneCopyNumber;
+                rowValues.add(formatPercentileField(expression.percentileCancer()));
+                rowValues.add(Expressions.formatFoldChangeCancer(expression));
             }
+            else
+            {
+                rowValues.add(formatPercentileField(expression.percentileCohort()));
+                rowValues.add(Expressions.formatFoldChange(expression));
+            }
+
+            rowValues.add(Strings.EMPTY);
+            cells.addRow(table, pcts, rowValues);
         }
 
-        return null;
+        return table;
     }
 
-    @NotNull
-    private static List<GeneExpression> sort(@NotNull List<GeneExpression> expressions, boolean sortDescending)
+    private static List<GeneExpression> sort(final List<GeneExpression> expressions, boolean sortDescending)
     {
         return expressions.stream().sorted((expression1, expression2) ->
         {

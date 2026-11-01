@@ -1,5 +1,7 @@
 package com.hartwig.hmftools.bamtools.checker;
 
+import static java.lang.String.format;
+
 import static com.hartwig.hmftools.bamtools.checker.PartitionThread.SORTED_BAM_ID;
 import static com.hartwig.hmftools.bamtools.checker.PartitionThread.UNSORTED_BAM_ID;
 import static com.hartwig.hmftools.bamtools.common.CommonUtils.APP_NAME;
@@ -39,7 +41,6 @@ import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import htsjdk.samtools.SAMFileHeader;
 import htsjdk.samtools.SAMRecord;
 import htsjdk.samtools.SamReaderFactory;
-import htsjdk.samtools.ValidationStringency;
 
 public class BamChecker
 {
@@ -93,15 +94,20 @@ public class BamChecker
 
             if(mConfig.WriteIncompleteFragments)
             {
-                writeIncompleteReads(incompleteReads);
+                writeIncompleteReads(incompleteReads, mConfig.MaxWriteIncompleteFragments);
             }
 
             fragmentCache.clear();
         }
 
+        writeIncompleteReads(partitionThreads, incompleteReads);
+        incompleteReads.clear();
+
+        partitionThreads.forEach(x -> x.close());
+
         if(mConfig.writeBam())
         {
-            finaliseBam(partitionThreads, incompleteReads);
+            finaliseBam(partitionThreads);
         }
 
         BT_LOGGER.info("BamChecker complete, mins({})", runTimeMinsStr(startTimeMs));
@@ -132,10 +138,11 @@ public class BamChecker
         return partitionThreads;
     }
 
-    private void finaliseBam(final List<PartitionThread> partitionThreads, final List<SAMRecord> incompleteReads)
+    private void writeIncompleteReads(final List<PartitionThread> partitionThreads, final List<SAMRecord> incompleteReads)
     {
         if(!incompleteReads.isEmpty() && !mConfig.DropIncompleteFragments)
         {
+            BT_LOGGER.debug("writing {} incomplete reads", incompleteReads.size());
             partitionThreads.get(0).writeIncompleteReads(incompleteReads);
         }
 
@@ -147,9 +154,10 @@ public class BamChecker
             PartitionThread writerThread = partitionThreads.size() > 1 ? partitionThreads.get(1) : partitionThreads.get(0);
             writerThread.writeUnmappedReads();
         }
+    }
 
-        partitionThreads.forEach(x -> x.close());
-
+    private void finaliseBam(final List<PartitionThread> partitionThreads)
+    {
         // sort and merge the interim BAMs
         BT_LOGGER.debug("sorting {} thread BAMs", partitionThreads.size());
 
@@ -173,6 +181,8 @@ public class BamChecker
         partitionThreads.clear();
         System.gc();
 
+        // clean-up unsorted BAMs
+
         List<Callable<Void>> threadTasks = sortTasks.stream().collect(Collectors.toList());
 
         if(!TaskExecutor.executeTasks(threadTasks, mConfig.Threads))
@@ -181,14 +191,20 @@ public class BamChecker
             System.exit(1);
         }
 
+        deleteInterimBams(unsortedBams, true);
+
         // merge sorted BAMs
         String finalBam = mConfig.OutputBam != null ? mConfig.OutputBam : mConfig.formFilename("final", BAM_EXTENSION);
+
+        BT_LOGGER.debug("writing final BAM {}", finalBam);
 
         if(!BamOperations.mergeBams(toolName, mConfig.BamToolPath, finalBam, sortedBams, mConfig.Threads))
         {
             BT_LOGGER.error("error merging sorted BAMs");
             System.exit(1);
         }
+
+        BT_LOGGER.debug("indexing final BAM");
 
         // index final BAM
         String finalBamIndex = finalBam + BAM_INDEX_EXTENSION;
@@ -198,15 +214,20 @@ public class BamChecker
         }
 
         // clean-up interim BAMs
+        deleteInterimBams(sortedBams, true);
+    }
+
+    private void deleteInterimBams(final List<String> bamFiles, boolean deleteIndex)
+    {
         try
         {
-            for(int i = 0; i < sortedBams.size(); ++i)
+            for(int i = 0; i < bamFiles.size(); ++i)
             {
-                Files.deleteIfExists(Paths.get(unsortedBams.get(i)));
+                String bamFile = bamFiles.get(i);
+                Files.deleteIfExists(Paths.get(bamFile));
 
-                String sortedBamFilename = sortedBams.get(i);
-                Files.deleteIfExists(Paths.get(sortedBamFilename));
-                Files.deleteIfExists(Paths.get(sortedBamFilename + BAM_INDEX_EXTENSION));
+                if(deleteIndex)
+                    Files.deleteIfExists(Paths.get(bamFile + BAM_INDEX_EXTENSION));
             }
         }
         catch(IOException e)
@@ -231,12 +252,12 @@ public class BamChecker
         public Void call()
         {
             BamToolName toolName = fromPath(mConfig.BamToolPath);
-            BamOperations.sortBam(toolName, mConfig.BamToolPath, mInputBam, mOutputBam, 1);
+            BamOperations.sortBam(toolName, mConfig.BamToolPath, mInputBam, mOutputBam, 1, mConfig.SortThreadMemory);
             return null;
         }
     }
 
-    private void writeIncompleteReads(final List<SAMRecord> incompleteReads)
+    private void writeIncompleteReads(final List<SAMRecord> incompleteReads, int maxWriteCount)
     {
         try
         {
@@ -252,6 +273,8 @@ public class BamChecker
             writer.write(sj.toString());
 
             writer.newLine();
+
+            int writeCount = 0;
 
             for(SAMRecord read : incompleteReads)
             {
@@ -287,6 +310,11 @@ public class BamChecker
 
                 writer.write(sj.toString());
                 writer.newLine();
+
+                ++writeCount;
+
+                if(maxWriteCount > 0 && writeCount >= maxWriteCount)
+                    break;
             }
 
             writer.close();

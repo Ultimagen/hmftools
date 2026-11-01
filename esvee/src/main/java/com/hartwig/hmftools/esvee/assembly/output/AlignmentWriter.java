@@ -7,6 +7,8 @@ import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
+import static com.hartwig.hmftools.esvee.common.FileCommon.FLD_SAGA_CIGAR;
+import static com.hartwig.hmftools.esvee.common.FileCommon.FLD_SAGA_MATCH;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -16,14 +18,18 @@ import java.util.StringJoiner;
 import com.hartwig.hmftools.esvee.assembly.AssemblyConfig;
 import com.hartwig.hmftools.esvee.assembly.alignment.AlignData;
 import com.hartwig.hmftools.esvee.assembly.alignment.AssemblyAlignment;
+import com.hartwig.hmftools.esvee.common.saga.SagaSequenceMatch;
+import com.hartwig.hmftools.esvee.common.WriteType;
 
 public class AlignmentWriter
 {
+    private final boolean mSagaEnabled;
     private final BufferedWriter mWriter;
     private final BufferedWriter mDetailedWriter;
 
     public AlignmentWriter(final AssemblyConfig config)
     {
+        mSagaEnabled = config.SagaFastaFile != null;
         mWriter = initialisePhasedAssemblyWriter(config);
         mDetailedWriter = initialiseAlignmentDataWriter(config);
     }
@@ -58,6 +64,12 @@ public class AlignmentWriter
             sj.add("AssemblyCigar");
             sj.add("FullSequence");
 
+            if(mSagaEnabled)
+            {
+                sj.add(FLD_SAGA_MATCH);
+                sj.add(FLD_SAGA_CIGAR);
+            }
+
             writer.write(sj.toString());
             writer.newLine();
 
@@ -70,7 +82,7 @@ public class AlignmentWriter
         }
     }
 
-    public synchronized static void writePhasedAssembly(final BufferedWriter writer, final AssemblyAlignment assemblyAlignment)
+    public synchronized void writePhasedAssembly(final BufferedWriter writer, final AssemblyAlignment assemblyAlignment)
     {
         if(writer == null)
             return;
@@ -85,6 +97,13 @@ public class AlignmentWriter
             sj.add(String.valueOf(assemblyAlignment.fullSequenceLength()));
             sj.add(assemblyAlignment.assemblyCigar());
             sj.add(assemblyAlignment.fullSequence());
+
+            if(mSagaEnabled)
+            {
+                SagaSequenceMatch sagaMatch = assemblyAlignment.sagaMatch();
+                sj.add(sagaMatch == null ? "" : sagaMatch.variant().toString());
+                sj.add(sagaMatch == null ? "" : sagaMatch.cigar().toString());
+            }
 
             writer.write(sj.toString());
             writer.newLine();

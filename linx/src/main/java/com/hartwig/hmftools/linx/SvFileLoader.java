@@ -5,12 +5,8 @@ import static com.hartwig.hmftools.common.sv.SvVcfTags.ALLELE_FRACTION;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.INFERRED;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.PON_COUNT;
 import static com.hartwig.hmftools.common.utils.config.ConfigUtils.convertWildcardSamplePath;
-import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS_FILTER;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.getGenotypeAttributeAsDouble;
-import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_AF;
-import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_CN;
-import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_CN_CHANGE;
-import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_JUNCTION_COPY_NUMBER;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
 
 import java.io.IOException;
@@ -32,7 +28,6 @@ import com.hartwig.hmftools.linx.types.SvVarData;
 
 import org.apache.logging.log4j.util.Strings;
 
-import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.VariantContext;
 
 public final class SvFileLoader
@@ -81,7 +76,10 @@ public final class SvFileLoader
         VcfFileReader vcfReader = new VcfFileReader(vcfFile);
 
         if(!vcfReader.fileValid())
+        {
+            System.exit(1);
             return Collections.emptyList();
+        }
 
         // NOTE: if linx (and Purple) are run in germline-only mode, then consider setting the reference ordinal only here,
         // but depends on the downstream interpretation of the Linx output
@@ -137,11 +135,11 @@ public final class SvFileLoader
     {
         List<SvVarData> svDataItems = Lists.newArrayList();
 
-        for(final StructuralVariantData svRecord : svRecords)
+        for(StructuralVariantData svRecord : svRecords)
         {
             final String filter = svRecord.filter();
 
-            if(filter.isEmpty() || filter.equals(PASS) || filter.equals(INFERRED) || config.IsGermline)
+            if(filter.isEmpty() || filter.equals(PASS_FILTER) || filter.equals(INFERRED) || config.IsGermline)
             {
                 svDataItems.add(new SvVarData(svRecord));
             }

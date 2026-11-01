@@ -1,6 +1,5 @@
 package com.hartwig.hmftools.linx.drivers;
 
-import static com.hartwig.hmftools.common.driver.DriverCategory.TSG;
 import static com.hartwig.hmftools.common.driver.DriverType.DRIVERS_PURPLE_SOMATIC;
 import static com.hartwig.hmftools.common.driver.LikelihoodMethod.DISRUPTION;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
@@ -9,6 +8,7 @@ import static com.hartwig.hmftools.linx.drivers.GeneCopyNumberRegion.calcGeneCop
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
@@ -20,6 +20,7 @@ import com.hartwig.hmftools.common.driver.panel.DriverGene;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
 import com.hartwig.hmftools.common.gene.GeneData;
 import com.hartwig.hmftools.common.gene.TranscriptData;
+import com.hartwig.hmftools.common.purple.ReportedStatus;
 import com.hartwig.hmftools.linx.gene.BreakendGeneData;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
 import com.hartwig.hmftools.common.purple.GeneCopyNumberFile;
@@ -31,7 +32,7 @@ public class DriverDataCache
 {
     public final EnsemblDataCache GeneTransCache;
     public final CnDataLoader CopyNumberData;
-    private final List<DriverGene> mDriverGenes;
+    private final Map<String,DriverGene> mDriverGenes;
 
     private final List<DriverCatalog> mDriverCatalog;
     private final List<DriverGeneData> mDriverGeneDataList;
@@ -43,7 +44,7 @@ public class DriverDataCache
     private boolean mIsMale;
 
     public DriverDataCache(
-            final CnDataLoader cnDataLoader, final EnsemblDataCache mGeneTransCache, final List<DriverGene> driverGenes)
+            final CnDataLoader cnDataLoader, final EnsemblDataCache mGeneTransCache, final Map<String,DriverGene> driverGenes)
     {
         CopyNumberData = cnDataLoader;
         GeneTransCache = mGeneTransCache;
@@ -58,9 +59,9 @@ public class DriverDataCache
         mIsMale = false;
     }
 
-    public final List<DriverCatalog> getDriverCatalog() { return mDriverCatalog; }
-    public final List<DriverGeneData> getDriverGeneDataList() { return mDriverGeneDataList; }
-    public final List<GeneCopyNumber> getGeneCopyNumberData() { return mGeneCopyNumberData; }
+    public List<DriverCatalog> getDriverCatalog() { return mDriverCatalog; }
+    public List<DriverGeneData> getDriverGeneDataList() { return mDriverGeneDataList; }
+    public List<GeneCopyNumber> getGeneCopyNumberData() { return mGeneCopyNumberData; }
 
     public String sampleId() { return mSampleId; }
     public double samplePloidy() { return mSamplePloidy; }
@@ -81,12 +82,13 @@ public class DriverDataCache
 
         try
         {
-            final PurityContext purityContext = PurityContextFile.read(purpleDataPath, mSampleId);
+            PurityContext purityContext = PurityContextFile.read(purpleDataPath, mSampleId);
             setSamplePurityData(purityContext.bestFit().ploidy(), isMaleSample(purityContext));
 
             mDriverCatalog.addAll(
                     DriverCatalogFile.read(DriverCatalogFile.generateSomaticFilename(purpleDataPath, mSampleId)).stream()
                             .filter(x -> DRIVERS_PURPLE_SOMATIC.contains(x.driver()))
+                            .filter(x -> x.reportedStatus() == ReportedStatus.REPORTED)
                             .collect(Collectors.toList()));
 
             mGeneCopyNumberData.addAll(
@@ -104,21 +106,27 @@ public class DriverDataCache
         mIsMale = isMale;
     }
 
-    public DriverGeneData createDriverData(final BreakendGeneData gene, final TranscriptData transData, final DriverType driverType)
+    public DriverGeneData createHomDisruptionDriver(final BreakendGeneData gene, final TranscriptData transData, final DriverType driverType)
     {
         GeneCopyNumber gcnData = findGeneCopyNumber(gene.geneName());
 
-        DriverGene driverGene = mDriverGenes.stream().filter(x -> x.gene().equals(gene.geneName())).findFirst().orElse(null);
+        DriverGene driverGene = mDriverGenes.get(gene.geneName());
 
-        final DriverCatalog driverRecord = ImmutableDriverCatalog.builder()
+        if(driverGene == null)
+            return null;
+
+        ReportedStatus reportedStatus = driverGene.reportDisruption() ? ReportedStatus.REPORTED : ReportedStatus.NOT_REPORTED;
+
+        DriverCatalog driverRecord = ImmutableDriverCatalog.builder()
                 .driver(driverType)
-                .category(driverGene != null ? driverGene.likelihoodType() : TSG)
+                .category(driverGene.likelihoodType())
                 .gene(gene.geneName())
                 .transcript(transData.TransName)
                 .isCanonical(transData.IsCanonical)
                 .chromosome(gene.chromosome())
                 .chromosomeBand(gene.GeneData.KaryotypeBand)
                 .likelihoodMethod(DISRUPTION)
+                .reportedStatus(reportedStatus)
                 .driverLikelihood(1.0)
                 .missense(0)
                 .nonsense(0)
@@ -132,7 +140,7 @@ public class DriverDataCache
 
         mDriverCatalog.add(driverRecord);
 
-        final GeneData geneData = GeneTransCache.getGeneDataByName(gene.geneName());
+        GeneData geneData = GeneTransCache.getGeneDataByName(gene.geneName());
 
         if(geneData == null)
         {
@@ -153,7 +161,7 @@ public class DriverDataCache
         return dgData;
     }
 
-    public final GeneCopyNumber findGeneCopyNumber(final String geneName)
+    public GeneCopyNumber findGeneCopyNumber(final String geneName)
     {
         for(GeneCopyNumber geneCN : mGeneCopyNumberData)
         {

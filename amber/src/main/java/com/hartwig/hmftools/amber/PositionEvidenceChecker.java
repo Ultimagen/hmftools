@@ -1,34 +1,67 @@
 package com.hartwig.hmftools.amber;
 
+import static com.hartwig.hmftools.amber.AmberConfig.isUltima;
+
+import java.util.List;
+
 import com.hartwig.hmftools.common.amber.AmberSite;
+import com.hartwig.hmftools.common.sequencing.UltimaBamUtils;
 
 import htsjdk.samtools.SAMRecord;
 
 public class PositionEvidenceChecker
 {
+    private final int mMinMapQuality;
     private final int mMinBaseQuality;
 
-    public PositionEvidenceChecker(final int minBaseQuality)
+    public PositionEvidenceChecker(final int minMapQuality, final int minBaseQuality)
     {
+        mMinMapQuality = minMapQuality;
         mMinBaseQuality = minBaseQuality;
     }
 
-    public void addEvidence(final PositionEvidence posEvidence, final SAMRecord samRecord)
+    public void addEvidence(final PositionEvidence posEvidence, final SAMRecord read)
     {
-        int baseQuality = getBaseQuality(posEvidence.Position, samRecord);
+        int baseQuality = getBaseQuality(posEvidence.Position, read);
+
+        boolean filtered = false;
+
+        if(read.getMappingQuality() < mMinMapQuality)
+        {
+            ++posEvidence.MapQualFiltered;
+            filtered = true;
+        }
 
         if(baseQuality < mMinBaseQuality)
-            return;
+        {
+            ++posEvidence.BaseQualFiltered;
+            filtered = true;
+        }
+
+        int bafPosition = posEvidence.position();
+        int readIndex = read.getReadPositionAtReferencePosition(bafPosition) - 1; // is 1-based
+
+        if(isUltima())
+        {
+            List<Integer> lowQualIndices = UltimaBamUtils.extractLowQualIndices(read);
+
+            if(lowQualIndices != null && lowQualIndices.contains(readIndex))
+            {
+                ++posEvidence.SeqTechFiltered;
+                filtered = true;
+            }
+        }
 
         ++posEvidence.ReadDepth;
 
-        int bafPosition = posEvidence.position();
-        int readPosition = samRecord.getReadPositionAtReferencePosition(bafPosition);
-        if(readPosition != 0)
+        if(filtered)
+            return;
+
+        if(readIndex >= 0)
         {
-            if(!isIndel(bafPosition, readPosition, samRecord))
+            if(!isIndel(bafPosition, readIndex + 1, read)) // to preserve existing read index behaviour
             {
-                char baseChar = samRecord.getReadString().charAt(readPosition - 1);
+                char baseChar = read.getReadString().charAt(readIndex);
 
                 if(posEvidence.equalsRef(baseChar))
                 {
@@ -37,7 +70,6 @@ public class PositionEvidenceChecker
                 else if(posEvidence.equalsAlt(baseChar))
                 {
                     ++posEvidence.AltSupport;
-                    posEvidence.AltQuality += baseQuality;
                 }
             }
             else
@@ -47,7 +79,7 @@ public class PositionEvidenceChecker
         }
     }
 
-    public static boolean isIndel(int bafPosition, int readPosition, final SAMRecord samRecord)
+    private static boolean isIndel(int bafPosition, int readIndex, final SAMRecord samRecord)
     {
         if(samRecord.getAlignmentEnd() > bafPosition)
         {
@@ -58,7 +90,7 @@ public class PositionEvidenceChecker
             }
 
             // Insert?
-            return samRecord.getReferencePositionAtReadPosition(readPosition + 1) != bafPosition + 1;
+            return samRecord.getReferencePositionAtReadPosition(readIndex + 1) != bafPosition + 1;
         }
 
         return false;

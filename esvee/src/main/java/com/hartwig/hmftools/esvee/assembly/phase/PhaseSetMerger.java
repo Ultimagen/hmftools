@@ -7,7 +7,7 @@ import static com.hartwig.hmftools.common.genome.region.Orientation.FORWARD;
 import static com.hartwig.hmftools.common.genome.region.Orientation.REVERSE;
 import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.ASSEMBLY_LINK_OVERLAP_BASES;
-import static com.hartwig.hmftools.esvee.assembly.AssemblyUtils.createMinBaseQuals;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyUtils.createBaseQualsAboveMinThreshold;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyUtils.mismatchesPerComparisonLength;
 import static com.hartwig.hmftools.esvee.assembly.types.JunctionSequence.PHASED_ASSEMBLY_MATCH_SEQ_LENGTH;
 import static com.hartwig.hmftools.esvee.common.CommonUtils.isLineInsertPair;
@@ -16,6 +16,7 @@ import java.util.List;
 
 import com.hartwig.hmftools.common.codon.Nucleotides;
 import com.hartwig.hmftools.common.genome.region.Orientation;
+import com.hartwig.hmftools.common.utils.StartEndPair;
 import com.hartwig.hmftools.esvee.assembly.alignment.AssemblyAlignment;
 import com.hartwig.hmftools.esvee.assembly.SequenceCompare;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
@@ -78,9 +79,9 @@ public final class PhaseSetMerger
         String primarySequence = primaryAssembly.fullSequence();
         String otherFullSequence = otherAssembly.fullSequence();
 
-        for(int i = 0; i <= 1; ++i)
+        for(StartEndPair se : StartEndPair.values())
         {
-            Orientation otherOrientation = (i == 0) ? FORWARD : REVERSE;
+            Orientation otherOrientation = se.isStart() ? FORWARD : REVERSE;
 
             String otherSequence = otherOrientation == FORWARD ?
                     otherFullSequence : Nucleotides.reverseComplementBases(otherFullSequence);
@@ -162,21 +163,21 @@ public final class PhaseSetMerger
             if(firstBases == null && secondBases == null)
             {
                 firstBases = firstSequence.getBytes();
-                firstBaseQuals = createMinBaseQuals(firstLength);
+                firstBaseQuals = createBaseQualsAboveMinThreshold(firstLength);
                 firstRepeats = RepeatInfo.findRepeats(firstBases);
 
                 secondBases = secondSequence.getBytes();
-                secondBaseQuals = createMinBaseQuals(secondLength);
+                secondBaseQuals = createBaseQualsAboveMinThreshold(secondLength);
                 secondRepeats = RepeatInfo.findRepeats(secondBases);
             }
 
             int permittedMismatches = mismatchesPerComparisonLength(overlapLength);
 
-            int mismatchCount = SequenceCompare.compareSequences(
+            double mismatchPenalty = SequenceCompare.compareSequences(
                     firstBases, firstBaseQuals, firstMatchIndexStart, firstMatchIndexEnd, firstRepeats,
                     secondBases, secondBaseQuals, secondMatchIndexStart, secondMatchIndexEnd, secondRepeats, permittedMismatches);
 
-            if(mismatchCount > permittedMismatches)
+            if(mismatchPenalty > permittedMismatches)
                 continue;
 
             if(!canMergePhaseSets(

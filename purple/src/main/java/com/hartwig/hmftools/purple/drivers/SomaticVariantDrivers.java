@@ -13,7 +13,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.driver.DriverCatalog;
 import com.hartwig.hmftools.common.driver.DriverImpact;
-import com.hartwig.hmftools.common.driver.panel.DriverGenePanel;
+import com.hartwig.hmftools.purple.DriverGeneResource;
 import com.hartwig.hmftools.common.driver.panel.ReportablePredicate;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
 import com.hartwig.hmftools.common.variant.CodingEffect;
@@ -33,13 +33,13 @@ public class SomaticVariantDrivers
     private final OncoDrivers mOncoDrivers;
     private final TsgDrivers mTsgDrivers;
 
-    public SomaticVariantDrivers(final DriverGenePanel panel)
+    public SomaticVariantDrivers(final DriverGeneResource driverGeneResource)
     {
         mVariantTypeCounts = Maps.newHashMap();
         mVariantTypeCountsBiallelic = Maps.newHashMap();
 
-        mOncoDrivers = new OncoDrivers(panel);
-        mTsgDrivers = new TsgDrivers(panel);
+        mOncoDrivers = new OncoDrivers(driverGeneResource);
+        mTsgDrivers = new TsgDrivers(driverGeneResource);
     }
 
     public void overrideVariantCounts(final Map<VariantType,Integer> variantTypeCounts, final Map<VariantType,Integer> biallelicCounts)
@@ -80,9 +80,9 @@ public class SomaticVariantDrivers
             mTsgDrivers.addVariant(variant);
     }
 
-    protected static boolean isReportable(final ReportablePredicate predicate, final SomaticVariant variant)
+    protected static boolean isCandidateReportable(final ReportablePredicate predicate, final SomaticVariant variant)
     {
-        return predicate.isReportable(variant.variantImpact(), variant.type(), variant.isHotspot());
+        return predicate.isCandidateReportable(variant.variantImpact(), variant.isHotspot());
     }
 
     public static boolean hasTranscriptCodingEffect(final VariantImpact variantImpact, final VariantType variantType, final String transcript)
@@ -119,7 +119,7 @@ public class SomaticVariantDrivers
         return topCodingEffect;
     }
 
-    public static boolean hasCodingEffect(final VariantType type, final CodingEffect codingEffect)
+    private static boolean hasCodingEffect(final VariantType type, final CodingEffect codingEffect)
     {
         DriverImpact impact = DriverImpact.select(type, codingEffect);
         return impact != DriverImpact.UNKNOWN;
@@ -150,7 +150,8 @@ public class SomaticVariantDrivers
         variantContext.getCommonInfo().putAttribute(REPORTABLE_TRANSCRIPTS, reportableTranscripts.toString());
     }
 
-    public List<DriverCatalog> buildCatalog(final Map<String,List<GeneCopyNumber>> geneCopyNumberMap, final List<DriverSourceData> driverSourceData)
+    public List<DriverCatalog> buildCatalog(
+            final Map<String,List<GeneCopyNumber>> geneCopyNumberMap, final List<DriverSourceData> driverSourceData)
     {
         final List<DriverCatalog> result = Lists.newArrayList();
 

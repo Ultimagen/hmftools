@@ -13,6 +13,7 @@ import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBuffer
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.common.CommonUtils.withinLineProximity;
+import static com.hartwig.hmftools.esvee.common.FileCommon.FLD_SAGA_MATCH;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -27,10 +28,12 @@ import com.hartwig.hmftools.esvee.assembly.alignment.AlternativeAlignment;
 import com.hartwig.hmftools.esvee.assembly.alignment.AssemblyAlignment;
 import com.hartwig.hmftools.esvee.assembly.alignment.Breakend;
 import com.hartwig.hmftools.esvee.assembly.alignment.BreakendSegment;
-import com.hartwig.hmftools.esvee.assembly.alignment.HomologyData;
 import com.hartwig.hmftools.esvee.assembly.types.InsertionType;
 import com.hartwig.hmftools.esvee.assembly.types.Junction;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
+import com.hartwig.hmftools.esvee.assembly.types.PhaseGroup;
+import com.hartwig.hmftools.esvee.common.saga.SagaSequenceMatch;
+import com.hartwig.hmftools.esvee.common.WriteType;
 
 public class BreakendWriter
 {
@@ -101,8 +104,16 @@ public class BreakendWriter
             sj.add("AltAlignments");
             sj.add("InsertionType");
             sj.add("UniqueFragPos");
+            sj.add("StrandBias");
+            sj.add("ThreePrimeRange");
             sj.add("ClosestAssembly");
             sj.add("NonPrimaryFragments");
+
+            if(mConfig.SagaFastaFile != null)
+            {
+                sj.add(FLD_SAGA_MATCH);
+                sj.add("SagaInferred");
+            }
 
             writer.write(sj.toString());
             writer.newLine();
@@ -127,13 +138,16 @@ public class BreakendWriter
 
             Map<Breakend,String> closestAssemblyMap = Maps.newHashMap();
 
+            JunctionAssembly firstAssembly = assemblyAlignment.assemblies().get(0);
+            PhaseGroup phaseGroup = firstAssembly.phaseGroup();
+
             for(Breakend breakend : assemblyAlignment.breakends())
             {
                 StringJoiner sj = new StringJoiner(TSV_DELIM);
 
                 sj.add(String.valueOf(breakend.id()));
-                sj.add(String.valueOf(assemblyAlignment.assemblies().get(0).phaseGroup().id()));
-                sj.add(String.valueOf(assemblyAlignment.phaseSet() != null ? assemblyAlignment.phaseSet().id() : -1));
+                sj.add(String.valueOf(phaseGroup.id()));
+                sj.add(String.valueOf(assemblyAlignment.phaseSet() != null ? assemblyAlignment.phaseSet().id() : firstAssembly.nonPhaseSetId()));
                 sj.add(String.valueOf(assemblyAlignment.id()));
                 sj.add(!breakend.isSingle() ? String.valueOf(breakend.otherBreakend().id()) : "");
                 sj.add(assemblyInfo);
@@ -148,7 +162,6 @@ public class BreakendWriter
                     sj.add(String.valueOf(breakend.otherBreakend().Position));
                     sj.add(String.valueOf(breakend.otherBreakend().Orient));
                     sj.add(String.valueOf(breakend.svLength()));
-
                 }
                 else
                 {
@@ -227,10 +240,23 @@ public class BreakendWriter
 
                 sj.add(String.valueOf(breakend.uniqueFragmentPositionCount()));
 
+                String strandBias = breakend.sampleSupport().stream().map(x -> format("%.2f", x.strandBias())).collect(Collectors.joining(ITEM_DELIM));
+                sj.add(strandBias);
+
+                int[] readOrientationRange = breakend.readOrientationRange();
+                sj.add(format("%d;%d", readOrientationRange[0], readOrientationRange[1]));
+
                 String assemblyMatchStr = getClosestAssembly(breakend, assemblyAlignment.assemblies(), closestAssemblyMap, true);
                 sj.add(assemblyMatchStr);
 
                 sj.add(String.valueOf(breakend.nonPrimaryAssemblyFragmentCount()));
+
+                if(mConfig.SagaFastaFile != null)
+                {
+                    SagaSequenceMatch sagaMatch = assemblyAlignment.sagaMatch();
+                    sj.add(sagaMatch == null ? "" : sagaMatch.variant().toString());
+                    sj.add(String.valueOf(breakend.isSagaInferred()));
+                }
 
                 mWriter.write(sj.toString());
                 mWriter.newLine();

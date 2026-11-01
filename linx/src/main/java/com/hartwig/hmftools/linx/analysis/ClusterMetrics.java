@@ -2,9 +2,9 @@ package com.hartwig.hmftools.linx.analysis;
 
 import static java.lang.Math.max;
 
+import static com.hartwig.hmftools.common.segmentation.Arm.P;
+import static com.hartwig.hmftools.common.segmentation.Arm.Q;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DEL;
-import static com.hartwig.hmftools.common.purple.ChromosomeArm.P_ARM;
-import static com.hartwig.hmftools.common.purple.ChromosomeArm.Q_ARM;
 import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_REV;
 import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_FWD;
 import static com.hartwig.hmftools.linx.types.LinxConstants.SHORT_DB_LENGTH;
@@ -77,17 +77,17 @@ public class ClusterMetrics
         if(cluster.getSvCount() == 0)
             return;
 
-        final Map<String,Boolean> crossCentromereLinks = Maps.newHashMap();
+        Map<String,Boolean> crossCentromereLinks = Maps.newHashMap();
 
         cluster.getLinkedPairs().stream()
                 .filter(x -> x.firstBreakend().arm() != x.secondBreakend().arm())
                 .forEach(x -> crossCentromereLinks.put(x.chromosome(), true));
 
-        for(final Map.Entry<String,List<SvBreakend>> entry : cluster.getChrBreakendMap().entrySet())
+        for(Map.Entry<String,List<SvBreakend>> entry : cluster.getChrBreakendMap().entrySet())
         {
-            final String chromosome = entry.getKey();
-            final List<SvBreakend> breakendList = entry.getValue();
-            final List<SvBreakend> chrBreakendList = chrBreakendMap.get(chromosome);
+            String chromosome = entry.getKey();
+            List<SvBreakend> breakendList = entry.getValue();
+            List<SvBreakend> chrBreakendList = chrBreakendMap.get(chromosome);
 
             int startIndex = findStartIndex(breakendList);
             int endIndex = findEndIndex(breakendList);
@@ -100,9 +100,9 @@ public class ClusterMetrics
             // add up all stand-alone DELs and deletion bridges, including those spanning unclustered SVs
             for(int i = startIndex; i <= endIndex - 1; ++i)
             {
-                final SvBreakend breakend = breakendList.get(i);
-                final SvVarData var = breakend.getSV();
-                final SvBreakend nextBreakend = breakendList.get(i+1);
+                SvBreakend breakend = breakendList.get(i);
+                SvVarData var = breakend.getSV();
+                SvBreakend nextBreakend = breakendList.get(i+1);
                 int breakendsDistance = nextBreakend.position() - breakend.position();
 
                 boolean isDB = breakend.getDBLink() != null && breakend.getDBLink() == nextBreakend.getDBLink();
@@ -130,8 +130,8 @@ public class ClusterMetrics
 
                     for(int j = breakend.getChrPosIndex() + 1; j < nextBreakend.getChrPosIndex() - 1; ++j)
                     {
-                        final SvBreakend ncBreakend = chrBreakendList.get(j);
-                        final SvVarData ncVar = ncBreakend.getSV();
+                        SvBreakend ncBreakend = chrBreakendList.get(j);
+                        SvVarData ncVar = ncBreakend.getSV();
                         if(ncVar.type() == DEL && chrBreakendList.get(j + 1).getSV() == ncVar)
                         {
                             TraversedDelLength += ncVar.length();
@@ -154,7 +154,7 @@ public class ClusterMetrics
                     ImpliedTICount += impliedTICount;
                 }
 
-                if(breakend.arm() == P_ARM && nextBreakend.arm() == Q_ARM)
+                if(breakend.arm() == P && nextBreakend.arm() == Q)
                 {
                     // if neither breakend points across the centromere then subtract it from the total range
                     // and also check for a reliable TI across this region as well
@@ -171,8 +171,8 @@ public class ClusterMetrics
         int startIndex = 0;
         for(; startIndex < breakendList.size() - 1; )
         {
-            final SvBreakend lowerBreakend = breakendList.get(startIndex);
-            final SvBreakend upperBreakend = breakendList.get(startIndex + 1);
+            SvBreakend lowerBreakend = breakendList.get(startIndex);
+            SvBreakend upperBreakend = breakendList.get(startIndex + 1);
 
             if(upperBreakend.position() - lowerBreakend.position() <= SHORT_TI_LENGTH
             && lowerBreakend.orientation() == ORIENT_REV && upperBreakend.orientation() == ORIENT_FWD
@@ -194,8 +194,8 @@ public class ClusterMetrics
 
         for(; endIndex >= 1;)
         {
-            final SvBreakend lowerBreakend = breakendList.get(endIndex - 1);
-            final SvBreakend upperBreakend = breakendList.get(endIndex);
+            SvBreakend lowerBreakend = breakendList.get(endIndex - 1);
+            SvBreakend upperBreakend = breakendList.get(endIndex);
 
             if(upperBreakend.position() - lowerBreakend.position() <= SHORT_TI_LENGTH
                     && lowerBreakend.orientation() == ORIENT_REV && upperBreakend.orientation() == ORIENT_FWD

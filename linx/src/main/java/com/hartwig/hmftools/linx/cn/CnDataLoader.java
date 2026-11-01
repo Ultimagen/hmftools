@@ -2,6 +2,7 @@ package com.hartwig.hmftools.linx.cn;
 
 import static java.lang.Math.min;
 
+import static com.hartwig.hmftools.common.purple.PurpleCommon.LOH_MINOR_ALLEL_CN;
 import static com.hartwig.hmftools.common.purple.SegmentSupport.CENTROMERE;
 import static com.hartwig.hmftools.common.purple.SegmentSupport.NONE;
 import static com.hartwig.hmftools.common.purple.SegmentSupport.TELOMERE;
@@ -49,7 +50,7 @@ public class CnDataLoader
     private final Map<String,TelomereCentromereCnData> mChrEndsCNMap; // telomere and centromere CN values
     private final CnJcnCalcs mCnJcnCalcs;
 
-    public static final double MIN_LOH_CN = 0.5;
+    public static final double MIN_LOH_CN = LOH_MINOR_ALLEL_CN;
     public static final double TOTAL_CN_LOSS = 0.5;
 
     public CnDataLoader(final String purpleDataPath)
@@ -70,14 +71,14 @@ public class CnDataLoader
         mCnJcnCalcs.establishReadCountCache();
     }
 
-    public final Map<Integer, JcnCalcData> getSvJcnCalcMap() { return mCnJcnCalcs.getSvJcnCalcMap(); }
-    public final List<LohEvent> getLohData() { return mLohEventData; }
-    public final List<HomLossEvent> getHomLossData() { return mHomLossData; }
-    public final Map<String,TelomereCentromereCnData> getChrTeleCentroData() { return mChrEndsCNMap; }
-    public final Map<String,List<SvCNData>> getChrCnDataMap() { return mChrCnDataMap; }
-    public final Map<Integer,SvCNData[]> getSvIdCnDataMap() { return mSvIdCnDataMap; }
-    public final PurityContext getPurityContext() { return mPurityContext; }
-    public final void setPurityContext(final PurityContext context) { mPurityContext = context; }
+    public Map<Integer, JcnCalcData> getSvJcnCalcMap() { return mCnJcnCalcs.getSvJcnCalcMap(); }
+    public List<LohEvent> getLohData() { return mLohEventData; }
+    public List<HomLossEvent> getHomLossData() { return mHomLossData; }
+    public Map<String,TelomereCentromereCnData> getChrTeleCentroData() { return mChrEndsCNMap; }
+    public Map<String,List<SvCNData>> getChrCnDataMap() { return mChrCnDataMap; }
+    public Map<Integer,SvCNData[]> getSvIdCnDataMap() { return mSvIdCnDataMap; }
+    public PurityContext getPurityContext() { return mPurityContext; }
+    public void setPurityContext(final PurityContext context) { mPurityContext = context; }
 
     public void loadSampleData(final String sampleId, List<StructuralVariantData> svRecords)
     {
@@ -127,7 +128,7 @@ public class CnDataLoader
 
         String currentChromosome = "";
         List<SvCNData> cnDataList = null;
-        for(final PurpleCopyNumber cnRecord : mCnRecords)
+        for(PurpleCopyNumber cnRecord : mCnRecords)
         {
             SvCNData cnData = new SvCNData(cnRecord, ++mRecordId);
 
@@ -149,7 +150,7 @@ public class CnDataLoader
 
         int unmatchedSVs = 0;
 
-        for(final StructuralVariantData svData : mSvDataList)
+        for(StructuralVariantData svData : mSvDataList)
         {
             if(svData.filter().equals(PON_FILTER_PON))
                 continue;
@@ -158,11 +159,11 @@ public class CnDataLoader
             {
                 boolean isStart = isStart(be);
 
-                final String svChromosome = isStart ? svData.startChromosome() : svData.endChromosome();
+                String svChromosome = isStart ? svData.startChromosome() : svData.endChromosome();
                 int svPosition = isStart ? svData.startPosition() : svData.endPosition();
                 int svOrientation = isStart ? svData.startOrientation() : svData.endOrientation();
 
-                final List<SvCNData> cnDataList = mChrCnDataMap.get(svChromosome);
+                List<SvCNData> cnDataList = mChrCnDataMap.get(svChromosome);
 
                 if(cnDataList == null || cnDataList.isEmpty())
                     continue;
@@ -231,7 +232,7 @@ public class CnDataLoader
 
     private boolean isSingleVariant(final SvCNData cnData)
     {
-        final StructuralVariantData svData = cnData.getStructuralVariantData();
+        StructuralVariantData svData = cnData.getStructuralVariantData();
 
         if(svData == null)
             return false;
@@ -276,17 +277,17 @@ public class CnDataLoader
         int lohSVsMatchedCount = 0;
         boolean lohOnStartTelomere = false;
         boolean totalLoss = false;
-        final List<HomLossEvent> lohHomLossEvents = Lists.newArrayList();
+        List<HomLossEvent> lohHomLossEvents = Lists.newArrayList();
 
         for(Map.Entry<String,List<SvCNData>> entry : mChrCnDataMap.entrySet())
         {
-            final String chromosome = entry.getKey();
+            String chromosome = entry.getKey();
 
-            final List<SvCNData> cnDataList = entry.getValue();
+            List<SvCNData> cnDataList = entry.getValue();
 
             for(int index = 0; index < cnDataList.size(); ++index)
             {
-                final SvCNData cnData = cnDataList.get(index);
+                SvCNData cnData = cnDataList.get(index);
 
                 double minCN = cnData.minorAlleleJcn();
 
@@ -296,7 +297,7 @@ public class CnDataLoader
                 if(cnData.CopyNumber < TOTAL_CN_LOSS)
                 {
                     // record homozygous loss
-                    final SvCNData nextCnData = index < cnDataList.size() - 1 ? cnDataList.get(index + 1) : null;
+                    SvCNData nextCnData = index < cnDataList.size() - 1 ? cnDataList.get(index + 1) : null;
 
                     StructuralVariantData svData = findSvData (cnData, 1);
                     StructuralVariantData nextSvData = nextCnData != null ? findSvData (nextCnData, -1) : null;
@@ -332,7 +333,7 @@ public class CnDataLoader
                         // check for a short isolated TI and if found continue with the LOH
                         if(lohRegained && cnData.EndPos - cnData.StartPos <= SHORT_TI_LENGTH && index < cnDataList.size() - 1)
                         {
-                            final SvCNData nextData = cnDataList.get(index + 1);
+                            SvCNData nextData = cnDataList.get(index + 1);
                             double nextMinCN = nextData.minorAlleleJcn();
 
                             if(nextData.EndPos - cnData.StartPos > REMOTE_SV_DISTANCE && nextMinCN < MIN_LOH_CN
@@ -462,7 +463,7 @@ public class CnDataLoader
 
         int svPosition = requiredOrient == -1 ? cnData.StartPos : cnData.StartPos - 1;
 
-        final StructuralVariantData svData = cnData.getStructuralVariantData();
+        StructuralVariantData svData = cnData.getStructuralVariantData();
 
         if(svData == null)
             return null;
@@ -588,7 +589,7 @@ public class CnDataLoader
             double centromerePArm = 0;
             double centromereQArm = 0;
 
-            for(final SvCNData cnData : entry.getValue())
+            for(SvCNData cnData : entry.getValue())
             {
                 if(cnData.SegStart.equals(TELOMERE.toString()))
                 {

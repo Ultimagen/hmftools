@@ -31,9 +31,10 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.hartwig.hmftools.common.linx.LinxBreakend;
+import com.hartwig.hmftools.common.segmentation.Arm;
 import com.hartwig.hmftools.linx.gene.BreakendGeneData;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeFunctions;
-import com.hartwig.hmftools.common.purple.ChromosomeArm;
 import com.hartwig.hmftools.common.sv.StartEndPair;
 import com.hartwig.hmftools.common.sv.StructuralVariantData;
 import com.hartwig.hmftools.common.sv.StructuralVariantType;
@@ -47,7 +48,7 @@ public class SvVarData
     // full set of DB fields
     private final StructuralVariantData mSVData;
     private final String[] mChr; // stripped of 'chr' for logging
-    private final ChromosomeArm[] mArm;
+    private final Arm[] mArm;
     private final SvBreakend[] mBreakend;
     private final boolean[] mFragileSite;
     private final StartEndPair<Set<LineElementType>> mLineElements;
@@ -97,7 +98,7 @@ public class SvVarData
     {
         mSVData = svData;
 
-        mArm = new ChromosomeArm[SE_PAIR];
+        mArm = new Arm[SE_PAIR];
         mChr = new String[] { RefGenomeFunctions.stripChrPrefix(chromosome(true)), RefGenomeFunctions.stripChrPrefix(chromosome(false)) };
 
         mFragileSite = new boolean[SE_PAIR];
@@ -174,27 +175,39 @@ public class SvVarData
     {
         if(isSglBreakend())
         {
-            return format("id(%s) pos(%s:%d:%d)",
-                    id(), mChr[SE_START], orientation(true), position(true));
+            return format("id(%s) pos(%s)", id(), coordsStr(mChr[SE_START], position(true), orientation(true)));
         }
         else
         {
-            return format("id(%s) pos(%s:%d:%d -> %s:%d:%d)",
-                    id(), mChr[SE_START], orientation(true), position(true),
-                    mChr[SE_END], orientation(false), position(false));
+            return format("id(%s) pos(%s -> %s)",
+                    id(), coordsStr(mChr[SE_START], position(true), orientation(true)),
+                    coordsStr(mChr[SE_END], position(false), orientation(false)));
         }
     }
 
     public String posId(boolean useStart)
     {
-        return format("%s: %s %s:%d:%d",
-                id(), useStart ? "start" :"end", mChr[seIndex(useStart)], orientation(useStart), position(useStart));
+        return format("%s: %s %s",
+                id(), useStart ? "start" :"end", coordsStr(mChr[seIndex(useStart)], position(useStart), orientation(useStart)));
     }
 
-    public ChromosomeArm arm(boolean isStart) { return mArm[seIndex(isStart)]; }
+    public String coordsStr(boolean useStart)
+    {
+        if(isSglBreakend() && !useStart)
+            return "";
+
+        return coordsStr(chromosome(useStart), position(useStart), orientation(useStart));
+    }
+
+    public static String coordsStr(final String chromosome, final int position, final byte orientation)
+    {
+        return LinxBreakend.coordsStr(chromosome, position, orientation);
+    }
+
+    public Arm arm(boolean isStart) { return mArm[seIndex(isStart)]; }
     public String chrShort(boolean isStart) { return mChr[seIndex(isStart)]; }
 
-    public void setChromosomalArms(final ChromosomeArm start, final ChromosomeArm end)
+    public void setChromosomalArms(final Arm start, final Arm end)
     {
         mArm[SE_START] = start;
         mArm[SE_END] = end;
@@ -239,6 +252,11 @@ public class SvVarData
 
     public double jcn() { return mJcn; }
 
+    public int getImpliedJcn()
+    {
+        return max(getMaxAssembledBreakend(), (int) getRoundedJcn(true));
+    }
+
     public double copyNumberChange(boolean isStart)
     {
         if(mDbLink[seIndex(isStart)] != null && mDbLink[seIndex(isStart)].length() == 0)
@@ -264,7 +282,7 @@ public class SvVarData
         return max(getAssembledLinkedPairs(true).size(), getAssembledLinkedPairs(false).size());
     }
 
-    public int getImpliedJcn()
+    public int getyImpliedJcn()
     {
         return max(getMaxAssembledBreakend(), (int) getRoundedJcn(true));
     }
@@ -303,12 +321,12 @@ public class SvVarData
     public void addLinkedPair(final LinkedPair link, boolean isStart)
     {
         // add in order from shortest to longest
-        final List<LinkedPair> links = mTiLinks.get(isStart);
+        List<LinkedPair> links = mTiLinks.get(isStart);
 
         int index = 0;
         while(index < links.size())
         {
-            final LinkedPair otherPair = links.get(index);
+            LinkedPair otherPair = links.get(index);
 
             if(otherPair.matches(link))
                 return;
@@ -430,18 +448,23 @@ public class SvVarData
         return getGeneInBreakend(isStart, includeId, false);
     }
 
+    public static String SV_DISRUPTIVE_STR = "disruptive";
+    public static String GENE_DATA_ITEM_DELIM = "|";
+
     public String getGeneInBreakend(boolean isStart, boolean includeId, boolean includeTransImpact)
     {
         // create a list of any genes which this breakend touches, but exclude the upstream distance used for fusions
-        final List<BreakendGeneData> genesList = getGenesList(isStart).stream()
+        List<BreakendGeneData> genesList = getGenesList(isStart).stream()
                 .filter(x -> x.breakendWithinGene(PRE_TRANSCRIPT_DISTANCE))
                 .collect(Collectors.toList());
 
         StringJoiner sj = new StringJoiner(ITEM_DELIM);
 
-        for(final BreakendGeneData gene : genesList)
+        for(BreakendGeneData gene : genesList)
         {
-            StringJoiner geneSj = new StringJoiner("|");
+            StringJoiner geneSj = new StringJoiner(GENE_DATA_ITEM_DELIM);
+
+            // format: geneName|regionType|codingType|disruption or not present|exon=123 or not present
 
             if(includeId)
                 geneSj.add(gene.geneId());
@@ -458,7 +481,7 @@ public class SvVarData
                     geneSj.add(String.valueOf(transData.codingType()));
 
                     if(transData.isDisruptive())
-                        geneSj.add("disruptive");
+                        geneSj.add(SV_DISRUPTIVE_STR);
 
                     if(transData.codingType() == CODING)
                         geneSj.add(format("exon=%d", transData.ExonUpstream));
@@ -558,7 +581,7 @@ public class SvVarData
         if(mSVData.insertSequenceRepeatClass().equals(SGL_CENTRO_SATELLITE))
             return true;
 
-        final String repeatType = mSVData.insertSequenceRepeatType();
+        String repeatType = mSVData.insertSequenceRepeatType();
 
         return repeatType.equals("(CATTC)n") || repeatType.equals("(GAATG)n") || repeatType.equals("HSATII") || repeatType.equals("SAR");
     }

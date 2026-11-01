@@ -9,7 +9,7 @@ import com.hartwig.hmftools.common.purple.SegmentSupport;
 import com.hartwig.hmftools.common.utils.Doubles;
 import com.hartwig.hmftools.common.purple.PurpleSegment;
 
-public class ObservedRegion implements GenomeRegion
+public class ObservedRegion implements FittingRegion
 {
     private final String mChromosome;
     private int mPosStart;
@@ -44,7 +44,8 @@ public class ObservedRegion implements GenomeRegion
     private double mFittedTumorCopyNumber;
     private double mFittedBAF;
 
-    public ObservedRegion(final String chromosome, final int posStart, final int posEnd, final boolean ratioSupport,
+    public ObservedRegion(
+            final String chromosome, final int posStart, final int posEnd, final boolean ratioSupport,
             final SegmentSupport support, final int bafCount, final double observedBAF, final int depthWindowCount,
             final double observedTumorRatio, final double observedNormalRatio, final double unnormalisedObservedNormalRatio,
             final GermlineStatus germlineStatus, final boolean svCluster, final double gcContent, final int minStart, final int maxStart,
@@ -140,6 +141,7 @@ public class ObservedRegion implements GenomeRegion
     public void setObservedNormalRatio(double ratio) { mObservedNormalRatio = ratio; }
 
     public double unnormalisedObservedNormalRatio() { return mUnnormalisedObservedNormalRatio; }
+    public void setUnnormalisedObservedNormalRatio(double ratio) { mUnnormalisedObservedNormalRatio = ratio; }
 
     public GermlineStatus germlineStatus() { return mGermlineStatus; }
     public void setGermlineStatus(final GermlineStatus status)
@@ -183,12 +185,14 @@ public class ObservedRegion implements GenomeRegion
     public double minorAlleleCopyNumber() { return mTumorCopyNumber - majorAlleleCopyNumber(); }
     public double majorAlleleCopyNumber() { return mTumorBAF * mTumorCopyNumber; }
 
+    public static boolean isDiploid(final double copyNumber)
+    {
+        return Doubles.greaterOrEqual(copyNumber, MIN_DIPLOID_COPY_NUMBER) && Doubles.lessOrEqual(copyNumber, MAX_DIPLOID_COPY_NUMBER);
+    }
+
     public boolean isDiploid()
     {
-        return Doubles.greaterOrEqual(majorAlleleCopyNumber(), MIN_DIPLOID_COPY_NUMBER)
-                && Doubles.lessOrEqual(majorAlleleCopyNumber(), MAX_DIPLOID_COPY_NUMBER)
-                && Doubles.greaterOrEqual(minorAlleleCopyNumber(), MIN_DIPLOID_COPY_NUMBER)
-                && Doubles.lessOrEqual(minorAlleleCopyNumber(), MAX_DIPLOID_COPY_NUMBER);
+        return isDiploid(majorAlleleCopyNumber()) && isDiploid(minorAlleleCopyNumber());
     }
 
     public String toString()
@@ -218,5 +222,15 @@ public class ObservedRegion implements GenomeRegion
                 segment.MinorAlleleCopyNumberDeviation, segment.MajorAlleleCopyNumberDeviation, segment.DeviationPenalty,
                 segment.EventPenalty, segment.RefNormalisedCopyNumber, segment.TumorCopyNumber, segment.TumorBAF,
                 segment.FittedTumorCopyNumber, segment.FittedBAF);
+    }
+
+    public static ObservedRegion fromOther(final ObservedRegion other)
+    {
+        return new ObservedRegion(
+                other.chromosome(), other.start(), other.end(), other.ratioSupport(), other.support(), other.bafCount(), other.observedBAF(),
+                other.depthWindowCount(), other.observedTumorRatio(), other.observedNormalRatio(), other.unnormalisedObservedNormalRatio(),
+                other.germlineStatus(), other.svCluster(), other.gcContent(), other.minStart(), other.maxStart(),
+                other.minorAlleleCopyNumberDeviation(), other.majorAlleleCopyNumberDeviation(), other.deviationPenalty(), other.eventPenalty(),
+                other.refNormalisedCopyNumber(), other.tumorCopyNumber(), other.tumorBAF(), other.fittedTumorCopyNumber(), other.fittedBAF());
     }
 }

@@ -10,22 +10,32 @@ import static com.hartwig.hmftools.common.sv.StructuralVariantType.INV;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.SGL;
 import static com.hartwig.hmftools.common.sv.SvUtils.hasShortIndelLength;
 import static com.hartwig.hmftools.common.sv.SvUtils.isIndel;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.ASM_INFO;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.AVG_FRAG_LENGTH;
+import static com.hartwig.hmftools.common.sv.SvVcfTags.SAGA_VARIANT;
 import static com.hartwig.hmftools.common.sv.SvVcfTags.TOTAL_FRAGS;
 import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
 import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
-import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS_FILTER;
+import static com.hartwig.hmftools.esvee.common.SvConstants.ASSEMBLY_INFO_DELIM;
+import static com.hartwig.hmftools.esvee.common.SvConstants.JUNCTION_COORD_DELIM;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
+import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.genome.region.Orientation;
 import com.hartwig.hmftools.common.sv.StructuralVariant;
 import com.hartwig.hmftools.common.sv.StructuralVariantType;
 import com.hartwig.hmftools.common.variant.GenotypeIds;
+import com.hartwig.hmftools.esvee.assembly.types.Junction;
 import com.hartwig.hmftools.esvee.caller.annotation.RepeatMaskAnnotation;
 import com.hartwig.hmftools.esvee.common.FilterType;
+
+import org.jetbrains.annotations.Nullable;
 
 import htsjdk.variant.variantcontext.VariantContext;
 
@@ -45,6 +55,9 @@ public class Variant
     private boolean mGermline;
     private RepeatMaskAnnotation mRmAnnotation;
     private final Set<FilterType> mFilters;
+    private final boolean mIsSagaMatched;
+
+    private List<Junction> mOriginalJunctions;
 
     public Variant(final StructuralVariant sv, final GenotypeIds genotypeIds)
     {
@@ -81,6 +94,9 @@ public class Variant
         mIsHotspot = false;
         mGermline = false;
         mRmAnnotation = null;
+        mOriginalJunctions = null;
+
+        mIsSagaMatched = isSagaMatched(sv.startContext()) || isSagaMatched(sv.endContext());
     }
 
     public String chromosomeStart() { return mBreakends[SE_START].Chromosome; }
@@ -180,6 +196,11 @@ public class Variant
         return maxUps;
     }
 
+    public boolean isSagaMatched()
+    {
+        return mIsSagaMatched;
+    }
+
     public void addFilter(final FilterType filter) { mFilters.add(filter); }
     public Set<FilterType> filters() { return mFilters; }
     public boolean isPass() { return mFilters.isEmpty(); }
@@ -193,7 +214,7 @@ public class Variant
         // keep any non-pass filters from assembly
         for(String filterStr : variantContext.getFilters())
         {
-            if(filterStr.equals(PASS))
+            if(filterStr.equals(PASS_FILTER))
                 continue;
 
             FilterType filterType = Arrays.stream(FilterType.values()).filter(x -> x.vcfTag().equals(x)).findFirst().orElse(null);
@@ -201,6 +222,51 @@ public class Variant
             if(filterType != null)
                 mFilters.add(filterType);
         }
+    }
+
+    public List<Junction> originalJunctions()
+    {
+        if(mOriginalJunctions != null)
+            return mOriginalJunctions;
+
+        String assemblyInfoStr = mBreakends[0].Context.getAttributeAsString(ASM_INFO, "");
+
+        if(assemblyInfoStr.isEmpty())
+        {
+            mOriginalJunctions = Collections.emptyList();
+        }
+        else
+        {
+            // chr10:87940542:1_chr10:87952584:-1
+            String[] assemblyStrs = assemblyInfoStr.split(ASSEMBLY_INFO_DELIM, -1);
+            mOriginalJunctions = Lists.newArrayListWithCapacity(assemblyStrs.length);
+
+            for(String assemblyStr : assemblyStrs)
+            {
+                String[] items = assemblyStr.split(JUNCTION_COORD_DELIM);
+
+                if(items.length < 3)
+                    continue;
+
+                String chromosome = items[0];
+                int position = Integer.parseInt(items[1]);
+                Orientation orientation = Orientation.fromByteStr(items[2]);
+
+                boolean indelBased = false;
+                boolean discordant = false;
+
+                if(items.length >= 4)
+                {
+                    indelBased = items[3].equals(Junction.INDEL_TYPE);
+                    discordant = items[3].equals(Junction.DISCORDANT_TYPE);
+                }
+
+                mOriginalJunctions.add(new Junction(
+                        chromosome, position, orientation, discordant, indelBased, false, 0, null));
+            }
+        }
+
+        return mOriginalJunctions;
     }
 
     public String toString()
@@ -215,5 +281,10 @@ public class Variant
             return String.format("%s pos(%s:%d)",
                     mType.toString(), chromosomeStart(), posStart());
         }
+    }
+
+    private static boolean isSagaMatched(@Nullable final VariantContext context)
+    {
+        return context != null && context.hasAttribute(SAGA_VARIANT);
     }
 }

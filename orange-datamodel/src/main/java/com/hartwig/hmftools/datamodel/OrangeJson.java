@@ -2,12 +2,19 @@ package com.hartwig.hmftools.datamodel;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
-import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.io.Reader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ServiceLoader;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -38,14 +45,27 @@ public class OrangeJson {
             gsonBuilder.registerTypeAdapterFactory(factory);
         }
 
-        gson = gsonBuilder.serializeNulls().serializeSpecialFloatingPointValues()
+        gson = gsonBuilder
+                .serializeNulls()
+                .serializeSpecialFloatingPointValues()
+                .setPrettyPrinting()
                 .registerTypeAdapter(LocalDate.class, new LocalDateAdapter())
                 .create();
     }
 
     @NotNull
     public OrangeRecord read(@NotNull String orangeJsonFilePath) throws IOException {
-        return read(new FileReader(orangeJsonFilePath));
+        return read(Path.of(orangeJsonFilePath));
+    }
+
+    @NotNull
+    public OrangeRecord read(@NotNull Path orangeJsonFilePath) throws IOException {
+        // NOTE: must use Files.newInputStream to support other Path types such as gs://
+        InputStream inputStream = Files.newInputStream(orangeJsonFilePath);
+        if(orangeJsonFilePath.endsWith(".gz")) {
+            inputStream = new GZIPInputStream(inputStream);
+        }
+        return read(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
     }
 
     @NotNull
@@ -56,7 +76,17 @@ public class OrangeJson {
     }
 
     public void write(@NotNull OrangeRecord orangeRecord, @NotNull String outputFilePath) throws IOException {
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputFilePath))) {
+        write(orangeRecord, Path.of(outputFilePath));
+    }
+
+    public void write(@NotNull OrangeRecord orangeRecord, @NotNull Path outputFilePath) throws IOException {
+        boolean isGzipped = outputFilePath.endsWith(".gz");
+        // NOTE: must use Files.newOutputStream to support other Path types such as gs://
+        OutputStream outputStream = Files.newOutputStream(outputFilePath);
+        if(isGzipped) {
+            outputStream = new GZIPOutputStream(outputStream);
+        }
+        try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8))) {
             gson.toJson(orangeRecord, OrangeRecord.class, writer);
         }
     }

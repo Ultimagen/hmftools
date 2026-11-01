@@ -1,6 +1,9 @@
 package com.hartwig.hmftools.esvee.prep;
 
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.CONSENSUS_READ_ATTRIBUTE;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_CHROMOSOME_NAME;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_CIGAR;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.NO_POSITION;
 import static com.hartwig.hmftools.common.genome.region.Orientation.FORWARD;
 import static com.hartwig.hmftools.common.genome.region.Orientation.REVERSE;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_1;
@@ -12,8 +15,9 @@ import static com.hartwig.hmftools.esvee.TestUtils.READ_ID_GENERATOR;
 import static com.hartwig.hmftools.esvee.TestUtils.REF_BASES_400;
 import static com.hartwig.hmftools.esvee.TestUtils.buildFlags;
 import static com.hartwig.hmftools.esvee.TestUtils.createSamRecord;
+import static com.hartwig.hmftools.esvee.prep.JunctionUtils.INVALID_JUNC_INDEX;
+import static com.hartwig.hmftools.esvee.prep.JunctionUtils.findJunctionIndex;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.DEPTH_WINDOW_SIZE;
-import static com.hartwig.hmftools.esvee.prep.TestUtils.BLACKLIST_LOCATIONS;
 import static com.hartwig.hmftools.esvee.prep.TestUtils.HOTSPOT_CACHE;
 import static com.hartwig.hmftools.esvee.prep.types.ReadType.CANDIDATE_SUPPORT;
 import static com.hartwig.hmftools.esvee.prep.types.ReadType.JUNCTION;
@@ -43,8 +47,6 @@ import com.hartwig.hmftools.esvee.prep.types.ReadType;
 
 import org.junit.Test;
 
-import htsjdk.samtools.SAMRecord;
-
 public class JunctionsTest
 {
     protected static final String REF_BASES = generateRandomBases(500);
@@ -60,7 +62,7 @@ public class JunctionsTest
         mDepthTracker = new DepthTracker(new BaseRegion(mPartitionRegion.start(), mPartitionRegion.end()), DEPTH_WINDOW_SIZE);
 
         mJunctionTracker = new JunctionTracker(
-                mPartitionRegion, new PrepConfig(1000), mDepthTracker, HOTSPOT_CACHE, BLACKLIST_LOCATIONS);
+                mPartitionRegion, new PrepConfig(1000), mDepthTracker, HOTSPOT_CACHE, null);
     }
 
     private void addRead(final PrepRead read, final ReadType readType)
@@ -153,8 +155,8 @@ public class JunctionsTest
         assertNotNull(junctionData);
         assertEquals(FORWARD, junctionData.Orient);
         assertEquals(1, junctionData.junctionFragmentCount());
-        assertEquals(1, junctionData.exactSupportFragmentCount());
-        assertEquals(2, junctionData.supportingFragmentCount());
+        assertEquals(2, junctionData.exactSupportFragmentCount());
+        assertEquals(1, junctionData.supportingFragmentCount());
 
         junctionData = mJunctionTracker.junctions().stream().filter(x -> x.Position == 1059).findFirst().orElse(null);
         assertNotNull(junctionData);
@@ -282,11 +284,21 @@ public class JunctionsTest
         addRead(read2, JUNCTION);
 
         // and a more complicated one
-
         PrepRead read3 = PrepRead.from(createSamRecord(
                 READ_ID_GENERATOR.nextId(), CHR_1, 210, REF_BASES.substring(0, 100), "5S10M2D10M3I10M35I10M2S"));
 
         addRead(read3, JUNCTION);
+
+        // not anchored with enough bases
+        PrepRead read4a = PrepRead.from(createSamRecord(
+                READ_ID_GENERATOR.nextId(), CHR_1, 310, REF_BASES.substring(0, 50), "9M40D41M"));
+
+        addRead(read4a, JUNCTION);
+
+        PrepRead read4b = PrepRead.from(createSamRecord(
+                READ_ID_GENERATOR.nextId(), CHR_1, 310, REF_BASES.substring(0, 50), "41M40D9M"));
+
+        addRead(read4b, JUNCTION);
 
         mJunctionTracker.assignJunctionFragmentsAndSupport();
 
@@ -323,36 +335,6 @@ public class JunctionsTest
         assertNotNull(junctionData);
         assertEquals(FORWARD, junctionData.Orient);
         assertEquals(2, junctionData.junctionFragmentCount());
-    }
-
-    @Test
-    public void testBlacklistRegions()
-    {
-        BLACKLIST_LOCATIONS.addRegion(CHR_1, new BaseRegion(500, 1500));
-
-        JunctionTracker junctionTracker = new JunctionTracker(
-                mPartitionRegion, new PrepConfig(1000), mDepthTracker, HOTSPOT_CACHE, BLACKLIST_LOCATIONS);
-
-        PrepRead read1 = PrepRead.from(createSamRecord(
-                READ_ID_GENERATOR.nextId(), CHR_1, 800, REF_BASES.substring(0, 100), "30S70M"));
-
-        PrepRead read2 = PrepRead.from(createSamRecord(
-                READ_ID_GENERATOR.nextId(), CHR_1, 820, REF_BASES.substring(20, 120), "100M"));
-
-        read1.setReadType(JUNCTION);
-        read2.setReadType(JUNCTION);
-        junctionTracker.processRead(read1);
-        junctionTracker.processRead(read2);
-
-        PrepRead suppRead1 = PrepRead.from(createSamRecord(
-                READ_ID_GENERATOR.nextId(), CHR_1, 800, REF_BASES.substring(0, 73), "3S70M"));
-
-        suppRead1.setReadType(CANDIDATE_SUPPORT);
-        junctionTracker.processRead(suppRead1);
-
-        junctionTracker.assignJunctionFragmentsAndSupport();
-
-        assertTrue(junctionTracker.junctions().isEmpty());
     }
 
     @Test
@@ -402,7 +384,7 @@ public class JunctionsTest
         ReadGroup readGroup2 = new ReadGroup(supp2, readIdTrimmer.trim(supp2.id()));
         readGroupsMap.put(readGroup2.id(), readGroup2);
 
-        JunctionUtils.markSupplementaryDuplicates(readGroupsMap, readIdTrimmer);
+        JunctionUtils.markSupplementaryDuplicates(readGroupsMap, readIdTrimmer, 0);
         assertNotEquals(ReadGroupStatus.DUPLICATE, readGroup1.groupStatus());
         assertEquals(ReadGroupStatus.DUPLICATE, readGroup2.groupStatus());
 
@@ -413,7 +395,7 @@ public class JunctionsTest
         readGroup2 = new ReadGroup(primary2, readIdTrimmer.trim(primary2.id()));
         readGroupsMap.put(readGroup2.id(), readGroup2);
 
-        JunctionUtils.markSupplementaryDuplicates(readGroupsMap, readIdTrimmer);
+        JunctionUtils.markSupplementaryDuplicates(readGroupsMap, readIdTrimmer, 0);
         assertNotEquals(ReadGroupStatus.DUPLICATE, readGroup1.groupStatus());
         assertEquals(ReadGroupStatus.DUPLICATE, readGroup2.groupStatus());
 
@@ -427,7 +409,7 @@ public class JunctionsTest
         readGroup2 = new ReadGroup(supp2, readIdTrimmer.trim(supp2.id()));
         readGroupsMap.put(readGroup2.id(), readGroup2);
 
-        JunctionUtils.markSupplementaryDuplicates(readGroupsMap, readIdTrimmer);
+        JunctionUtils.markSupplementaryDuplicates(readGroupsMap, readIdTrimmer, 0);
         assertEquals(ReadGroupStatus.DUPLICATE, readGroup1.groupStatus());
         assertNotEquals(ReadGroupStatus.DUPLICATE, readGroup2.groupStatus());
 
@@ -437,8 +419,190 @@ public class JunctionsTest
         readGroup2 = new ReadGroup(primary2, readIdTrimmer.trim(primary2.id()));
         readGroupsMap.put(readGroup2.id(), readGroup2);
 
-        JunctionUtils.markSupplementaryDuplicates(readGroupsMap, readIdTrimmer);
+        JunctionUtils.markSupplementaryDuplicates(readGroupsMap, readIdTrimmer, 0);
         assertEquals(ReadGroupStatus.DUPLICATE, readGroup1.groupStatus());
         assertNotEquals(ReadGroupStatus.DUPLICATE, readGroup2.groupStatus());
+    }
+
+    @Test
+    public void testSbxPrimarySupplementaryDuplicates()
+    {
+        String readBases = REF_BASES.substring(0, 50);
+
+        String lowerCigar1 = "20S30M";
+        String upperCigar1 = "20M30S";
+
+        String lowerCigar2 = "20S31M";
+        String upperCigar2 = "20M31S";
+
+        SupplementaryReadData suppDataUpper = new SupplementaryReadData(
+                CHR_3, 1000, SupplementaryReadData.SUPP_POS_STRAND, upperCigar1, DEFAULT_MAP_QUAL);
+
+        PrepRead primary1 = PrepRead.from(SamRecordTestUtils.createSamRecord(
+                READ_ID_GENERATOR.nextId(), CHR_1, 1000, readBases, lowerCigar1, NO_CHROMOSOME_NAME, NO_POSITION, false,
+                false, suppDataUpper, false, NO_CIGAR));
+        primary1.record().setReadPairedFlag(false);
+        primary1.setReadType(JUNCTION);
+
+        SupplementaryReadData suppDataLower = new SupplementaryReadData(
+                CHR_1, 1001, SupplementaryReadData.SUPP_POS_STRAND, lowerCigar1, DEFAULT_MAP_QUAL);
+
+        PrepRead supp1 = PrepRead.from(SamRecordTestUtils.createSamRecord(
+                primary1.id(), CHR_3, 1000, readBases, upperCigar1, NO_CHROMOSOME_NAME, NO_POSITION, false,
+                true, suppDataLower, false, NO_CIGAR));
+        supp1.record().setReadPairedFlag(false);
+        supp1.setReadType(CANDIDATE_SUPPORT);
+
+        PrepRead supp2 = PrepRead.from(SamRecordTestUtils.createSamRecord(
+                READ_ID_GENERATOR.nextId(), CHR_1, 1001, readBases, lowerCigar1, NO_CHROMOSOME_NAME, NO_POSITION, false,
+                true, suppDataUpper, false, NO_CIGAR));
+        supp2.record().setReadPairedFlag(false);
+        supp2.setReadType(JUNCTION);
+
+        PrepRead primary2 = PrepRead.from(SamRecordTestUtils.createSamRecord(
+                supp2.id(), CHR_3, 1001, readBases, upperCigar1, NO_CHROMOSOME_NAME, NO_POSITION, false,
+                false, suppDataLower, true, NO_CIGAR));
+        primary2.record().setReadPairedFlag(false);
+        primary2.setReadType(CANDIDATE_SUPPORT);
+
+        ReadIdTrimmer readIdTrimmer = new ReadIdTrimmer(true);
+
+        Map<String,ReadGroup> readGroupsMap = Maps.newHashMap();
+
+        ReadGroup readGroup1 = new ReadGroup(primary1, readIdTrimmer.trim(primary1.id()));
+        readGroupsMap.put(readGroup1.id(), readGroup1);
+
+        ReadGroup readGroup2 = new ReadGroup(supp2, readIdTrimmer.trim(supp2.id()));
+        readGroupsMap.put(readGroup2.id(), readGroup2);
+
+        JunctionUtils.markSupplementaryDuplicates(readGroupsMap, readIdTrimmer, 2);
+        assertNotEquals(ReadGroupStatus.DUPLICATE, readGroup1.groupStatus());
+        assertEquals(ReadGroupStatus.DUPLICATE, readGroup2.groupStatus());
+    }
+
+    @Test
+    public void testJunctionDataCreateAndLookup()
+    {
+        // test junction-finding logic
+        String readBases = REF_BASES.substring(0, 100);
+        String leftCigar = "30S70M";
+
+        PrepRead read = PrepRead.from(createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, 100, readBases, leftCigar));
+        mJunctionTracker.addJunctionData(read);
+
+        // ensure junction matches prevent duplicate junctions
+        mJunctionTracker.addJunctionData(read);
+
+        read = PrepRead.from(createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, 150, readBases, leftCigar));
+        mJunctionTracker.addJunctionData(read);
+
+        read = PrepRead.from(createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, 200, readBases, leftCigar));
+        mJunctionTracker.addJunctionData(read);
+
+        read = PrepRead.from(createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, 250, readBases, leftCigar));
+        mJunctionTracker.addJunctionData(read);
+
+        read = PrepRead.from(createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, 300, readBases, leftCigar));
+        mJunctionTracker.addJunctionData(read);
+
+        // ensure junction matches prevent duplicate junctions
+        mJunctionTracker.addJunctionData(read);
+
+        List<JunctionData> junctions = mJunctionTracker.junctions();
+        assertEquals(5, junctions.size());
+
+        // add junctions at matching positions but opposite orientations
+        String rightCigar = "50M30S";
+
+        read = PrepRead.from(createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, 101, readBases, rightCigar));
+        mJunctionTracker.addJunctionData(read);
+
+        assertEquals(6, junctions.size());
+
+        read = PrepRead.from(createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, 201, readBases, rightCigar));
+        mJunctionTracker.addJunctionData(read);
+
+        assertEquals(7, junctions.size());
+
+        // ensure junction matches prevent duplicate junctions
+        mJunctionTracker.addJunctionData(read);
+
+        int juncIndex = findJunctionIndex(junctions, 50, 10);
+        assertEquals(INVALID_JUNC_INDEX, juncIndex);
+
+        juncIndex = findJunctionIndex(junctions, 100, 10);
+        assertEquals(0, juncIndex);
+
+        // using fast-search logic
+        juncIndex = findJunctionIndex(junctions, 100, 0);
+        assertEquals(0, juncIndex);
+
+        juncIndex = findJunctionIndex(junctions, 149, 0);
+        assertEquals(0, juncIndex);
+
+        juncIndex = findJunctionIndex(junctions, 150, 0);
+        assertEquals(1, juncIndex);
+
+        juncIndex = findJunctionIndex(junctions, 151, 0);
+        assertEquals(2, juncIndex);
+
+        juncIndex = findJunctionIndex(junctions, 200, 0);
+        assertEquals(3, juncIndex);
+
+        juncIndex = findJunctionIndex(junctions, 225, 0);
+        assertEquals(3, juncIndex);
+
+        juncIndex = findJunctionIndex(junctions, 249, 0);
+        assertEquals(3, juncIndex);
+
+        juncIndex = findJunctionIndex(junctions, 250, 0);
+        assertEquals(4, juncIndex);
+
+        juncIndex = findJunctionIndex(junctions, 299, 0);
+        assertEquals(5, juncIndex);
+
+        juncIndex = findJunctionIndex(junctions, 300, 0);
+        assertEquals(6, juncIndex);
+
+        juncIndex = findJunctionIndex(junctions, 301, 0);
+        assertEquals(6, juncIndex);
+
+        // test adding discordant junctions - they will replace a split junction if have sufficiently more support
+
+        // first matches an existing, does not replace since the split junction has sufficient support
+        juncIndex = findJunctionIndex(junctions, 200, 0);
+
+        JunctionData splitJunction = junctions.get(juncIndex);
+        splitJunction.addJunctionReadGroup(new ReadGroup(read));
+        splitJunction.addJunctionReadGroup(new ReadGroup(read));
+
+        read = PrepRead.from(createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, 151, readBases, "50M"));
+        JunctionData discJunction = new JunctionData(200, REVERSE, read);
+        discJunction.markDiscordantGroup();
+
+        mJunctionTracker.addDiscordantJunction(discJunction);
+        assertEquals(7, junctions.size());
+        assertEquals(splitJunction, junctions.get(juncIndex));
+
+        // check replacing
+        read = PrepRead.from(createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, 251, readBases, "50M"));
+        discJunction = new JunctionData(300, REVERSE, read);
+        discJunction.markDiscordantGroup();
+
+        juncIndex = findJunctionIndex(junctions, 300, 0);
+
+        mJunctionTracker.addDiscordantJunction(discJunction);
+        assertEquals(7, junctions.size());
+        assertEquals(discJunction, junctions.get(juncIndex));
+
+        // add a new discordant group
+        read = PrepRead.from(createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, 221, readBases, "50M"));
+        discJunction = new JunctionData(270, REVERSE, read);
+        discJunction.markDiscordantGroup();
+
+        mJunctionTracker.addDiscordantJunction(discJunction);
+        assertEquals(8, junctions.size());
+        juncIndex = findJunctionIndex(junctions, 270, 0);
+        assertEquals(discJunction, junctions.get(juncIndex));
     }
 }

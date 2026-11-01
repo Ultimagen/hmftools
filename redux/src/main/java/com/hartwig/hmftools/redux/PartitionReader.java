@@ -5,17 +5,24 @@ import static java.lang.String.format;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.ALIGNMENT_SCORE_ATTRIBUTE;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.CONSENSUS_READ_ATTRIBUTE;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.MATE_CIGAR_ATTRIBUTE;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.SUPPLEMENTARY_ATTRIBUTE;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.UNMAP_ATTRIBUTE;
 import static com.hartwig.hmftools.common.perf.PerformanceCounter.secondsSinceNow;
-import static com.hartwig.hmftools.common.sequencing.SBXBamUtils.fillQualZeroMismatchesWithRef;
-import static com.hartwig.hmftools.common.sequencing.SBXBamUtils.stripDuplexIndels;
-import static com.hartwig.hmftools.common.sequencing.SequencingType.ILLUMINA;
-import static com.hartwig.hmftools.common.sequencing.SequencingType.SBX;
 import static com.hartwig.hmftools.redux.ReduxConfig.RD_LOGGER;
-import static com.hartwig.hmftools.redux.common.Constants.SUPP_ALIGNMENT_SCORE_MIN;
+import static com.hartwig.hmftools.redux.ReduxConfig.SEQUENCING_TYPE;
+import static com.hartwig.hmftools.redux.ReduxConfig.isIllumina;
+import static com.hartwig.hmftools.redux.ReduxConfig.isSbx;
+import static com.hartwig.hmftools.redux.ReduxConfig.isUltima;
+import static com.hartwig.hmftools.redux.ReduxConstants.EXPECTED_VALID_CONTIGS;
+import static com.hartwig.hmftools.redux.ReduxConstants.SUPP_ALIGNMENT_SCORE_MIN;
 import static com.hartwig.hmftools.redux.common.FilterReadsType.NONE;
 import static com.hartwig.hmftools.redux.common.FilterReadsType.readOutsideSpecifiedRegions;
 import static com.hartwig.hmftools.redux.common.ReadInfo.readToString;
+import static com.hartwig.hmftools.redux.consensus.SbxRoutines.SBX_READ_CACHE_GROUP_SIZE;
+import static com.hartwig.hmftools.redux.consensus.SbxRoutines.SBX_READ_CACHE_LOG_READ_COUNT_THRESHOLD;
+import static com.hartwig.hmftools.redux.consensus.SbxRoutines.SBX_READ_CACHE_MAX_SOFT_CLIP;
+import static com.hartwig.hmftools.redux.duplicate.ReadCache.DEFAULT_DYNAMIC_READ_COUNT_THRESHOLD;
+import static com.hartwig.hmftools.redux.duplicate.ReadCache.DEFAULT_POP_DISTANCE_CHECK;
 
 import static org.apache.logging.log4j.Level.DEBUG;
 import static org.apache.logging.log4j.Level.TRACE;
@@ -29,20 +36,22 @@ import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.perf.PerformanceCounter;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
 import com.hartwig.hmftools.common.mappability.UnmappingRegion;
-import com.hartwig.hmftools.redux.common.DuplicateGroup;
-import com.hartwig.hmftools.redux.common.DuplicateGroupBuilder;
-import com.hartwig.hmftools.redux.common.FragmentCoordReads;
+import com.hartwig.hmftools.redux.duplicate.DuplicateGroup;
+import com.hartwig.hmftools.redux.duplicate.DuplicateGroupBuilder;
+import com.hartwig.hmftools.redux.duplicate.FragmentCoordReads;
 import com.hartwig.hmftools.redux.common.ReadInfo;
 import com.hartwig.hmftools.redux.common.Statistics;
 import com.hartwig.hmftools.redux.consensus.ConsensusReads;
-import com.hartwig.hmftools.redux.umi.UmiGroupBuilder;
+import com.hartwig.hmftools.redux.consensus.SbxRoutines;
+import com.hartwig.hmftools.redux.consensus.UltimaRoutines;
+import com.hartwig.hmftools.redux.duplicate.ReadCache;
 import com.hartwig.hmftools.redux.unmap.ReadUnmapper;
 import com.hartwig.hmftools.redux.unmap.UnmapRegionState;
 import com.hartwig.hmftools.redux.write.BamWriter;
+import com.hartwig.hmftools.redux.write.BamWriterSync;
 import com.hartwig.hmftools.redux.write.PartitionInfo;
 
 import org.apache.logging.log4j.Level;
-import org.jetbrains.annotations.Nullable;
 
 import htsjdk.samtools.SAMRecord;
 
@@ -51,13 +60,14 @@ public class PartitionReader
     private final ReduxConfig mConfig;
 
     private final BamReader mBamReader;
-    private final IReadCache mReadCache;
+    private final ReadCache mReadCache;
     private final ReadUnmapper mReadUnmapper;
     private final DuplicateGroupBuilder mDuplicateGroupBuilder;
     private final ConsensusReads mConsensusReads;
 
     // state for current partition
     private BamWriter mBamWriter;
+    private final BamWriterSync mUnmappedBamWriter;
     private List<ChrBaseRegion> mSliceRegions;
     private ChrBaseRegion mCurrentRegion;
     private int mLastWriteLowerPosition;
@@ -71,34 +81,35 @@ public class PartitionReader
     private int mNextLogReadCount;
     private int mProcessedReads;
 
-    public PartitionReader(final ReduxConfig config, final BamReader bamReader)
+    public PartitionReader(final ReduxConfig config, final BamReader bamReader, final BamWriterSync unmappedBamWriter)
     {
         mConfig = config;
         mBamReader = bamReader;
+        mUnmappedBamWriter = unmappedBamWriter;
         mReadUnmapper = mConfig.UnmapRegions;
 
-        if(config.Sequencing == ILLUMINA && mConfig.UMIs.Enabled)
+        if(isIllumina())
         {
-            mReadCache = new JitterReadCache(new ReadCache(
-                    ReadCache.DEFAULT_GROUP_SIZE, ReadCache.DEFAULT_MAX_SOFT_CLIP, mConfig.UMIs.Enabled, mConfig.DuplicateGroupCollapse));
-        }
-        else if(config.Sequencing == ILLUMINA)
-        {
-            mReadCache = new ReadCache(
-                    ReadCache.DEFAULT_GROUP_SIZE, ReadCache.DEFAULT_MAX_SOFT_CLIP, mConfig.UMIs.Enabled, mConfig.DuplicateGroupCollapse);
+            mReadCache = new ReadCache(mConfig.UMIs.Enabled, mConfig.DuplicateConfig);
         }
         else
         {
-            // the sampled max read length is doubled, because it has been observed in non-ulimina bams that the max read length is usually
-            // larger than the sampled max read length, so we need extra room
-            mReadCache = new ReadCache(3 * mConfig.readLength(),
-                    2 * mConfig.readLength() - 1, mConfig.UMIs.Enabled, mConfig.DuplicateGroupCollapse);
+            // the sampled max read length is doubled, because it has been observed in non-Illumina bams that the max read length is usually
+            // larger than the sampled max read length extra room is required
+
+            // currently only used for SBX since Ultima does not mark duplicates
+            int groupSize = SBX_READ_CACHE_GROUP_SIZE; // was 3 * mConfig.readLength()
+            int maxSoftClipLength = SBX_READ_CACHE_MAX_SOFT_CLIP; // was 2 * mConfig.readLength() - 1
+            int logCacheReadCount = SBX_READ_CACHE_LOG_READ_COUNT_THRESHOLD;
+
+            mReadCache = new ReadCache(
+                    groupSize, maxSoftClipLength, false, mConfig.DuplicateConfig,
+                    DEFAULT_POP_DISTANCE_CHECK, DEFAULT_DYNAMIC_READ_COUNT_THRESHOLD, logCacheReadCount);
         }
 
         mDuplicateGroupBuilder = new DuplicateGroupBuilder(config);
         mStats = mDuplicateGroupBuilder.statistics();
-        mConsensusReads = new ConsensusReads(config.RefGenome, mConfig.Sequencing, mStats.ConsensusStats);
-        mConsensusReads.setDebugOptions(config.RunChecks);
+        mConsensusReads = new ConsensusReads(config.RefGenome, SEQUENCING_TYPE, mStats.ConsensusStats);
 
         mCurrentRegion = null;
         mUnmapRegionState = null;
@@ -147,7 +158,7 @@ public class PartitionReader
 
         setUnmappedRegions();
 
-        mBamWriter.initialiseRegion(region.Chromosome, region.start());
+        mBamWriter.initialiseRegion(region);
     }
 
     public void processRegion()
@@ -166,7 +177,7 @@ public class PartitionReader
         // post-slice clean-up
         processReadGroups(mReadCache.evictAll());
 
-        mBamWriter.onRegionComplete();
+        mBamWriter.regionComplete();
 
         Level logLevel = isAltContigRegion() ? TRACE : DEBUG;
         RD_LOGGER.log(logLevel, "region({}) complete, processed {} reads", mCurrentRegion, mProcessedReads);
@@ -181,7 +192,7 @@ public class PartitionReader
 
     public static boolean shouldFilterRead(final SAMRecord read)
     {
-        if(read.hasAttribute(CONSENSUS_READ_ATTRIBUTE)) // drop any consensus reads from previous MarkDup-generated BAMs runs
+        if(read.hasAttribute(CONSENSUS_READ_ATTRIBUTE)) // drop any consensus reads from previous Redux-generated BAMs runs
             return true;
 
         if(read.getSupplementaryAlignmentFlag())
@@ -189,38 +200,15 @@ public class PartitionReader
             Integer alignmentScore = read.getIntegerAttribute(ALIGNMENT_SCORE_ATTRIBUTE);
             if(alignmentScore != null && alignmentScore < SUPP_ALIGNMENT_SCORE_MIN)
                 return true;
+
+            if(!read.hasAttribute(SUPPLEMENTARY_ATTRIBUTE) && !EXPECTED_VALID_CONTIGS.contains(read.getContig()))
+                return true;
         }
 
         return false;
     }
 
     private static final int LOG_READ_COUNT = 1000000;
-
-    private void preprocessSamRecord(final SAMRecord read)
-    {
-        if(mConfig.Sequencing == SBX)
-        {
-            stripDuplexIndels(mConfig.RefGenome, read);
-        }
-    }
-
-    private void postProcessSingleReads(final List<ReadInfo> singleReads)
-    {
-        if(mConfig.Sequencing == SBX)
-        {
-            for(ReadInfo readInfo : singleReads)
-                fillQualZeroMismatchesWithRef(mConfig.RefGenome, readInfo.read());
-        }
-    }
-
-    private void postProcessPrimaryRead(@Nullable SAMRecord primaryRead)
-    {
-        if(primaryRead == null)
-            return;
-
-        if(mConfig.Sequencing == SBX)
-            fillQualZeroMismatchesWithRef(mConfig.RefGenome, primaryRead);
-    }
 
     private void processSamRecord(final SAMRecord read)
     {
@@ -234,35 +222,48 @@ public class PartitionReader
         if(mProcessedReads >= mNextLogReadCount)
         {
             double processedReads = mProcessedReads / 1000000.0;
-            RD_LOGGER.debug("region({}) position({}) processed {}M reads, cache(coords={} reads={})",
+            boolean logCache = !mConfig.SkipDuplicateMarking;
+
+            RD_LOGGER.debug("region({}) position({}) processed {}M reads{}",
                     mCurrentRegion, readStart, format("%.0f", processedReads),
-                    mReadCache.cachedFragCoordGroups(), mReadCache.cachedReadCount());
+                    logCache ? format(", cache(coords=%d reads=%d)", mReadCache.cachedFragCoordGroups(), mReadCache.cachedReadCount()) : "");
 
             mNextLogReadCount += LOG_READ_COUNT;
         }
 
-        if(mConfig.JitterMsiOnly)
+        if(mLogReadIds) // debugging only
         {
-            mBamWriter.processJitterRead(read);
+            if(mConfig.LogReadIds.contains(read.getReadName()))
+            {
+                RD_LOGGER.debug("specific read: {}", readToString(read));
+            }
+            else if(mConfig.ProcessOnlyReadIds)
+            {
+                return;
+            }
+        }
+
+        if(mConfig.BqrAndJitterMsiOnly)
+        {
+            // assumes the primary / consensus reads have been marked correctly, and any pre & post processing has also been done
+            mBamWriter.captureReadInfo(read);
             return;
         }
 
         if(shouldFilterRead(read))
             return;
 
-        if(!read.isSecondaryAlignment() && read.getReadPairedFlag() && !read.getMateUnmappedFlag()
-                && !read.hasAttribute(MATE_CIGAR_ATTRIBUTE))
-        {
-            if(!read.getSupplementaryAlignmentFlag() || mConfig.FailOnMissingSuppMateCigar)
-            {
-                RD_LOGGER.error("read({}) missing mate CIGAR", readToString(read));
-                System.exit(1);
-            }
-        }
+        checkMissingMateCigar(read);
 
         ++mStats.TotalReads;
 
-        read.setDuplicateReadFlag(false);
+        if(read.getDuplicateReadFlag())
+        {
+            if(isUltima()) // currently no purpose for keeping these
+                return;
+
+            read.setDuplicateReadFlag(false);
+        }
 
         if(mConfig.SpecificRegionsFilterType != NONE && readOutsideSpecifiedRegions(
                 read, mConfig.SpecificChrRegions.Regions, mConfig.SpecificChrRegions.Chromosomes, mConfig.SpecificRegionsFilterType))
@@ -270,20 +271,52 @@ public class PartitionReader
             return;
         }
 
-        if(mLogReadIds && mConfig.LogReadIds.contains(read.getReadName())) // debugging only
+        if(checkReadUnmapping(read, readStart))
+            return;
+
+        preProcessRead(read);
+
+        if(read.isSecondaryAlignment() || mConfig.SkipDuplicateMarking)
         {
-            RD_LOGGER.debug("specific read: {}", readToString(read));
+            if(mConfig.SkipDuplicateMarking)
+                postProcessRead(read);
+
+            mBamWriter.setBoundaryPosition(readStart, false);
+            mBamWriter.writeNonDuplicateRead(read);
+            return;
         }
 
-        if(mReadUnmapper.enabled())
+        try
         {
-            // any read in an unmapping region has already been tested by the RegionUnmapper - scenarios:
-            // 1. If the read was unmapped, it will have been relocated to its mate's coordinates and marked as internally unmapped
-            // 2. That same read will also be encountered again at its original location - it will again satisfy the criteria to be unmapped
-            // and then should be discarded from any further processing since it now a duplicate instance of the read in scenario 1
-            // 3. A read with its mate already unmapped (ie prior to running Redux) - with the read also now unmapped - both of these should
-            // be dropped without further processing
+            mBamWriter.setBoundaryPosition(readStart, false);
 
+            mReadCache.processRead(read);
+            processReadGroups(mReadCache.popReads());
+        }
+        catch(Exception e)
+        {
+            RD_LOGGER.error("read({}) exception: {}", readToString(read), e.toString());
+            e.printStackTrace();
+            System.exit(1);
+        }
+    }
+
+    private boolean checkReadUnmapping(final SAMRecord read, final int readStart)
+    {
+        // returns true if the read cna be dropped from further processing
+
+        if(!mReadUnmapper.enabled())
+            return false;
+
+        // any read in an unmapping region has already been tested by the RegionUnmapper - scenarios:
+        // 1. If the read was unmapped, it will have been relocated to its mate's coordinates and marked as internally unmapped
+        // 2. That same read will also be encountered again at its original location - it will again satisfy the criteria to be unmapped
+        // and then should be discarded from any further processing since it now a duplicate instance of the read in scenario 1
+        // 3. A read with its mate already unmapped (ie prior to running Redux) - with the read also now unmapped - both of these should
+        // be dropped without further processing
+
+        if(mReadUnmapper.unmapPairedReads())
+        {
             // Further more, any read which was unmapped by the RegionUnmapper and has now appeared here can skip being checked
             boolean isUnmapped = read.getReadUnmappedFlag();
             boolean internallyUnmapped = isUnmapped && read.hasAttribute(UNMAP_ATTRIBUTE);
@@ -298,37 +331,76 @@ public class PartitionReader
                 if(unmapped || fullyUnmapped)
                 {
                     mConfig.readChecker().checkRead(read, mCurrentRegion.Chromosome, readStart, fullyUnmapped);
-                    return;
+                    return true;
                 }
             }
         }
-
-        preprocessSamRecord(read);
-
-        if(read.isSecondaryAlignment())
+        else
         {
-            mBamWriter.setBoundaryPosition(readStart, false);
-            mBamWriter.writeSecondaryRead(read);
-            return;
+            if(mReadUnmapper.checkTransformRead(read, mUnmapRegionState))
+            {
+                if(!read.getReadUnmappedFlag())
+                    return false;
+
+                if(read.getSupplementaryAlignmentFlag() || read.isSecondaryAlignment())
+                    return true;
+
+                if(!mConfig.SkipFullyUnmappedReads)
+                {
+                    if(isUltima())
+                        UltimaRoutines.stripAttributes(read, mStats.Ultima);
+
+                    // write to unmapped primary reads to full-unmapped BAM, since no mate to realign them to
+                    mUnmappedBamWriter.writeRecordSync(read);
+                }
+
+                return true;
+            }
         }
 
-        try
+        return false;
+    }
+
+    private void preProcessRead(final SAMRecord read)
+    {
+        if(isSbx())
         {
-            mBamWriter.setBoundaryPosition(readStart, false);
-
-            mReadCache.processRead(read);
-
-            processReadGroups(mReadCache.popReads());
+            SbxRoutines.prepProcessRead(read);
         }
-        catch(Exception e)
+        else if(isUltima())
         {
-            RD_LOGGER.error("read({}) exception: {}", readToString(read), e.toString());
-            e.printStackTrace();
-            System.exit(1);
+            UltimaRoutines.preProcessRead(read, mStats.Ultima);
         }
     }
 
-    private static final double LOG_PERF_TIME_SEC = 1;
+    private void postProcessSingleReads(final List<ReadInfo> singleReads)
+    {
+        singleReads.forEach(x -> postProcessRead(x.read()));
+    }
+
+    private void postProcessPrimaryRead(final DuplicateGroup duplicateGroup)
+    {
+        if(duplicateGroup.consensusRead() != null)
+            postProcessRead(duplicateGroup.consensusRead());
+        else if(duplicateGroup.primaryRead() != null)
+            postProcessRead(duplicateGroup.primaryRead());
+    }
+
+    private void postProcessRead(final SAMRecord read)
+    {
+        if(isSbx())
+        {
+            try
+            {
+                SbxRoutines.finaliseRead(mConfig.RefGenome, read);
+            }
+            catch(Exception e)
+            {
+                RD_LOGGER.error("post-process read error: {}", readToString(read));
+            }
+        }
+    }
+
     private static final int LOG_PERF_FRAG_COUNT = 3000;
 
     private void processReadGroups(final FragmentCoordReads fragmentCoordReads)
@@ -379,16 +451,21 @@ public class PartitionReader
         // write single fragments and duplicate groups
         for(DuplicateGroup duplicateGroup : duplicateGroups)
         {
-            // do not form consensus if duplicateGroup only contains one non poly-g umi read
-            if(mConfig.FormConsensus && duplicateGroup.readCount() - duplicateGroup.polyGUmiReads().size() >= 2)
+            // do not form consensus if duplicateGroup only contains one non poly-G read, but even if only 1 read is to be used to make
+            // the consensus read (the other being non-consensus), still make it to include its attributes and to mark the others as duplicates
+            if(mConfig.FormConsensus && !duplicateGroup.polyGUnmapped())
             {
-                duplicateGroup.setPCRClusterCount(mConfig.Sequencing);
                 duplicateGroup.formConsensusRead(mConsensusReads);
                 mBamWriter.setBoundaryPosition(duplicateGroup.consensusRead().getAlignmentStart(), false);
             }
 
-            postProcessPrimaryRead(duplicateGroup.primaryRead());
+            postProcessPrimaryRead(duplicateGroup);
             mBamWriter.writeDuplicateGroup(duplicateGroup);
+
+            if(mConfig.LogDuplicateGroupSize > 0 && duplicateGroup.totalReadCount() >= mConfig.LogDuplicateGroupSize)
+            {
+                RD_LOGGER.debug("dup group size({}) coords({})", duplicateGroup.totalReadCount(), duplicateGroup.fragCoordinates());
+            }
         }
 
         postProcessSingleReads(fragmentCoordReads.SingleReads);
@@ -417,6 +494,21 @@ public class PartitionReader
         }
 
         mUnmapRegionState = new UnmapRegionState(mCurrentRegion, partitionRegions);
+    }
+
+    private void checkMissingMateCigar(final SAMRecord read)
+    {
+        if(!mConfig.FailOnMissingSuppMateCigar)
+            return;
+
+        if(read.getSupplementaryAlignmentFlag() || read.isSecondaryAlignment() || !read.getReadPairedFlag() || read.getMateUnmappedFlag())
+            return;
+
+        if(!read.hasAttribute(MATE_CIGAR_ATTRIBUTE))
+        {
+            RD_LOGGER.error("read({}) missing mate CIGAR", readToString(read));
+            System.exit(1);
+        }
     }
 
     private void perfCountersStart()
@@ -453,11 +545,5 @@ public class PartitionReader
     public void flushReadPositions()
     {
         processReadGroups(mReadCache.evictAll());
-    }
-
-    @VisibleForTesting
-    public UmiGroupBuilder umiGroupBuilder()
-    {
-        return mDuplicateGroupBuilder.umiGroupBuilder();
     }
 }

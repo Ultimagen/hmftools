@@ -2,6 +2,7 @@ package com.hartwig.hmftools.linx;
 
 import static java.lang.Math.min;
 
+import static com.hartwig.hmftools.common.driver.panel.DriverGeneRegions.findInvalidDriverGenes;
 import static com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache.addEnsemblDir;
 import static com.hartwig.hmftools.common.perf.PerformanceCounter.runTimeMinsStr;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkCreateOutputDir;
@@ -15,12 +16,14 @@ import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.driver.panel.DriverGene;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
 import com.hartwig.hmftools.common.perf.PerformanceCounter;
 import com.hartwig.hmftools.common.perf.TaskExecutor;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.common.utils.config.ConfigUtils;
 import com.hartwig.hmftools.common.utils.config.VersionInfo;
+import com.hartwig.hmftools.linx.cohort.CohortDataWriter;
 import com.hartwig.hmftools.linx.fusion.FusionConfig;
 import com.hartwig.hmftools.linx.fusion.FusionResources;
 
@@ -94,7 +97,19 @@ public class LinxApplication
             }
 
             if(config.RunDrivers)
+            {
+                List<DriverGene> invalidDriverGenes = findInvalidDriverGenes(
+                        config.DriverGenes.values().stream().collect(Collectors.toList()), ensemblDataCache);
+
+                if(!invalidDriverGenes.isEmpty())
+                {
+                    LNX_LOGGER.error("Invalid non-Ensembl gene names: {}",
+                            invalidDriverGenes.stream().map( x -> x.gene()).collect(Collectors.joining(";")));
+                    System.exit(1);
+                }
+
                 ensemblDataCache.createGeneNameIdMap();
+            }
         }
 
         CohortDataWriter cohortDataWriter = new CohortDataWriter(config, ensemblDataCache);
@@ -118,7 +133,7 @@ public class LinxApplication
             }
 
             int saIndex = 0;
-            for(final String sampleId : samplesList)
+            for(String sampleId : samplesList)
             {
                 saSampleLists.get(saIndex).add(sampleId);
                 ++saIndex;

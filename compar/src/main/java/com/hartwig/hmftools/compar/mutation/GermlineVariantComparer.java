@@ -1,14 +1,9 @@
 package com.hartwig.hmftools.compar.mutation;
 
-import static com.hartwig.hmftools.common.variant.SomaticVariantFactory.PASS_FILTER;
-import static com.hartwig.hmftools.compar.common.Category.GERMLINE_VARIANT;
-import static com.hartwig.hmftools.compar.common.CommonUtils.FLD_QUAL;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS_FILTER;
+import static com.hartwig.hmftools.compar.common.CategoryType.GERMLINE_VARIANT;
 import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
 import static com.hartwig.hmftools.compar.common.CommonUtils.determineComparisonGenomePosition;
-import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_PURITY_ADJUSTED_VAF;
-import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_TUMOR_SUPPORTING_READ_COUNT;
-import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_TUMOR_TOTAL_READ_COUNT;
-import static com.hartwig.hmftools.compar.mutation.VariantCommon.FLD_VARIANT_COPY_NUMBER;
 import static com.hartwig.hmftools.patientdb.database.hmfpatients.Tables.GERMLINEVARIANT;
 
 import java.util.List;
@@ -16,9 +11,9 @@ import java.util.List;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.purple.PurpleCommon;
 import com.hartwig.hmftools.common.region.BasePosition;
-import com.hartwig.hmftools.common.variant.GermlineVariant;
-import com.hartwig.hmftools.common.variant.GermlineVariantFactory;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.common.variant.SmallVariant;
+import com.hartwig.hmftools.common.variant.SmallVariantFactory;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.common.CommonUtils;
 import com.hartwig.hmftools.compar.ComparConfig;
 import com.hartwig.hmftools.compar.ComparableItem;
@@ -26,6 +21,7 @@ import com.hartwig.hmftools.compar.common.DiffThresholds;
 import com.hartwig.hmftools.compar.common.FileSources;
 import com.hartwig.hmftools.compar.ItemComparer;
 import com.hartwig.hmftools.compar.common.Mismatch;
+import com.hartwig.hmftools.compar.common.SourceType;
 import com.hartwig.hmftools.patientdb.dao.DatabaseAccess;
 import com.hartwig.hmftools.patientdb.dao.GermlineVariantDAO;
 
@@ -42,7 +38,7 @@ public class GermlineVariantComparer implements ItemComparer
     }
 
     @Override
-    public Category category() { return GERMLINE_VARIANT; }
+    public CategoryType category() { return GERMLINE_VARIANT; }
 
     @Override
     public boolean processSample(final String sampleId, final List<Mismatch> mismatches)
@@ -53,12 +49,7 @@ public class GermlineVariantComparer implements ItemComparer
     @Override
     public void registerThresholds(final DiffThresholds thresholds)
     {
-        // same as somatic
-        thresholds.addFieldThreshold(FLD_QUAL, 20, 0.2);
-        thresholds.addFieldThreshold(FLD_VARIANT_COPY_NUMBER, 0.3, 0.15);
-        thresholds.addFieldThreshold(FLD_PURITY_ADJUSTED_VAF, 0.2, 0);
-        thresholds.addFieldThreshold(FLD_TUMOR_SUPPORTING_READ_COUNT, 1, 0.2);
-        thresholds.addFieldThreshold(FLD_TUMOR_TOTAL_READ_COUNT, 1, 0.2);
+        VariantCommon.registerThresholds(thresholds);
     }
 
     @Override
@@ -68,7 +59,7 @@ public class GermlineVariantComparer implements ItemComparer
     }
 
     @Override
-    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final String sourceName)
+    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final SourceType sourceType)
     {
         Result<Record> result = dbAccess.context().select()
                 .from(GERMLINEVARIANT)
@@ -79,9 +70,9 @@ public class GermlineVariantComparer implements ItemComparer
         final List<ComparableItem> variants = Lists.newArrayList();
         for (Record record : result)
         {
-            GermlineVariant variant = GermlineVariantDAO.buildFromRecord(record);
+            SmallVariant variant = GermlineVariantDAO.buildFromRecord(record);
             BasePosition comparisonPosition = determineComparisonGenomePosition(
-                    variant.chromosome(), variant.position(), sourceName, mConfig.RequiresLiftover, mConfig.LiftoverCache);
+                    variant.chromosome(), variant.position(), sourceType, mConfig.RequiresLiftover, mConfig.LiftoverCache);
             variants.add(new GermlineVariantData(variant, comparisonPosition));
         }
 
@@ -97,8 +88,8 @@ public class GermlineVariantComparer implements ItemComparer
 
         try
         {
-            List<GermlineVariant> variants = GermlineVariantFactory.fromVCFFile(sampleId, vcfFile);
-            for(GermlineVariant variant : variants)
+            List<SmallVariant> variants = SmallVariantFactory.loadVariants(sampleId, vcfFile);
+            for(SmallVariant variant : variants)
             {
                 if(!variant.isFiltered())
                 {

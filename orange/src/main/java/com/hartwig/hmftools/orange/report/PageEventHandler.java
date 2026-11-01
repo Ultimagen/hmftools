@@ -4,89 +4,86 @@ import com.google.common.io.Resources;
 import com.hartwig.hmftools.orange.report.components.Footer;
 import com.hartwig.hmftools.orange.report.components.Header;
 import com.hartwig.hmftools.orange.report.components.SidePanel;
-import com.itextpdf.kernel.events.Event;
-import com.itextpdf.kernel.events.IEventHandler;
-import com.itextpdf.kernel.events.PdfDocumentEvent;
-import com.itextpdf.kernel.pdf.PdfDocument;
-import com.itextpdf.kernel.pdf.PdfOutline;
-import com.itextpdf.kernel.pdf.PdfPage;
-import com.itextpdf.kernel.pdf.navigation.PdfExplicitRemoteGoToDestination;
 
-import org.jetbrains.annotations.NotNull;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitWidthDestination;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
 
-public class PageEventHandler implements IEventHandler
+public class PageEventHandler
 {
-    @NotNull
-    private final Header header;
-    @NotNull
-    private final Footer footer;
-    @NotNull
-    private final SidePanel sidePanel;
+    private final Header mHeader;
+    private final Footer mFooter;
+    private final SidePanel mSidePanel;
 
-    private String chapterTitle = "Undefined";
-    private boolean firstPageOfChapter = true;
-    private PdfOutline outline = null;
+    private String mChapterTitle;
+    private boolean mFirstPageOfChapter;
+    private PDDocumentOutline mOutline;
 
-    @NotNull
-    static PageEventHandler create(@NotNull String sampleId, @NotNull String pipelineVersion, @NotNull ReportResources reportResources,
-            boolean addDisclaimer)
+    static PageEventHandler create(final String sampleId, final ReportResources reportResources, boolean addDisclaimer,
+            final PDDocument document)
     {
-        return new PageEventHandler(new Header(Resources.getResource("orange_circos.png"), reportResources, addDisclaimer),
+        return new PageEventHandler(
+                new Header(Resources.getResource("orange_circos.png"), reportResources, addDisclaimer, document),
                 new Footer(reportResources, addDisclaimer),
-                new SidePanel(sampleId, pipelineVersion, reportResources));
+                new SidePanel(sampleId, reportResources));
     }
 
-    private PageEventHandler(@NotNull final Header header, @NotNull final Footer footer, @NotNull final SidePanel sidePanel)
+    private PageEventHandler(final Header header, final Footer footer, final SidePanel sidePanel)
     {
-        this.header = header;
-        this.footer = footer;
-        this.sidePanel = sidePanel;
+        mHeader = header;
+        mFooter = footer;
+        mSidePanel = sidePanel;
+
+        mChapterTitle = "Undefined";
+        mFirstPageOfChapter = true;
+        mOutline = null;
     }
 
-    @Override
-    public void handleEvent(@NotNull Event event)
+    void onPageStart(final PDPage page, final PDDocument document)
     {
-        PdfDocumentEvent documentEvent = (PdfDocumentEvent) event;
-        if(documentEvent.getType().equals(PdfDocumentEvent.START_PAGE))
+        mHeader.renderHeader(page, document);
+
+        if(mFirstPageOfChapter)
         {
-            PdfPage page = documentEvent.getPage();
-
-            header.renderHeader(page);
-            if(firstPageOfChapter)
-            {
-                firstPageOfChapter = false;
-
-                createChapterBookmark(documentEvent.getDocument(), chapterTitle);
-            }
-
-            sidePanel.renderSidePanel(page);
-            footer.renderFooter(page);
+            mFirstPageOfChapter = false;
+            createChapterBookmark(document, page, mChapterTitle);
         }
+
+        mSidePanel.renderSidePanel(page, document);
+        mFooter.renderFooter(page, document);
     }
 
-    void chapterTitle(@NotNull String chapterTitle)
+    void chapterTitle(final String chapterTitle)
     {
-        this.chapterTitle = chapterTitle;
+        this.mChapterTitle = chapterTitle;
     }
 
     void resetChapterPageCounter()
     {
-        firstPageOfChapter = true;
+        mFirstPageOfChapter = true;
     }
 
-    void writeFooters(@NotNull PdfDocument document)
+    void writeFooters(final PDDocument document)
     {
-        footer.writeFooters(document);
+        mFooter.writeFooters(document);
     }
 
-    private void createChapterBookmark(@NotNull PdfDocument pdf, @NotNull String title)
+    private void createChapterBookmark(final PDDocument document, final PDPage page, final String title)
     {
-        if(outline == null)
+        if(mOutline == null)
         {
-            outline = pdf.getOutlines(false);
+            mOutline = new PDDocumentOutline();
+            document.getDocumentCatalog().setDocumentOutline(mOutline);
         }
 
-        PdfOutline chapterItem = outline.addOutline(title);
-        chapterItem.addDestination(PdfExplicitRemoteGoToDestination.createFitH(pdf.getNumberOfPages(), 0));
+        PDPageFitWidthDestination dest = new PDPageFitWidthDestination();
+        dest.setPage(page);
+
+        PDOutlineItem chapterItem = new PDOutlineItem();
+        chapterItem.setTitle(title);
+        chapterItem.setDestination(dest);
+        mOutline.addLast(chapterItem);
     }
 }

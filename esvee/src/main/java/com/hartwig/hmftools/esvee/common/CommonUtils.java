@@ -2,13 +2,15 @@ package com.hartwig.hmftools.esvee.common;
 
 import static java.lang.Math.abs;
 
+import static com.hartwig.hmftools.common.codon.Nucleotides.DNA_N_BYTE;
 import static com.hartwig.hmftools.esvee.common.SvConstants.LINE_INDEL_MAX_GAP;
 import static com.hartwig.hmftools.esvee.common.SvConstants.LINE_INDEL_MAX_OVERLAP;
-import static com.hartwig.hmftools.esvee.common.SvConstants.LOW_BASE_QUAL_THRESHOLD;
 
 import com.hartwig.hmftools.common.bam.SupplementaryReadData;
+import com.hartwig.hmftools.common.codon.Nucleotides;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.genome.region.Orientation;
+import com.hartwig.hmftools.common.redux.BaseQualAdjustment;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 
 import org.jetbrains.annotations.Nullable;
@@ -17,11 +19,32 @@ import htsjdk.samtools.SAMRecord;
 
 public final class CommonUtils
 {
-    public static boolean aboveMinQual(byte qual) { return qual >= LOW_BASE_QUAL_THRESHOLD; }
-    public static boolean aboveMinQual(int qual) { return qual >= LOW_BASE_QUAL_THRESHOLD; }
+    public static boolean aboveMinQual(byte qual) { return BaseQualAdjustment.aboveLowBaseQual(qual); }
+    public static boolean belowMinQual(byte qual) { return BaseQualAdjustment.isLowBaseQual(qual); }
 
-    public static boolean belowMinQual(byte qual) { return qual < LOW_BASE_QUAL_THRESHOLD; }
-    public static boolean belowMinQual(int qual) { return qual < LOW_BASE_QUAL_THRESHOLD; }
+    public static boolean isHighBaseQual(byte qual) { return BaseQualAdjustment.isHighBaseQual(qual, SvConstants.SEQUENCING_TYPE); }
+    public static boolean isMediumBaseQual(byte qual) { return BaseQualAdjustment.isMediumBaseQual(qual, SvConstants.SEQUENCING_TYPE); }
+
+    public static boolean isHigherBaseQualCategory(byte qual1, byte qual2)
+    {
+        if(qual1 == qual2)
+            return false;
+
+        boolean lowBq1 = BaseQualAdjustment.isLowBaseQual(qual1);
+        boolean lowBq2 = BaseQualAdjustment.isLowBaseQual(qual2);
+
+        if(lowBq1 != lowBq2)
+            return lowBq2;
+
+        boolean highBq1 = isHighBaseQual(qual1);
+        boolean highBq2 = isHighBaseQual(qual2);
+
+        if(highBq1 != highBq2)
+            return highBq1;
+
+        // both medium
+        return qual1 > qual2;
+    }
 
     public static boolean isDiscordantFragment(
             final SAMRecord read, final int maxConcordantFragmentLength, @Nullable final SupplementaryReadData suppData)
@@ -119,6 +142,19 @@ public final class CommonUtils
         }
 
         return pos1 < pos2 ? -1 : 1;
+    }
+
+    public static void checkStandardNucleotides(final SAMRecord read)
+    {
+        // simplifies usage downstream in assembly for other non-standard letters
+        for(int i = 0; i < read.getReadBases().length; ++i)
+        {
+            if(!Nucleotides.isValidDnaBase(read.getReadBases()[i]))
+            {
+                read.getReadBases()[i] = DNA_N_BYTE;
+                read.getBaseQualities()[i] = BaseQualAdjustment.BASE_QUAL_MINIMUM;
+            }
+        }
     }
 
     public static byte[] createByteArray(final int length, final byte value)

@@ -5,7 +5,7 @@ import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
 import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
 
 import com.google.common.collect.Lists;
-import com.hartwig.hmftools.common.purple.ChromosomeArm;
+import com.hartwig.hmftools.common.segmentation.Arm;
 
 import java.util.List;
 
@@ -17,13 +17,13 @@ public class ArmGroup
     private List<SvBreakend> mBreakends;
 
     private final String mChromosome;
-    private final ChromosomeArm mArm;
+    private final Arm mArm;
 
     // width of SVs on the arm taking into account any excluded SVs
     private int mStartPos;
     private int mEndPos;
 
-    public ArmGroup(final String chr, final ChromosomeArm arm)
+    public ArmGroup(final String chr, final Arm arm)
     {
         mId = makeChrArmStr(chr, arm);
 
@@ -36,17 +36,12 @@ public class ArmGroup
         mEndPos = -1;
     }
 
-    public final String id() { return mId; }
+    public String id() { return mId; }
 
-    public final String chromosome() { return mChromosome; }
-    public final ChromosomeArm arm() { return mArm; }
+    public String chromosome() { return mChromosome; }
+    public Arm arm() { return mArm; }
     public int posStart() { return mStartPos; }
     public int posEnd() { return mEndPos; }
-
-    public boolean hasEndsSet()
-    {
-        return mStartPos >= 0 && mEndPos >= 0;
-    }
 
     public List<SvVarData> getSVs() { return mSVs; }
     public List<SvBreakend> getBreakends() { return mBreakends; }
@@ -68,7 +63,7 @@ public class ArmGroup
             int index = 0;
             while(index < mBreakends.size())
             {
-                final SvBreakend otherBreakend = mBreakends.get(index);
+                SvBreakend otherBreakend = mBreakends.get(index);
 
                 if(breakend.position() < otherBreakend.position())
                     break;

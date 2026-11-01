@@ -8,8 +8,7 @@ public enum SequencingType
 {
     ILLUMINA,
     ULTIMA,
-    SBX,
-    BIOMODAL;
+    SBX;
 
     public static final String SEQUENCING_TYPE_CFG = "sequencing_type";
 
@@ -20,7 +19,7 @@ public enum SequencingType
                 ILLUMINA.toString());
     }
 
-        public static SequencingType parseConfig(final ConfigBuilder configBuilder)
+    public static SequencingType parseConfig(final ConfigBuilder configBuilder)
     {
         if(configBuilder.hasValue(SEQUENCING_TYPE_CFG))
             return SequencingType.valueOf(configBuilder.getValue(SEQUENCING_TYPE_CFG));

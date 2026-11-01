@@ -92,7 +92,7 @@ public class RnaFusionMapper
 
         LNX_LOGGER.debug("assessing {} RNA fusions", rnaFusionList.size());
 
-        for(final RnaFusionData rnaFusion : rnaFusionList)
+        for(RnaFusionData rnaFusion : rnaFusionList)
         {
             setRnaFusionData(rnaFusion);
 
@@ -161,7 +161,7 @@ public class RnaFusionMapper
             if(breakendList == null)
                 continue;
 
-            for(final SvBreakend breakend : breakendList)
+            for(SvBreakend breakend : breakendList)
             {
                 if(breakend.orientation() != rnaOrient)
                      continue;
@@ -214,9 +214,9 @@ public class RnaFusionMapper
                 // boolean correctLocation = isViableBreakend(breakend, rnaPosition, requiredGeneStrand, isUpstream);
 
                 // check whether any of the breakend's transcripts match the exon (exact or nearest) of the RNA fusion breakpoint
-                for(final BreakendGeneData gene : genesList)
+                for(BreakendGeneData gene : genesList)
                 {
-                    for(final BreakendTransData trans : gene.transcripts())
+                    for(BreakendTransData trans : gene.transcripts())
                     {
                         if(isKnownJunction && !rnaFusion.getExactMatchTransIds(fs).contains(trans.transName()))
                             continue;
@@ -358,7 +358,7 @@ public class RnaFusionMapper
                     if(!isViable)
                     {
                         // for non-viable breakends, provide the exons skipped count
-                        String geneId = closestTrans.gene().geneId();
+                        String geneId = closestTrans.breakendGeneData().geneId();
                         final int rnaExonData[] = mGeneTransCache.getExonRankings(geneId, rnaPosition);
                         final int svPosExonData[] = mGeneTransCache.getExonRankings(geneId, closestBreakend.position());
 
@@ -384,10 +384,10 @@ public class RnaFusionMapper
         final BreakendTransData transUp = rnaFusion.getMatchedTranscripts()[FS_UP];
         final BreakendTransData transDown = rnaFusion.getMatchedTranscripts()[FS_DOWN];
 
-        for(final GeneFusion dnaFusion : mDnaFusions)
+        for(GeneFusion dnaFusion : mDnaFusions)
         {
-            if(transUp != null && dnaFusion.upstreamTrans().gene().id() == transUp.gene().id()
-            && transDown != null && dnaFusion.downstreamTrans().gene().id() == transDown.gene().id())
+            if(transUp != null && dnaFusion.upstreamTrans().breakendGeneData().varId() == transUp.breakendGeneData().varId()
+            && transDown != null && dnaFusion.downstreamTrans().breakendGeneData().varId() == transDown.breakendGeneData().varId())
             {
                 matchType = DnaRnaMatchType.SVS;
                 reportableFusion = dnaFusion.reportable();
@@ -399,7 +399,7 @@ public class RnaFusionMapper
                     LNX_LOGGER.debug("genePair rna({}-{}) differs from dna({}-{}) for same SVs({} & {})",
                             rnaFusion.GeneNames[FS_UP], rnaFusion.GeneNames[FS_DOWN],
                             dnaFusion.upstreamTrans().geneName(), dnaFusion.downstreamTrans().geneName(),
-                            transUp.gene().id(), transDown.gene().id());
+                            transUp.breakendGeneData().varId(), transDown.breakendGeneData().varId());
 
                     // override the gene selection for downstream analysis
                     rnaFusion.GeneNames[FS_UP] = dnaFusion.upstreamTrans().geneName();
@@ -433,8 +433,8 @@ public class RnaFusionMapper
         {
             final GeneFusion fusion = entry.getKey();
 
-            if(transUp != null && fusion.upstreamTrans().gene().id() == transUp.gene().id()
-            && transDown != null && fusion.downstreamTrans().gene().id() == transDown.gene().id())
+            if(transUp != null && fusion.upstreamTrans().breakendGeneData().varId() == transUp.breakendGeneData().varId()
+            && transDown != null && fusion.downstreamTrans().breakendGeneData().varId() == transDown.breakendGeneData().varId())
             {
                 rnaFusion.setDnaFusionMatch(DnaRnaMatchType.INVALID, entry.getValue(), false);
                 return;
@@ -557,7 +557,7 @@ public class RnaFusionMapper
 
             if(transDataList != null)
             {
-                for(final TranscriptData transData : transDataList)
+                for(TranscriptData transData : transDataList)
                 {
                     RnaExonMatchData exonMatchData = findExonMatch(transData, rnaPosition);
 

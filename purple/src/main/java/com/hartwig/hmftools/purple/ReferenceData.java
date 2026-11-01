@@ -1,78 +1,78 @@
 package com.hartwig.hmftools.purple;
 
-import static com.hartwig.hmftools.common.genome.gc.GCProfileFactory.GC_PROFILE;
+import static com.hartwig.hmftools.common.driver.panel.DriverGeneRegions.findInvalidDriverGenes;
 import static com.hartwig.hmftools.common.genome.gc.GCProfileFactory.addGcProfilePath;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.REF_GENOME;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.addRefGenomeConfig;
+import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.deriveRefGenomeVersion;
+import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.REF_GENOME_VERSION;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.V37;
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.V38;
 import static com.hartwig.hmftools.common.hla.HlaCommon.hlaChromosome;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.TARGET_REGIONS_BED;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.TARGET_REGIONS_BED_DESC;
+import static com.hartwig.hmftools.purple.PurpleConstants.DEFAULT_CODING_BASE_FACTOR;
+import static com.hartwig.hmftools.purple.PurpleConstants.DEFAULT_TARGETED_TMB_RATIO;
+import static com.hartwig.hmftools.purple.PurpleConstants.DEFAULT_TARGETED_TML_RATIO;
 import static com.hartwig.hmftools.purple.PurpleUtils.PPL_LOGGER;
 import static com.hartwig.hmftools.purple.SampleDataFiles.GERMLINE_VARIANTS;
-import static com.hartwig.hmftools.purple.germline.GermlineDeletionFrequency.COHORT_DEL_FREQ_FILE;
+import static com.hartwig.hmftools.purple.tools.GenerateGermlineAmpDelFrequency.COHORT_AMP_DEL_FREQ_FILE;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig;
 import com.hartwig.hmftools.common.driver.panel.DriverGene;
-import com.hartwig.hmftools.common.driver.panel.DriverGenePanel;
-import com.hartwig.hmftools.common.driver.panel.DriverGenePanelFactory;
+import com.hartwig.hmftools.common.driver.panel.DriverGenePanelConfig;
 import com.hartwig.hmftools.common.ensemblcache.EnsemblDataCache;
 import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.genome.position.GenomePosition;
 import com.hartwig.hmftools.common.genome.position.GenomePositions;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeCoordinates;
+import com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.hla.HlaCommon;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
-import com.hartwig.hmftools.common.variant.VariantHotspot;
+import com.hartwig.hmftools.common.variant.SimpleVariant;
 import com.hartwig.hmftools.common.variant.VariantHotspotFile;
-import com.hartwig.hmftools.purple.germline.GermlineDeletionFrequency;
+import com.hartwig.hmftools.purple.germline.GermlineAmpDelFrequencyCache;
 import com.hartwig.hmftools.purple.region.ObservedRegionFactory;
+import com.hartwig.hmftools.purple.targeted.TargetRegionsData;
 
 import org.apache.logging.log4j.util.Strings;
-
-import htsjdk.samtools.reference.IndexedFastaSequenceFile;
 
 public class ReferenceData
 {
     public final RefGenomeVersion RefGenVersion;
-    public final IndexedFastaSequenceFile RefGenome;
+    public final RefGenomeSource RefGenome;
 
-    public final Map<Chromosome,GenomePosition> ChromosomeLengths;
-    public final Map<Chromosome,GenomePosition> Centromeres;
+    public final Map<Chromosome, GenomePosition> ChromosomeLengths;
+    public final Map<Chromosome, GenomePosition> Centromeres;
 
     public final EnsemblDataCache GeneTransCache;
 
-    public final DriverGenePanel DriverGenes;
-    public final Map<String,List<String>> OtherReportableTranscripts;
-    public final GermlineDeletionFrequency CohortGermlineDeletions;
+    public final DriverGeneResource DriverGenes;
+    public final Map<String, List<String>> OtherReportableTranscripts;
+    public final GermlineAmpDelFrequencyCache CohortGermlineDeletions;
 
-    public final ListMultimap<Chromosome,VariantHotspot> SomaticHotspots;
-    public final ListMultimap<Chromosome,VariantHotspot> GermlineHotspots;
+    public final ListMultimap<Chromosome,SimpleVariant> SomaticHotspots;
+    public final ListMultimap<Chromosome, SimpleVariant> GermlineHotspots;
 
-    public final String GcProfileFilename;
     public final TargetRegionsData TargetRegions;
 
     private boolean mIsValid;
 
     private static final String SOMATIC_HOTSPOT = "somatic_hotspots";
     private static final String GERMLINE_HOTSPOT = "germline_hotspots";
-
-    private static final String TARGET_REGIONS_RATIOS = "target_regions_ratios";
-    private static final String TARGET_REGION_MSI_INDELS = "target_regions_msi_indels";
 
     public ReferenceData(final ConfigBuilder configBuilder, final PurpleConfig config)
     {
@@ -85,23 +85,14 @@ public class ReferenceData
         }
 
         final String refGenomePath = configBuilder.getValue(REF_GENOME);
-        GcProfileFilename = configBuilder.getValue(GC_PROFILE);
 
-        IndexedFastaSequenceFile refGenome = null;
+        RefGenome = RefGenomeSource.loadRefGenome(refGenomePath);
 
-        try
-        {
-            refGenome = new IndexedFastaSequenceFile(new File(refGenomePath));
-        }
-        catch(Exception e)
-        {
-            mIsValid = false;
-            PPL_LOGGER.error("failed to load ref genome: {}", e.toString());
-        }
+        if(configBuilder.hasValue(REF_GENOME_VERSION))
+            RefGenVersion = RefGenomeVersion.from(configBuilder);
+        else
+            RefGenVersion = deriveRefGenomeVersion(RefGenome);
 
-        RefGenome = refGenome;
-
-        RefGenVersion = RefGenomeVersion.from(configBuilder);
         PPL_LOGGER.info("using ref genome: {}", RefGenVersion);
 
         ChromosomeLengths = Maps.newHashMap();
@@ -142,7 +133,7 @@ public class ReferenceData
                 PPL_LOGGER.error("unable to load driver genes: {}", e.toString());
             }
 
-            DriverGenes = DriverGenePanelFactory.create(driverGenes);
+            DriverGenes = new DriverGeneResource(driverGenes);
 
             if(configBuilder.hasValue(GERMLINE_VARIANTS))
             {
@@ -161,15 +152,26 @@ public class ReferenceData
         }
         else
         {
-            DriverGenes = DriverGenePanelFactory.empty();
+            DriverGenes = new DriverGeneResource();
         }
 
         OtherReportableTranscripts = Maps.newHashMap();
         GeneTransCache = new EnsemblDataCache(configBuilder);
         loadGeneTransCache();
 
+        // validate that driver genes have matching entries in Ensembl
+        List<DriverGene> invalidDriverGenes = findInvalidDriverGenes(DriverGenes.DriverGeneList, GeneTransCache);
+        if(!invalidDriverGenes.isEmpty())
+        {
+            PPL_LOGGER.error("Invalid non-Ensembl gene names: {}",
+                    invalidDriverGenes.stream().map( x -> x.gene()).collect(Collectors.joining(";")));
+            System.exit(1);
+        }
+
         if(mIsValid && config.tumorOnlyMode())
+        {
             HlaCommon.populateGeneData(GeneTransCache.getChrGeneDataMap().get(hlaChromosome(RefGenVersion)));
+        }
 
         SomaticHotspots = ArrayListMultimap.create();
         GermlineHotspots = ArrayListMultimap.create();
@@ -177,29 +179,28 @@ public class ReferenceData
         try
         {
             SomaticHotspots.putAll(somaticHotspotVcf.equals(Strings.EMPTY) ?
-                    ArrayListMultimap.create() : VariantHotspotFile.readFromVCF(somaticHotspotVcf));
+                    ArrayListMultimap.create() : VariantHotspotFile.loadHotspotVcf(somaticHotspotVcf));
 
             GermlineHotspots.putAll(germlineHotspotVcf.equals(Strings.EMPTY) ?
-                    ArrayListMultimap.create() : VariantHotspotFile.readFromVCF(germlineHotspotVcf));
+                    ArrayListMultimap.create() : VariantHotspotFile.loadHotspotVcf(germlineHotspotVcf));
         }
-        catch (IOException e)
+        catch(IOException e)
         {
             mIsValid = false;
             PPL_LOGGER.error("failed to load hotspots: {}", e.toString());
         }
 
-        CohortGermlineDeletions = new GermlineDeletionFrequency(configBuilder.getValue(COHORT_DEL_FREQ_FILE));
+        String germlineDeletionFreqFile = config.runGermline() ? configBuilder.getValue(COHORT_AMP_DEL_FREQ_FILE) : null;
+        CohortGermlineDeletions = new GermlineAmpDelFrequencyCache(germlineDeletionFreqFile);
 
-        TargetRegions = new TargetRegionsData(
-                configBuilder.getValue(TARGET_REGIONS_RATIOS), configBuilder.getValue(TARGET_REGION_MSI_INDELS));
-
+        TargetRegions = new TargetRegionsData(configBuilder);
         TargetRegions.loadTargetRegionsBed(configBuilder.getValue(TARGET_REGIONS_BED), GeneTransCache);
     }
 
     private void loadGeneTransCache()
     {
         // load transcripts with any alts from the driver gene panel in mind
-        for(DriverGene driverGene : DriverGenes.driverGenes())
+        for(DriverGene driverGene : DriverGenes.DriverGeneList)
         {
             if(!driverGene.additionalReportedTranscripts().isEmpty())
             {
@@ -212,9 +213,6 @@ public class ReferenceData
             List<String> additionalTransNames = Lists.newArrayList();
             OtherReportableTranscripts.values().forEach(x -> additionalTransNames.addAll(x));
 
-            PPL_LOGGER.debug("loaded {} alternative transcripts from {} genes",
-                    additionalTransNames.size(), OtherReportableTranscripts.size());
-
             GeneTransCache.setRequiredData(true, false, false, true);
             mIsValid &= GeneTransCache.load(true);
             mIsValid &= GeneTransCache.loadTranscriptData(Collections.emptyList(), additionalTransNames);
@@ -226,7 +224,10 @@ public class ReferenceData
         }
     }
 
-    public boolean isValid() { return mIsValid && TargetRegions.isValid(); }
+    public boolean isValid()
+    {
+        return mIsValid && TargetRegions.isValid();
+    }
 
     public static void addConfig(final ConfigBuilder configBuilder)
     {
@@ -234,11 +235,10 @@ public class ReferenceData
 
         configBuilder.addConfigItem(SOMATIC_HOTSPOT, false, "Path to somatic hotspot VCF", "");
         configBuilder.addConfigItem(GERMLINE_HOTSPOT, false, "Path to germline hotspot VCF", "");
-        addGcProfilePath(configBuilder, false);
-        configBuilder.addPath(COHORT_DEL_FREQ_FILE, false, "Path to cohort germline deletions frequency file");
+        configBuilder.addPath(COHORT_AMP_DEL_FREQ_FILE, false, "Path to cohort germline deletions frequency file");
         configBuilder.addPath(TARGET_REGIONS_BED, false, TARGET_REGIONS_BED_DESC);
-        configBuilder.addPath(TARGET_REGIONS_RATIOS, false, "Path to target regions ratios file");
-        configBuilder.addPath(TARGET_REGION_MSI_INDELS, false, "Path to target regions MSI INDELs file");
+        TargetRegionsData.registerConfig(configBuilder);
+
         EnsemblDataCache.addEnsemblDir(configBuilder, true);
         DriverGenePanelConfig.addGenePanelOption(configBuilder, false);
     }
@@ -256,22 +256,20 @@ public class ReferenceData
     }
 
     @VisibleForTesting
-    public ReferenceData(final PurpleConfig config)
+    public ReferenceData()
     {
         mIsValid = true;
-        GcProfileFilename = null;
         RefGenome = null;
         RefGenVersion = V38;
         ChromosomeLengths = Maps.newHashMap();
         Centromeres = Maps.newHashMap();
         setChromosomeCoords();
-        DriverGenes = DriverGenePanelFactory.empty();
-
+        DriverGenes = new DriverGeneResource();
         OtherReportableTranscripts = Maps.newHashMap();
         GeneTransCache = new EnsemblDataCache("", RefGenVersion);
         SomaticHotspots = ArrayListMultimap.create();
         GermlineHotspots = ArrayListMultimap.create();
-        CohortGermlineDeletions = new GermlineDeletionFrequency(null);
-        TargetRegions = new TargetRegionsData(null, null);
+        CohortGermlineDeletions = new GermlineAmpDelFrequencyCache(null);
+        TargetRegions = new TargetRegionsData(DEFAULT_CODING_BASE_FACTOR, DEFAULT_TARGETED_TMB_RATIO, DEFAULT_TARGETED_TML_RATIO);
     }
 }

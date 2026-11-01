@@ -20,7 +20,7 @@ import com.hartwig.hmftools.isofox.IsofoxConfig;
 import com.hartwig.hmftools.isofox.common.BaseDepth;
 import com.hartwig.hmftools.isofox.common.GeneCollection;
 import com.hartwig.hmftools.isofox.common.GeneReadData;
-import com.hartwig.hmftools.isofox.common.ReadRecord;
+import com.hartwig.hmftools.isofox.common.Read;
 import com.hartwig.hmftools.isofox.common.RegionMatchType;
 import com.hartwig.hmftools.isofox.common.RegionReadData;
 import com.hartwig.hmftools.isofox.common.TransMatchType;
@@ -53,7 +53,7 @@ public class RetainedIntronFinder
 
     public final List<RetainedIntron> getRetainedIntrons() { return mRetainedIntrons; }
 
-    public void evaluateFragmentReads(final ReadRecord read1, final ReadRecord read2)
+    public void evaluateFragmentReads(final Read read1, final Read read2)
     {
         if(!mEnabled)
             return;
@@ -68,13 +68,13 @@ public class RetainedIntronFinder
         // - intronic read
         // - spliced read
         // - another exon-intron read - same exon - dismissed as likely unspliced
-        final List<Integer> splicedTrans = Lists.newArrayList();
+        List<Integer> splicedTrans = Lists.newArrayList();
 
         List<RetainedIntron> retIntrons = Lists.newArrayList();
 
-        for (int i = 0; i <= 1; ++i)
+        for(int i = 0; i <= 1; ++i)
         {
-            ReadRecord read = (i == 0) ? read1 : read2;
+            Read read = (i == 0) ? read1 : read2;
 
             if(read.containsSplit())
             {
@@ -106,7 +106,7 @@ public class RetainedIntronFinder
              {
                  if(retIntron1.regions().stream().anyMatch(x -> retIntron2.regions().contains(x)))
                  {
-                     ISF_LOGGER.trace("reads({}) support the same exon from exon-intron reads", read1.Id);
+                     ISF_LOGGER.trace("reads({}) support the same exon from exon-intron reads", read1.id());
                      return;
                  }
              }
@@ -123,7 +123,7 @@ public class RetainedIntronFinder
 
             RetainedIntron existingRetIntron = mRetainedIntrons.stream().filter(x -> x.matches(retIntron)).findFirst().orElse(null);
 
-            if (existingRetIntron != null)
+            if(existingRetIntron != null)
             {
                 existingRetIntron.addFragmentCount(hasSpliceSupport);
             }
@@ -135,12 +135,12 @@ public class RetainedIntronFinder
         }
     }
 
-    private RetainedIntron evaluateRead(ReadRecord read)
+    private RetainedIntron evaluateRead(Read read)
     {
         int spannedPosition = 0;
         boolean spannedIsStart = false;
 
-        final List<RegionReadData> candidateRegions = Lists.newArrayList();
+        List<RegionReadData> candidateRegions = Lists.newArrayList();
 
         if(read.getMappedRegions().values().stream().anyMatch(x -> x != RegionMatchType.EXON_INTRON))
             return null;
@@ -150,29 +150,29 @@ public class RetainedIntronFinder
             RegionReadData region = entry.getKey();
 
             // check each end in turn
-            for (int se = SE_START; se <= SE_END; ++se)
+            for(int se = SE_START; se <= SE_END; ++se)
             {
                 boolean usesStart = se == SE_START;
                 int regionPos = usesStart ? region.start() : region.end();
 
-                if (!read.getMappedRegionCoords().stream().anyMatch(x -> positionWithin(regionPos, x[SE_START], x[SE_END])))
+                if(!read.getMappedRegionCoords().stream().anyMatch(x -> positionWithin(regionPos, x.start(), x.end())))
                     continue;
 
                 // cannot be the last or first exon
-                if ((usesStart && region.getPreRegions().isEmpty()) || (!usesStart && region.getPostRegions().isEmpty()))
+                if((usesStart && region.getPreRegions().isEmpty()) || (!usesStart && region.getPostRegions().isEmpty()))
                     continue;
 
                 spannedIsStart = usesStart;
 
                 // take the outer-most region(s) if there are more than one
-                if (!candidateRegions.isEmpty())
+                if(!candidateRegions.isEmpty())
                 {
-                    if (usesStart)
+                    if(usesStart)
                     {
-                        if (regionPos > spannedPosition)
+                        if(regionPos > spannedPosition)
                             continue;
 
-                        if (spannedPosition > regionPos)
+                        if(spannedPosition > regionPos)
                         {
                             candidateRegions.clear();
                             spannedPosition = regionPos;
@@ -180,10 +180,10 @@ public class RetainedIntronFinder
                     }
                     else
                     {
-                        if (regionPos < spannedPosition)
+                        if(regionPos < spannedPosition)
                             continue;
 
-                        if (spannedPosition < regionPos)
+                        if(spannedPosition < regionPos)
                         {
                             candidateRegions.clear();
                             spannedPosition = regionPos;
@@ -221,7 +221,7 @@ public class RetainedIntronFinder
     {
         try
         {
-            final String outputFileName = config.formOutputFile("retained_intron.csv");
+            String outputFileName = config.formOutputFile("retained_intron.csv");
 
             BufferedWriter writer = createBufferedWriter(outputFileName, false);
             writer.write("GeneId,GeneName,Chromosome,Strand,Position");
@@ -249,25 +249,25 @@ public class RetainedIntronFinder
     {
         try
         {
-            for(final RetainedIntron retIntron: retainedIntrons)
+            for(RetainedIntron retIntron: retainedIntrons)
             {
                 if(retIntron.getFragmentCount() < MIN_FRAG_COUNT && retIntron.getSplicedFragmentCount() < MIN_SPLICED_FRAG_COUNT)
                     continue;
 
-                for(final GeneReadData gene : genes)
+                for(GeneReadData gene : genes)
                 {
                     // log if the gene can be linked to one of the transcripts
                     if(!gene.getTranscripts().stream().anyMatch(x -> retIntron.regions().stream().anyMatch(y -> y.hasTransId(x.TransId))))
                         continue;
 
                     writer.write(String.format("%s,%s,%s,%d",
-                            gene.GeneData.GeneId, gene.GeneData.GeneName,
-                            gene.GeneData.Chromosome, gene.GeneData.Strand));
+                            gene.Gene.GeneId, gene.Gene.GeneName,
+                            gene.Gene.Chromosome, gene.Gene.Strand));
 
                     int readDepth = max(retIntron.getDepth(), retIntron.getFragmentCount());
 
                     writer.write(String.format(",%d,%s,%d,%d,%d,%s",
-                            retIntron.position(), retIntron.type(gene.GeneData.forwardStrand()), retIntron.getFragmentCount(),
+                            retIntron.position(), retIntron.type(gene.Gene.forwardStrand()), retIntron.getFragmentCount(),
                             retIntron.getSplicedFragmentCount(), readDepth, retIntron.transcriptInfo()));
 
                     writer.newLine();

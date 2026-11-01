@@ -12,7 +12,10 @@ import java.util.Queue;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.bam.BamSlicer;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
+import com.hartwig.hmftools.esvee.common.saga.SagaMatcherFactory;
 import com.hartwig.hmftools.esvee.prep.types.CombinedStats;
+
+import org.jetbrains.annotations.Nullable;
 
 import htsjdk.samtools.SamReader;
 import htsjdk.samtools.SamReaderFactory;
@@ -29,11 +32,15 @@ public class PartitionThread extends Thread
     private final BamSlicer mBamSlicer;
     private final Queue<ChrBaseRegion> mPartitions;
 
+    @Nullable
+    private final SagaMatcherFactory mSagaMatcherFactory;
+
     private final int mPartitionCount;
 
     public PartitionThread(
             final String chromosome, final PrepConfig config, final Queue<ChrBaseRegion> partitions,
-            final SpanningReadCache spanningReadCache, final ResultsWriter writer, final CombinedStats combinedStats)
+            final SpanningReadCache spanningReadCache, @Nullable final SagaMatcherFactory sagaMatcherFactory, final ResultsWriter writer,
+            final CombinedStats combinedStats)
     {
         mChromosome = chromosome;
         mConfig = config;
@@ -41,6 +48,7 @@ public class PartitionThread extends Thread
         mWriter = writer;
         mCombinedStats = combinedStats;
         mPartitions = partitions;
+        mSagaMatcherFactory = sagaMatcherFactory;
 
         mPartitionCount = partitions.size();
 
@@ -62,14 +70,23 @@ public class PartitionThread extends Thread
     {
         while(true)
         {
+            ChrBaseRegion partition;
             try
             {
-                ChrBaseRegion partition = mPartitions.remove();
+                partition = mPartitions.remove();
+            }
+            catch(NoSuchElementException e)
+            {
+                SV_LOGGER.trace("all tasks complete");
+                break;
+            }
 
+            try
+            {
                 int processedCount = mPartitionCount - mPartitions.size();
 
                 PartitionSlicer slicer = new PartitionSlicer(
-                        0, partition, mConfig, mSamReaders, mBamSlicer, mSpanningReadCache, mWriter, mCombinedStats);
+                        partition, mConfig, mSamReaders, mBamSlicer, mSpanningReadCache, mSagaMatcherFactory, mWriter, mCombinedStats);
 
                 slicer.run();
 
@@ -77,11 +94,6 @@ public class PartitionThread extends Thread
                 {
                     SV_LOGGER.debug("chromosome({}) processed {} partitions", mChromosome, mPartitions.size());
                 }
-            }
-            catch(NoSuchElementException e)
-            {
-                SV_LOGGER.trace("all tasks complete");
-                break;
             }
             catch(Throwable e)
             {

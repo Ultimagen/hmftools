@@ -1,17 +1,17 @@
 # TEAL
 
-TEAL measures telomere content, and estimates telomeric length based on WGS BAM input and can be run on a germline only, tumor only or tumor-normal pair.
+Teal measures telomere content, and estimates telomeric length based on WGS BAM input and can be run on a germline only, tumor only or tumor-normal pair.
 
-If a tumor-normal pair is provided, TEAL will also call somatic telomeric rearrangements, ie. breakends linking non telomeric regions of the genome to telomeric content.
+If a tumor-normal pair is provided, Teal will also call somatic telomeric rearrangements, ie. breakends linking non telomeric regions of the genome to telomeric content.
 
 ## Installation
 
 To install, download the latest compiled jar file from the [download links](#version-history-and-download-links).
 
-TEAL requires Java 17+ to be installed.
+Teal requires Java 17+ to be installed.
 
-## Using TEAL with HMF pipeline
-We can run TEAL using output files from HMF pipeline tools.
+## Using Teal with HMF pipeline
+We can run Teal using output files from HMF pipeline tools.
 
 ### Paired germline/tumor mode with HMF pipeline
 
@@ -71,8 +71,8 @@ java -Xmx16G -cp teal.jar com.hartwig.hmftools.teal.TealPipelineApp \
    -threads 28
 ```
 
-## Using TEAL standalone (without HMF pipeline)
-If HMF pipeline is not available, then TEAL can be used in standalone mode. Inputs that it extracts from
+## Using Teal standalone (without HMF pipeline)
+If HMF pipeline is not available, then Teal can be used in standalone mode. Inputs that it extracts from
 other pipeline tools will need to be explicited provided.
 
 ### Paired germline/tumor mode standalone
@@ -96,6 +96,7 @@ other pipeline tools will need to be explicited provided.
 | ref_genome                     |                           | Path to the reference genome fasta file. Required only when using CRAM files.              |
 | ref_genome (optional)          |                           | Path to the reference genome fasta file. Required only when using CRAM files.              |
 | ref_genome_version             | V37                       | Reference genome version (V37 or V38)                                                      |
+| sequencing_type                | ILLUMINA                  | Sequencing technology (ILLUMINA, SBX or ULTIMA)                                            |
 
 Example Usage:
 ```
@@ -156,11 +157,19 @@ In this step, each read is annotated according to it’s telomeric and other cha
 
 ### 3. Estimate total telomeric content and length
 
-We must first estimate the total amount of telomeric content (in bases) in the BAM. To do this we count the number of fragments with both reads telomeric and with only one read telomeric. A read is classified as telomeric if it has at least 4 canonical T-type repeats and 5 consecutive telomeric repeats overall. 
+We must first estimate the total amount of telomeric content (in bases) in the BAM. To do this we count the number of fragments with both reads telomeric and with only one read telomeric. A read is classified as telomeric if it has at least a minimum # of canonical T-type repeats and minimum numbe of consecutive telomeric hexamers overall within the first N bases according to the following:
 
+| Sequencing Technology    | minCanonicalCount | minConsecutiveHexamers | singleReadTelomereCheckBases |
+|------------|----------------|--------------|--------------|
+| Illumina | 4 | 6 | 151 |
+| Ultima | 3 | 0 | 75 |
+| Axelios | 3 | 0 | 75 |
+     
 Where only 1 read is telomeric the orientation of the telomeric read is important as only C-rich fragments are candidate telomeres, whereas the G-rich) likely represent one end of an interstitial telomeric repeat. As described in TelomereCat (https://www.nature.com/articles/s41598-017-14403-y), we expect interstitial telomeric repeats to be symmetric and have equal numbers of G and C rich reads. Hence we can use the G-rich count to estimate the proportion of the c-rich single read telomeric 
 
 $$ Total Telomeric Reads = 2 \times Both Telomeric Fragment Count + Single Read Telomeric Fragment C-rich count - Single Read Telomeric Fragment G-rich count $$
+
+_Note for single read technologies (Axelios and Ultima), the factor of 2 is omitted._
 
 To calculate the average telomere length we need to normalise this to the coverage of the genome as a whole. The formula used to normalise is:
 
@@ -255,7 +264,7 @@ recurrent artefacts across samples (currently for hg19/grch37 assembly only)
 
 ## Outputs
 
-The outputs of TEAL is a 'telbam' file (ie a bam restricted to fragments where at least 1 read contains telomeric content), a file which
+The outputs of Teal is a 'telbam' file (ie a bam restricted to fragments where at least 1 read contains telomeric content), a file which
 details the estimated  telomeric length and content and finally a file which predicts the telomeric reararrangements
   
 ### Telomeric Length and content
@@ -301,9 +310,9 @@ details the estimated  telomeric length and content and finally a file which pre
 | 
 ## Known issues and future improvements
 * A blacklist bed file is currently only provided for hg19 / grch37 assembly.  
-* TEAL represents each breakend independently, but ideally should pair up rearrangements which are supported by the same fragment and represent telomeric insertions
-* TEAL should determine a consensus sequence for each telomeric rearrangement
-* TEAL could aslo count relative amount T-Type, C-Type, G-Type and J-Type content per sample (relevant for ALT pathway identification)
+* Teal represents each breakend independently, but ideally should pair up rearrangements which are supported by the same fragment and represent telomeric insertions
+* Teal should determine a consensus sequence for each telomeric rearrangement
+* Teal could aslo count relative amount T-Type, C-Type, G-Type and J-Type content per sample (relevant for ALT pathway identification)
 
 # Version History and Download Links
 - [1.3.4](https://github.com/hartwigmedical/hmftools/releases/tag/teal-v1.3.4)

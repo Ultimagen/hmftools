@@ -63,6 +63,9 @@ public class RefGenomeSource implements RefGenomeInterface
     @Override
     public String getBaseString(final String chromosome, int posStart, int posEnd)
     {
+        if(posStart < 1 || posEnd < posStart)
+            return null;
+
         return mRefGenome.getSubsequenceAt(chromosome, posStart, posEnd).getBaseString();
     }
 
@@ -83,6 +86,9 @@ public class RefGenomeSource implements RefGenomeInterface
     @Override
     public byte[] getBases(final String chromosome, int posStart, int posEnd)
     {
+        if(posStart < 1 || posEnd < posStart)
+            return null;
+
         return mRefGenome.getSubsequenceAt(chromosome, posStart, posEnd).getBases();
     }
 
@@ -123,23 +129,20 @@ public class RefGenomeSource implements RefGenomeInterface
         }
     }
 
-    public static List<ChrBaseRegion> formRefGenomeRegions(final SpecificRegions specificRegions, final RefGenomeInterface refGenome)
+    public List<ChrBaseRegion> formRefGenomeRegions(final SpecificRegions specificRegions)
     {
         List<ChrBaseRegion> inputRegions = Lists.newArrayList();
 
-        for(Map.Entry<String,Integer> contigEntry : refGenome.chromosomeLengths().entrySet())
+        // form regions in same order as in dictionary
+        for(SAMSequenceRecord sequenceRecord : mRefGenome.getSequenceDictionary().getSequences())
         {
-            String contig = contigEntry.getKey();
+            String contig = sequenceRecord.getSequenceName();
 
             if(specificRegions.excludeChromosome(contig))
                 continue;
 
-            int contigLength = contigEntry.getValue();
-
-            inputRegions.add(new ChrBaseRegion(contig, 1, contigLength));
+            inputRegions.add(new ChrBaseRegion(contig, 1, sequenceRecord.getSequenceLength()));
         }
-
-        Collections.sort(inputRegions);
 
         return inputRegions;
     }

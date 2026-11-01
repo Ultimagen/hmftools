@@ -1,10 +1,12 @@
 package com.hartwig.hmftools.esvee.assembly;
 
 import static com.hartwig.hmftools.esvee.common.SvConstants.DEFAULT_MAX_CONCORDANT_FRAG_LENGTH;
+import static com.hartwig.hmftools.esvee.common.SvConstants.MAX_JUNC_POSITION_DIFF;
 import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_ANCHOR_LENGTH;
 import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_INDEL_SUPPORT_LENGTH;
 import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_MAP_QUALITY;
 import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_VARIANT_LENGTH;
+import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_VARIANT_LENGTH_LOWER;
 
 import java.util.List;
 
@@ -31,9 +33,13 @@ public final class AssemblyConstants
     public static final int PROXIMATE_REF_SIDE_SOFT_CLIPS = 3;
     public static final int ASSEMBLY_MIN_SOFT_CLIP_LENGTH = MIN_VARIANT_LENGTH;
     public static final int ASSEMBLY_MIN_SOFT_CLIP_SECONDARY_LENGTH = ASSEMBLY_MIN_SOFT_CLIP_LENGTH / 2;
-    public static final int ASSEMBLY_MAX_JUNC_POS_DIFF = 2;
+    public static final int ASSEMBLY_MIN_SOFT_CLIP_LENGTH_LOWER = MIN_VARIANT_LENGTH_LOWER;
+    public static final int ASSEMBLY_MIN_SOFT_CLIP_SECONDARY_LENGTH_LOWER = ASSEMBLY_MIN_SOFT_CLIP_LENGTH_LOWER / 2;
+    public static final int ASSEMBLY_MAX_JUNC_POS_DIFF = MAX_JUNC_POSITION_DIFF;
     public static final int ASSEMBLY_REF_READ_MIN_SOFT_CLIP = 10;
     public static final int ASSEMBLY_MIN_EXTENSION_READ_HIGH_QUAL_MATCH = 2;
+    public static final double ASSEMBLY_MAX_EXTENSION_READ_LOW_QUAL_MISMATCH_PERC = 0.34;
+    public static final double ASSEMBLY_MAX_JUNCTION_READ_LOW_QUAL_MISMATCH_PERC = 0.90;
     public static final int ASSEMBLY_DISCORDANT_MIN_MAP_QUALITY = MIN_MAP_QUALITY;
     public static final int ASSEMBLY_MIN_DISTINCT_FRAGS = 2;
     public static final int ASSEMBLY_INDEL_UNLINKED_ASSEMBLY_MIN_LENGTH = 85;
@@ -41,19 +47,53 @@ public final class AssemblyConstants
     public static final double ASSEMBLY_INDEL_UNLINKED_ASSEMBLY_INDEL_PERC = 0.33;
     public static final int ASSEMBLY_DEDUP_JITTER_MAX_DIST = 20;
     public static final int ASSEMBLY_DEDUP_HIGH_SUPPORT_RATIO = 50;
+    public static final int JUNCTION_PROXIMATE_READ_DISTANCE = 25;
+
+    public static final int WEAK_ASSEMBLY_UNPAIRED_MAX_READS = 3;
+    public static final double WEAK_ASSEMBLY_UNPAIRED_READ_FACTOR = 5;
+    public static final double WEAK_ASSEMBLY_UNPAIRED_LONG_EXT_FACTOR = 2.5;
+    public static final double WEAK_ASSEMBLY_UNPAIRED_LONG_EXT_FACTOR_LOWER = 2;
+    public static final double WEAK_ASSEMBLY_DISC_RATE = 0.02;
+    public static final int WEAK_ASSEMBLY_MIN_INS_LENGTH = 16;
+    public static final int WEAK_ASSEMBLY_MIN_REF_REPEAT = 7;
+    public static final int WEAK_ASSEMBLY_MAX_REF_REPEAT_LENGTH = 4;
 
     public static final double DEFAULT_DISC_RATE_INCREMENT = 0.01;
     public static final int DISC_RATE_JUNC_INCREMENT = 1;
     public static final int DISC_RATE_DISC_ONLY_INCREMENT = 3;
 
-    // sequence comparison
-    public static final int REPEAT_2_DIFF_COUNT = 11;
-    public static final int REPEAT_3_DIFF_COUNT = 16;
+    // consensus building and read mismatches
+    public static final double READ_MISMATCH_PENALTY = 1;
+    public static final double READ_MISMATCH_MED_QUAL_SNV_PENALTY = 0.3;
+    public static final double READ_MISMATCH_MED_QUAL_NON_SNV_PENALTY = 0.2;
+    public static final double READ_MAX_MISMATCH_RATE = 0.33; // max rate of mismatches per read even if zero penalty
+    public static final int READ_MISMATCH_RATE_MIN_BASE = MIN_VARIANT_LENGTH;
+
+    public static final double TOTAL_READ_MISMATCH_RATE = 0.1; // to consider more extensive searches for mismatch causes
+
+    // penalty factors as function of read extension base length
+    public static final int READ_MISMATCH_PENALTY_LENGTH_1 = 5;
+    public static final double READ_MISMATCH_PENALTY_PENALTY_1 = 0; // ie overlap 1-5 allows zero penalty
+    public static final int READ_MISMATCH_PENALTY_LENGTH_2 = 15;
+    public static final double READ_MISMATCH_PENALTY_PENALTY_2 = 0.3; // ie overlap 6-15 allows 0.3
+    public static final int READ_MISMATCH_PENALTY_LENGTH_3 = 49;
+    public static final double READ_MISMATCH_PENALTY_PENALTY_3 = 1;
+    public static final int READ_MISMATCH_PENALTY_LENGTH_4 = 99;
+    public static final double READ_MISMATCH_PENALTY_PENALTY_4 = 2;
+    public static final double READ_MISMATCH_PENALTY_PENALTY_LONG = 3;
+
+    public static final int REPEAT_MIN_COUNT = 4; // minimum number of repeats to consider a repeat
+    public static final int REPEAT_MAX_BASE_LENGTH = 5;
+
+    public static final int READ_MISMATCH_LOW_REPEAT_COUNT = REPEAT_MIN_COUNT;
+    public static int READ_MISMATCH_MEDIUM_REPEAT_COUNT = 11;
+    public static int READ_MISMATCH_LONG_REPEAT_COUNT = 16;
+    public static int READ_MISMATCH_MAX_REPEAT_DIFF = 5;
 
     public static final int DEFAULT_ASSEMBLY_MAP_QUAL_THRESHOLD = 10;
 
     public static final int PRIMARY_ASSEMBLY_MERGE_MISMATCH = 3;
-    public static final int PROXIMATE_JUNCTION_DISTANCE = 50;
+    public static int PROXIMATE_JUNCTION_DISTANCE = 50;
 
     // discordant fragment max upper bound is dynamically set from the fragment distribution
     public static int MAX_OBSERVED_CONCORDANT_FRAG_LENGTH = DEFAULT_MAX_CONCORDANT_FRAG_LENGTH;
@@ -66,6 +106,7 @@ public final class AssemblyConstants
     public static final int ASSEMBLY_EXTENSION_BASE_MISMATCH = 2;
     public static final int ASSEMBLY_REF_BASE_MAX_GAP = 200;
     public static final int REF_SIDE_MIN_SOFT_CLIP_LENGTH = ASSEMBLY_MIN_SOFT_CLIP_SECONDARY_LENGTH;
+    public static final int REF_SIDE_INITIAL_MIN_SOFT_CLIP_LENGTH = 5;
 
     public static final int LOCAL_ASSEMBLY_MATCH_DISTANCE = 500;
     public static final int MATCH_SUBSEQUENCE_LENGTH = 20;
@@ -89,6 +130,7 @@ public final class AssemblyConstants
     public static final int BWA_ZDROP = 20;
     public static final int BWA_GAP_OPEN_PENALTY = 6 + BWA_PENALTY_ADJUST;
     public static final int ALIGNMENT_MIN_SOFT_CLIP = MIN_VARIANT_LENGTH;
+    public static final int ALIGNMENT_MIN_SOFT_CLIP_LOWER = MIN_VARIANT_LENGTH_LOWER;
     public static final int ALIGNMENT_INDEL_RECOVERY_MIN_MAP_QUAL = 50;
     public static final int ALIGNMENT_MIN_MOD_MAP_QUAL = 10;
     public static final int ALIGNMENT_MIN_MOD_MAP_QUAL_NO_XA = 5;
@@ -124,5 +166,11 @@ public final class AssemblyConstants
 
     public static final Orientation SSX2_GENE_ORIENT = Orientation.REVERSE;
     public static final int SSX2_MAX_MAP_QUAL = 20;
+
+    public static final int PMS2_MAX_MAP_QUAL = 10;
+
+    public static final int INDEL_HOMOLOGY_MATCH_SCORE = 1;
+    public static final int INDEL_HOMOLOGY_MISMATCH_SCORE = -4;
+    public static final int INDEL_HOMOLOGY_CLIP_SCORE = -5;
 
 }

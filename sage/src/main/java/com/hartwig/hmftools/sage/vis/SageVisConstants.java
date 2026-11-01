@@ -4,17 +4,13 @@ import java.util.EnumMap;
 
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.sage.common.ReadContextMatch;
-import com.hartwig.hmftools.sage.evidence.ReadContextCounter;
 
-public class SageVisConstants
+public final class SageVisConstants
 {
+    private SageVisConstants() {}
+
     // sizes
     public static final double READ_HEIGHT_PX = 12.0;
-    public static final CssSize VARIANT_INFO_SPACING_SIZE = CssSize.em(2);
-    public static final int BASE_FONT_SIZE = 10;
-
-    // styles
-    public static final CssBuilder BASE_FONT_STYLE = CssBuilder.EMPTY.fontSizePt(BASE_FONT_SIZE).fontFamily("sans-serif");
 
     // config
     public static final int READ_EXTEND_LENGTH = 75;
@@ -34,5 +30,8 @@ public class SageVisConstants
         MAX_READS_PER_TYPE.put(ReadContextMatch.CORE, 10);
         MAX_READS_PER_TYPE.put(ReadContextMatch.REALIGNED, 20);
         MAX_READS_PER_TYPE.put(ReadContextMatch.REF, 20);
+        MAX_READS_PER_TYPE.put(ReadContextMatch.SIMPLE_ALT, 5);
     }
+
+    public static final int REF_BUFFER_SIZE = 100;
 }

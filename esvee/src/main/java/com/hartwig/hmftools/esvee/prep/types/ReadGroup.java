@@ -14,9 +14,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.StringJoiner;
 
-import com.beust.jcommander.internal.Nullable;
-import com.beust.jcommander.internal.Sets;
+import javax.annotation.Nullable;
+
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.bam.SupplementaryReadData;
 import com.hartwig.hmftools.common.genome.region.Orientation;
@@ -193,11 +194,7 @@ public class ReadGroup
     public boolean conditionalOnRemoteReads()
     {
         // a candidate or supporting SC low-qual read needs to check that its remote mate read supports a junction
-        // and for supplementaries needs to check that the remote mate read(s) aren't duplicates
         // an exception is where a supplementary supporting a junction is paired with a non-supp candidate
-        if(mReads.stream().allMatch(x -> x.isSupplementaryAlignment()))
-            return true;
-
         if(mReads.stream().allMatch(x -> x.readType() == CANDIDATE_SUPPORT
         || x.readType() == NO_SUPPORT
         || x.isUnmapped()

@@ -2,6 +2,9 @@ package com.hartwig.hmftools.esvee.common;
 
 import static java.lang.Math.max;
 
+import static com.hartwig.hmftools.common.sequencing.SequencingType.ILLUMINA;
+import static com.hartwig.hmftools.common.sequencing.SequencingType.SBX;
+import static com.hartwig.hmftools.common.sequencing.SequencingType.ULTIMA;
 import static com.hartwig.hmftools.common.sv.LineElements.LINE_POLY_AT_REQ;
 
 import com.hartwig.hmftools.common.sequencing.SequencingType;
@@ -12,12 +15,12 @@ public final class SvConstants
 
     // commonly used thresholds
     public static final int MIN_VARIANT_LENGTH = 32;
+    public static final int MIN_VARIANT_LENGTH_LOWER = 24; // lowered to aid SAGA-matching
     public static final int MIN_MAP_QUALITY = 20;
 
-    public static final int DEFAULT_LOW_BASE_QUAL_THRESHOLD = 26;
-    public static int LOW_BASE_QUAL_THRESHOLD = DEFAULT_LOW_BASE_QUAL_THRESHOLD; // may be set in config
-
     public static final int DEFAULT_MAX_CONCORDANT_FRAG_LENGTH = 1000; // default, otherwise set from BAM fragment sampling
+    public static final int DEFAULT_MAX_FRAGMENT_LENGTH = 1100;
+
     public static final int MIN_UPPER_FRAGMENT_LENGTH = 800; // in place for panels to maintain a minimum
 
     public static int maxConcordantFragmentLength(int observedMaxFragmentLength)
@@ -25,8 +28,17 @@ public final class SvConstants
         return max(observedMaxFragmentLength, MIN_UPPER_FRAGMENT_LENGTH);
     }
 
-    // sequencing type
-    public static SequencingType Sequencing = SequencingType.ILLUMINA;
+    public static final int MAX_JUNC_POSITION_DIFF = 15;
+    public static final int MAX_JUNC_SC_VS_INDEL_POSITION_DIFF = 50;
+
+    // sequencing type - set in config
+    public static SequencingType SEQUENCING_TYPE = SequencingType.ILLUMINA;
+
+    public static boolean isIllumina() { return SEQUENCING_TYPE == ILLUMINA; }
+    public static boolean isSbx() { return SEQUENCING_TYPE == SBX; }
+    public static boolean isUltima() { return SEQUENCING_TYPE == ULTIMA; }
+
+    public static boolean hasPairedReads() { return isIllumina(); }
 
     // indels
     public static final int MIN_INDEL_SUPPORT_LENGTH = 3;
@@ -34,13 +46,28 @@ public final class SvConstants
 
     // qual calcs and filters
     public static final double QUAL_CALC_FRAG_SUPPORT_FACTOR = 5;
-
+    public static final int INV_SHORT_MAX_HOMOLOGY_HIGHER = 6;
     public static final int MIN_ANCHOR_LENGTH = 50;
+    public static final int WEAK_ASSEMBLY_LONG_LENGTH = 100_000;
 
     // LINE elements
     public static final int LINE_MIN_EXTENSION_LENGTH = LINE_POLY_AT_REQ;
     public static final int LINE_MIN_SOFT_CLIP_SECONDARY_LENGTH = LINE_MIN_EXTENSION_LENGTH / 2;
     public static final double LINE_REF_BASE_REPEAT_FACTOR = 1.5;
+    public static final int LINE_REF_BASE_MAX_LENGTH = 20;
     public static final int LINE_INDEL_MAX_OVERLAP = 40;
     public static final int LINE_INDEL_MAX_GAP = 30;
+
+    public static final String ASSEMBLY_INFO_DELIM = "_";
+    public static final String JUNCTION_COORD_DELIM = ":";
+
+    // For matching variants to the SAGA resource variants
+    public static final int SAGA_LOCATION_MATCH_DISTANCE = 50;
+    public static final double SAGA_ALIGN_LENGTH_MIN_RATIO = 0.8;
+    public static final int SAGA_ALIGN_SCORE_MIN_BASELINE = 50;
+    public static final double SAGA_ALIGN_SCORE_MIN_RATIO = 0.8;
+    public static final int SAGA_ALIGN_JUNCTION_OVERLAP_MIN = MIN_VARIANT_LENGTH_LOWER;
+    public static final int SAGA_ALIGN_JUNCTION_OVERLAP_MIN_LOWER = LINE_MIN_EXTENSION_LENGTH;
+    public static final int SAGA_ALIGN_JUNCTION_INDEL_DISTANCE = MIN_VARIANT_LENGTH_LOWER;
+    public static final int SAGA_ALIGN_JUNCTION_INDEL_MAX_LENGTH = 2;
 }

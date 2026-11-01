@@ -14,25 +14,32 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.bwa.IBwaMemAligner;
 import com.hartwig.hmftools.common.perf.PerformanceCounter;
 import com.hartwig.hmftools.esvee.assembly.AssemblyConfig;
 import com.hartwig.hmftools.esvee.assembly.output.AlignmentWriter;
-import com.hartwig.hmftools.esvee.assembly.output.WriteType;
 import com.hartwig.hmftools.esvee.assembly.types.AssemblyOutcome;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 import com.hartwig.hmftools.common.perf.TaskQueue;
+import com.hartwig.hmftools.esvee.common.saga.SagaMatcherFactory;
+import com.hartwig.hmftools.esvee.common.WriteType;
+
+import org.jetbrains.annotations.Nullable;
 
 public class Alignment
 {
     private final AssemblyConfig mConfig;
 
-    private final Aligner mAligner;
+    private final IBwaMemAligner mAligner;
+    @Nullable
+    private final SagaMatcherFactory mSagaMatcherFactory;
     private final AlignmentWriter mWriter;
 
-    public Alignment(final AssemblyConfig config, final Aligner aligner)
+    public Alignment(final AssemblyConfig config, final IBwaMemAligner aligner, @Nullable final SagaMatcherFactory sagaMatcherFactory)
     {
         mConfig = config;
         mAligner = aligner;
+        mSagaMatcherFactory = sagaMatcherFactory;
         mWriter = new AlignmentWriter(mConfig);
     }
 
@@ -49,7 +56,7 @@ public class Alignment
             return true;
         }
 
-        if(isWeakIndelBasedUnlinkedAssembly(assembly))
+        if(!assembly.isSagaMatched() && isWeakIndelBasedUnlinkedAssembly(assembly))
             return true;
 
         return false;
@@ -69,7 +76,7 @@ public class Alignment
         Queue<AssemblyAlignment> assemblyAlignmentQueue = new ConcurrentLinkedQueue<>();
         assemblyAlignments.forEach(x -> assemblyAlignmentQueue.add(x));
 
-        TaskQueue taskQueue = new TaskQueue(assemblyAlignmentQueue, "assembly alignments", 10000);
+        TaskQueue<AssemblyAlignment> taskQueue = new TaskQueue<>(assemblyAlignmentQueue, "assembly alignments", 10000);
 
         List<Thread> threadTasks = new ArrayList<>();
         List<AssemblyAligner> alignerTasks = Lists.newArrayList();
@@ -78,7 +85,7 @@ public class Alignment
 
         for(int i = 0; i < taskCount; ++i)
         {
-            AssemblyAligner alignerTask = new AssemblyAligner(mConfig, mAligner, mWriter, taskQueue);
+            AssemblyAligner alignerTask = new AssemblyAligner(mConfig, mAligner, mSagaMatcherFactory, mWriter, taskQueue);
             alignerTasks.add(alignerTask);
             threadTasks.add(alignerTask);
         }
@@ -107,7 +114,7 @@ public class Alignment
             return;
 
         if(config.WriteTypes.contains(WriteType.PHASED_ASSEMBLY))
-            AlignmentWriter.writePhasedAssembly(writer.alignmentWriter(), assemblyAlignment);
+            writer.writePhasedAssembly(writer.alignmentWriter(), assemblyAlignment);
 
         if(config.WriteTypes.contains(WriteType.ALIGNMENT))
         {

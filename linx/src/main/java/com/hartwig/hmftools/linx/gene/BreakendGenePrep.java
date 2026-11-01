@@ -28,7 +28,8 @@ import com.hartwig.hmftools.linx.types.SvVarData;
 
 public final class BreakendGenePrep
 {
-    public static void setSvGeneData(final List<SvVarData> svList, final EnsemblDataCache ensemblDataCache,
+    public static void setSvGeneData(
+            final List<SvVarData> svList, final EnsemblDataCache ensemblDataCache,
             int defaultPreGeneDistance, final Map<String,Integer> specificPreGeneDistances)
     {
         List<ChrBaseRegion> specificPreGeneRanges = Lists.newArrayList();
@@ -50,7 +51,7 @@ public final class BreakendGenePrep
         }
 
         // associate breakends with transcripts
-        for(final SvVarData var : svList)
+        for( SvVarData var : svList)
         {
             for(int be = SE_START; be <= SE_END; ++be)
             {
@@ -65,7 +66,7 @@ public final class BreakendGenePrep
                         int preGeneDistance = getPreGeneDistance(
                                 mapping.Chromosome, mapping.Position, defaultPreGeneDistance, specificPreGeneDistance, specificPreGeneRanges);
 
-                        final List<BreakendGeneData> mappingGenes = findGeneAnnotationsBySv(
+                        List<BreakendGeneData> mappingGenes = findGeneAnnotationsBySv(
                                 ensemblDataCache, var.id(), isStart, mapping.Chromosome, mapping.Position, mapping.Orientation,
                                 preGeneDistance);
 
@@ -79,9 +80,11 @@ public final class BreakendGenePrep
                     int preGeneDistance = getPreGeneDistance(
                             var.chromosome(isStart), var.position(isStart), defaultPreGeneDistance, specificPreGeneDistance, specificPreGeneRanges);
 
-                    genesList.addAll(findGeneAnnotationsBySv(
+                    List<BreakendGeneData> breakendGenes = findGeneAnnotationsBySv(
                             ensemblDataCache, var.id(), isStart, var.chromosome(isStart), var.position(isStart), var.orientation(isStart),
-                            preGeneDistance));
+                            preGeneDistance);
+
+                    genesList.addAll(breakendGenes);
 
                     for(BreakendGeneData gene : genesList)
                     {
@@ -99,15 +102,15 @@ public final class BreakendGenePrep
     }
 
     public static List<BreakendGeneData> findGeneAnnotationsBySv(
-            final EnsemblDataCache ensemblDataCache, int svId, boolean isStart, final String chromosome, int position, byte orientation,
-            int upstreamDistance)
+            final EnsemblDataCache ensemblDataCache, int svId, boolean isStart,
+            final String chromosome, int position, byte orientation, int upstreamDistance)
     {
         List<BreakendGeneData> geneAnnotations = Lists.newArrayList();
 
         final List<GeneData> matchedGenes = ensemblDataCache.findGeneRegions(chromosome, position, upstreamDistance);
 
         // now look up relevant transcript and exon information
-        for(final GeneData geneData : matchedGenes)
+        for(GeneData geneData : matchedGenes)
         {
             final List<TranscriptData> transcriptDataList = ensemblDataCache.getTranscriptDataMap().get(geneData.GeneId);
 
@@ -161,7 +164,7 @@ public final class BreakendGenePrep
                 .filter(x -> positionWithin(position, x.GeneStart, x.GeneEnd))
                 .collect(Collectors.toList());
 
-        for(final GeneData altGeneData : altMappingGenes)
+        for(GeneData altGeneData : altMappingGenes)
         {
             final List<TranscriptData> transcriptDataList = ensemblDataCache.getTranscriptDataMap().get(altGeneData.GeneId);
 
@@ -194,7 +197,7 @@ public final class BreakendGenePrep
             final BreakendTransData transcript, final List<ExonData> exonDataList, int position, byte orientation)
     {
         // collect exon phasings before the position on the upstream and after it on the downstream
-        boolean isUpstream = (transcript.gene().strand() * orientation) > 0;
+        boolean isUpstream = (transcript.breakendGeneData().strand() * orientation) > 0;
         boolean forwardStrand = transcript.TransData.posStrand();
 
         Map<Integer,Integer> alternativePhasing = transcript.getAlternativePhasing();
@@ -463,7 +466,7 @@ public final class BreakendGenePrep
         {
             // if the breakend is after (higher for +ve strand) the nearest preceding splice acceptor, then the distance will be positive
             // and mean that the transcript isn't interrupted when used in a downstream fusion
-            int preDistance = transcript.gene().strand() == POS_STRAND ? position - precedingGeneSAPos : precedingGeneSAPos - position;
+            int preDistance = transcript.breakendGeneData().strand() == POS_STRAND ? position - precedingGeneSAPos : precedingGeneSAPos - position;
             transcript.setSpliceAcceptorDistance(true, preDistance);
         }
     }

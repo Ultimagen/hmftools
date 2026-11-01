@@ -1,6 +1,6 @@
 package com.hartwig.hmftools.compar.purple;
 
-import static com.hartwig.hmftools.compar.common.Category.COPY_NUMBER;
+import static com.hartwig.hmftools.compar.common.CategoryType.COPY_NUMBER;
 import static com.hartwig.hmftools.compar.ComparConfig.CMP_LOGGER;
 import static com.hartwig.hmftools.compar.common.CommonUtils.determineComparisonGenomePosition;
 import static com.hartwig.hmftools.compar.purple.CopyNumberData.FLD_COPY_NUMBER;
@@ -14,7 +14,7 @@ import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.purple.PurpleCopyNumber;
 import com.hartwig.hmftools.common.purple.PurpleCopyNumberFile;
 import com.hartwig.hmftools.common.region.BasePosition;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.common.CommonUtils;
 import com.hartwig.hmftools.compar.ComparConfig;
 import com.hartwig.hmftools.compar.ComparableItem;
@@ -22,6 +22,7 @@ import com.hartwig.hmftools.compar.common.DiffThresholds;
 import com.hartwig.hmftools.compar.common.FileSources;
 import com.hartwig.hmftools.compar.ItemComparer;
 import com.hartwig.hmftools.compar.common.Mismatch;
+import com.hartwig.hmftools.compar.common.SourceType;
 import com.hartwig.hmftools.patientdb.dao.DatabaseAccess;
 
 public class CopyNumberComparer implements ItemComparer
@@ -34,7 +35,7 @@ public class CopyNumberComparer implements ItemComparer
     }
 
     @Override
-    public Category category() { return COPY_NUMBER; }
+    public CategoryType category() { return COPY_NUMBER; }
 
     @Override
     public void registerThresholds(final DiffThresholds thresholds)
@@ -59,11 +60,11 @@ public class CopyNumberComparer implements ItemComparer
     }
 
     @Override
-    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final String sourceName)
+    public List<ComparableItem> loadFromDb(final String sampleId, final DatabaseAccess dbAccess, final SourceType sourceType)
     {
         final List<PurpleCopyNumber> copyNumbers = dbAccess.readCopynumbers(sampleId);
         List<ComparableItem> items = Lists.newArrayList();
-        copyNumbers.forEach(x -> items.add(createCopyNumberData(x, sourceName)));
+        copyNumbers.forEach(x -> items.add(createCopyNumberData(x, sourceType)));
         return items;
     }
 
@@ -88,12 +89,18 @@ public class CopyNumberComparer implements ItemComparer
         return comparableItems;
     }
 
-    private CopyNumberData createCopyNumberData(final PurpleCopyNumber copyNumber, final String fileSource)
+    private CopyNumberData createCopyNumberData(final PurpleCopyNumber copyNumber, final SourceType sourceType)
     {
         BasePosition comparisonPositionStart = determineComparisonGenomePosition(
-                copyNumber.chromosome(), copyNumber.start(), fileSource, mConfig.RequiresLiftover, mConfig.LiftoverCache);
+                copyNumber.chromosome(), copyNumber.start(), sourceType, mConfig.RequiresLiftover, mConfig.LiftoverCache);
+
         BasePosition comparisonPositionEnd = determineComparisonGenomePosition(
-                copyNumber.chromosome(), copyNumber.end(), fileSource, mConfig.RequiresLiftover, mConfig.LiftoverCache);
-        return new CopyNumberData(copyNumber, comparisonPositionStart, comparisonPositionEnd);
+                copyNumber.chromosome(), copyNumber.end(), sourceType, mConfig.RequiresLiftover, mConfig.LiftoverCache);
+
+        return new CopyNumberData(
+                copyNumber.chromosome(), copyNumber.start(), copyNumber.end(),
+                copyNumber.averageTumorCopyNumber(), copyNumber.majorAlleleCopyNumber(),
+                copyNumber.method(), comparisonPositionStart, comparisonPositionEnd
+        );
     }
 }

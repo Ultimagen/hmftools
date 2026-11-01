@@ -6,7 +6,6 @@ import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDir
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -23,11 +22,11 @@ import com.hartwig.hmftools.common.genome.position.GenomePosition;
 import com.hartwig.hmftools.common.genome.region.GenomeRegion;
 import com.hartwig.hmftools.common.genome.region.GenomeRegions;
 import com.hartwig.hmftools.common.genome.region.Window;
-import com.hartwig.hmftools.common.region.BaseRegion;
 import com.hartwig.hmftools.common.region.ChrBaseRegion;
+import com.hartwig.hmftools.common.utils.file.DelimFileReader;
+import com.hartwig.hmftools.common.utils.file.DelimFileWriter;
 
 import org.apache.logging.log4j.util.Strings;
-import org.jetbrains.annotations.NotNull;
 
 public final class PCFFile
 {
@@ -39,130 +38,125 @@ public final class PCFFile
     private static final int COL_POS_START = 3;
     private static final int COL_POS_END = 4;
 
-    @NotNull
     public static String generateRatioFilename(final String basePath, final String sample)
     {
         return checkAddDirSeparator(basePath) + sample + RATIO_EXTENSION;
     }
 
-    @NotNull
     public static String generateBAFFilename(final String basePath, final String sample)
     {
         return checkAddDirSeparator(basePath) + sample + BAF_EXTENSION;
     }
 
-    @NotNull
-    public static ListMultimap<Chromosome, PCFPosition> readPositions(int windowSize, final PCFSource source, final String filename) throws IOException
+    public static ListMultimap<Chromosome, PcfSegment> readPcfFile(final String path)
     {
-        ListMultimap<Chromosome, PCFPosition> result = ArrayListMultimap.create();
-        final Window window = new Window(windowSize);
-
-        PCFPosition pcfPosition = null;
-
-        String prevChromosome = Strings.EMPTY;
-        int minPosition = 1;
-        List<PCFPosition> chromosomeResult = Lists.newArrayList();
-
-        for(String line : Files.readAllLines(new File(filename).toPath()))
+        ListMultimap<Chromosome, PcfSegment> result = ArrayListMultimap.create();
+        try(DelimFileReader dfr = new DelimFileReader(path))
         {
-            if(!line.startsWith(HEADER_PREFIX))
+            dfr.stream().forEach(row ->
             {
-                String[] values = line.split(TSV_DELIM);
-                String chromosomeName = values[COL_CHROMOSOME];
-                if(HumanChromosome.contains(chromosomeName))
-                {
-                    if(!chromosomeName.equals(prevChromosome))
-                    {
-                        if(pcfPosition != null)
-                        {
-                            chromosomeResult.add(pcfPosition);
-                            result.putAll(HumanChromosome.fromString(prevChromosome), mergePositions(chromosomeResult));
-                        }
-                        chromosomeResult.clear();
-                        pcfPosition = null;
-                        minPosition = 1;
-                        prevChromosome = chromosomeName;
-                    }
-
-                    int start = window.start(Integer.parseInt(values[COL_POS_START]));
-                    int end = window.start(Integer.parseInt(values[COL_POS_END])) + windowSize;
-                    if(pcfPosition != null)
-                    {
-                        pcfPosition.setMaxPosition(start);
-                        chromosomeResult.add(pcfPosition);
-                    }
-
-                    pcfPosition = new PCFPosition(source, chromosomeName, start);
-                    pcfPosition.setMinPosition(minPosition);
-                    pcfPosition.setMaxPosition(start);
-
-                    chromosomeResult.add(pcfPosition);
-
-                    minPosition = end;
-
-                    pcfPosition = new PCFPosition(source, chromosomeName, end);
-                    pcfPosition.setMinPosition(end);
-                    pcfPosition.setMaxPosition(end);
-                }
-            }
+                final String chrName = row.get(0);
+                Chromosome chromosome = HumanChromosome.fromString(chrName);
+                int start = row.getInt(1);
+                int end = row.getInt(2);
+                double meanRatio = row.getDouble(3);
+                result.put(chromosome, new PcfSegment(chrName, start, end, meanRatio));
+            });
         }
-
-        if(pcfPosition != null)
-        {
-            chromosomeResult.add(pcfPosition);
-            result.putAll(HumanChromosome.fromString(prevChromosome), mergePositions(chromosomeResult));
-        }
-
         return result;
     }
 
-    public static Map<String,List<BaseRegion>> loadChrBaseRegions(final String filename)
+    public static void write(final String filename, final GenomeIntervals data)
     {
-        if(filename == null)
-            return Collections.emptyMap();
-
-        try
-        {
-            Map<String,List<BaseRegion>> regionsMap = Maps.newHashMap();
-
-            List<BaseRegion> regions = null;
-            String currentChromosome = "";
-
-            List<String> lines = Files.readAllLines(new File(filename).toPath());
-            lines.remove(0);
-
-            for(String line : lines)
-            {
-                String[] values = line.split(TSV_DELIM, -1);
-
-                String chromosome = values[COL_CHROMOSOME];
-                int posStart = Integer.parseInt(values[COL_POS_START]);
-                int posEnd = Integer.parseInt(values[COL_POS_END]);
-
-                if(!currentChromosome.equals(chromosome))
+        List<ChrBaseRegion> ratios = data.regionsList();
+        List<String> columns = List.of("sampleID", "chrom", "arm", "start.pos", "end.pos", "n.probes", "mean");
+        DelimFileWriter.write(filename, columns, ratios,
+                (ratio, row) ->
                 {
-                    currentChromosome = chromosome;
-                    regions = regionsMap.get(chromosome);
-
-                    if(regions == null)
-                    {
-                        regions = Lists.newArrayList();
-                        regionsMap.put(chromosome, regions);
-                    }
-                }
-
-                regions.add(new BaseRegion(posStart, posEnd));
-            }
-
-            return regionsMap;
-        }
-        catch(IOException e)
-        {
-            return null;
-        }
+                    row.set(columns.get(0), "unused");
+                    row.set(columns.get(1), ratio.chromosome());
+                    row.set(columns.get(2), "unused");
+                    row.set(columns.get(3), ratio.start());
+                    row.set(columns.get(4), ratio.end());
+                    row.set(columns.get(5), -1);
+                    row.set(columns.get(6), -1);
+                });
     }
 
-    public static Multimap<String,GenomeRegion> read(int windowSize, final String filename) throws IOException
+    public static Map<Chromosome,List<PCFPosition>> readPositions(int windowSize, PCFSource source, String filename) throws IOException
+    {
+        Map<Chromosome,List<PCFPosition>> chrPositionsMap = Maps.newHashMap();
+        Window window = new Window(windowSize);
+
+        PCFPosition lastPcfPosition = null;
+
+        String currentChromosome = Strings.EMPTY;
+        int minPosition = 1;
+        List<PCFPosition> pcfPositions = null;
+
+        List<String> lines = Files.readAllLines(new File(filename).toPath());
+        String header = lines.get(0);
+
+        boolean inOldFormat = header.startsWith(HEADER_PREFIX);
+        int chrIndex = inOldFormat ? COL_CHROMOSOME : 0;
+        int posStartIndex = inOldFormat ? COL_POS_START : 1;
+        int posEndIndex = inOldFormat ? COL_POS_END : 2;
+
+        for(int i = 1; i < lines.size(); i++)
+        {
+            String line = lines.get(i);
+            String[] values = line.split(TSV_DELIM);
+
+            String chrStr = values[chrIndex];
+
+            if(!HumanChromosome.contains(chrStr))
+                continue;
+
+            // each entry results in 2 PCF positions since gaps are converted into entries as well
+            if(!chrStr.equals(currentChromosome))
+            {
+                currentChromosome = chrStr;
+                pcfPositions = Lists.newArrayList();
+                chrPositionsMap.put(HumanChromosome.fromString(chrStr), pcfPositions);
+
+                minPosition = 1; // reset for start of new chromosome
+                lastPcfPosition = null;
+            }
+
+            int rawStart = Integer.parseInt(values[posStartIndex]);
+            int rawEnd = Integer.parseInt(values[posEndIndex]);
+            int start = inOldFormat ? window.start(rawStart) : rawStart;
+            int end = inOldFormat ? window.start(rawEnd) + windowSize : rawEnd + 1;
+
+            if(lastPcfPosition != null)
+            {
+                lastPcfPosition.setMaxPosition(start); // mark the boundary for the previous PCF position
+            }
+
+            PCFPosition pcfStart = new PCFPosition(source, chrStr, start);
+            pcfStart.setMinPosition(minPosition); // taken from the previous position's end
+            pcfStart.setMaxPosition(start);
+            pcfPositions.add(pcfStart);
+
+            minPosition = end;
+
+            PCFPosition pcfEnd = new PCFPosition(source, chrStr, end);
+            pcfEnd.setMinPosition(end);
+            pcfEnd.setMaxPosition(end);
+            pcfPositions.add(pcfEnd);
+
+            lastPcfPosition = pcfEnd;
+        }
+
+        for(List<PCFPosition> positions : chrPositionsMap.values())
+        {
+            mergePositions(positions);
+        }
+
+        return chrPositionsMap;
+    }
+
+    public static Multimap<String, GenomeRegion> read(int windowSize, final String filename) throws IOException
     {
         return fromLines(windowSize, Files.readAllLines(new File(filename).toPath()));
     }

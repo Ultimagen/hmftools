@@ -1,26 +1,29 @@
 package com.hartwig.hmftools.lilac.qc;
 
+import static java.lang.String.format;
+
 import static com.hartwig.hmftools.lilac.LilacConfig.LL_LOGGER;
-import static com.hartwig.hmftools.lilac.LilacConstants.GENE_A;
-import static com.hartwig.hmftools.lilac.LilacConstants.GENE_B;
-import static com.hartwig.hmftools.lilac.LilacConstants.GENE_C;
+import static com.hartwig.hmftools.lilac.ReferenceData.GENE_CACHE;
 import static com.hartwig.hmftools.lilac.fragment.FragmentScope.HLA_Y;
 import static com.hartwig.hmftools.lilac.fragment.FragmentScope.NO_HET_LOCI;
 import static com.hartwig.hmftools.lilac.fragment.FragmentScope.SOLUTION;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
-import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.hartwig.hmftools.lilac.coverage.ComplexCoverage;
 import com.hartwig.hmftools.lilac.fragment.Fragment;
 import com.hartwig.hmftools.lilac.hla.HlaAllele;
+import com.hartwig.hmftools.lilac.hla.HlaGene;
 
-public class CoverageQC {
+public class CoverageQC
+{
 
-    public final int ATypes;
-    public final int BTypes;
-    public final int CTypes;
+    public final Map<HlaGene, Integer> CountsByGene;
 
     public final int TotalFragments; // fragment with at least 1 sufficient map-qual base
 
@@ -28,7 +31,6 @@ public class CoverageQC {
     public final int UnmatchedFragments;
     public final int UninformativeFragments;
     public final int HlaYFragments;
-
 
     // winning solution breakdown
     public final int UniqueFragments; //
@@ -45,7 +47,7 @@ public class CoverageQC {
     - discardedHLA_YFragments - fragments matching HLA-Y
     - uninformativeFragments - fragment does not overlap any heterozygous location considered in evidence phase
     - unmatchedFragments - fragment does not match any allele exactly in solution at all heterozygous location (eg. due to sequencing error or mapping error)
-    - aTypes/bTypes/cTypes - # of distinct HLA-A alleles fitted (0,1 or 2), etc
+    - geneTypes - # of distinct alleles fitted (0,1 or 2), etc
     - proportionUnique - Percentage of fitted fragments that are uniquely assigned to 1 allele
     - proportionShared - Percentage of fitted fragments allocated across multiple alleles
     - proportionWildcard - Percentage of fitted fragments uniquely assigned to wildcard regions
@@ -54,14 +56,10 @@ public class CoverageQC {
     - discardedIndelMaxSupport - Maximum fragment support for an indel detected but not present in any known allele
      */
 
-
-    public CoverageQC(
-            int aTypes, int bTypes, int cTypes, int totalFragments, int unmatched, int uninformative, int hlaY,
+    public CoverageQC(final Map<HlaGene, Integer> countsByGene, int totalFragments, int unmatched, int uninformative, int hlaY,
             int uniqueFragments, int sharedFragments, int wildcardFragments)
     {
-        ATypes = aTypes;
-        BTypes = bTypes;
-        CTypes = cTypes;
+        CountsByGene = countsByGene;
         TotalFragments = totalFragments;
         UnmatchedFragments = unmatched;
         UninformativeFragments = uninformative;
@@ -77,17 +75,24 @@ public class CoverageQC {
         PercentWildcard = 1.0 * wildcardFragments / FittedFragments;
     }
 
-    public static CoverageQC create(
-            final List<Fragment> fragments, final ComplexCoverage winner)
+    public static CoverageQC create(final Collection<Fragment> fragments, final ComplexCoverage winner)
     {
-        List<HlaAllele> alleles = winner.getAlleleCoverage().stream().map(x -> x.Allele).collect(Collectors.toList());
-        int aTypes = alleles.stream().filter(x -> x.Gene.equals(GENE_A)).collect(Collectors.toSet()).size();
-        int bTypes = alleles.stream().filter(x -> x.Gene.equals(GENE_B)).collect(Collectors.toSet()).size();
-        int cTypes = alleles.stream().filter(x -> x.Gene.equals(GENE_C)).collect(Collectors.toSet()).size();
-
-        if (aTypes == 0 || bTypes == 0 || cTypes == 0)
+        List<HlaAllele> alleles = winner.getAlleleCoverage().stream().map(x -> x.Allele).toList();
+        Map<HlaGene, Integer> countsByGene = Maps.newHashMap();
+        for(HlaGene gene : GENE_CACHE.GeneNames)
         {
-            LL_LOGGER.warn("  UNMATCHED ALLELE: {} A alleles, {} B alleles, {} C alleles", aTypes, bTypes, cTypes);
+            if(gene.isPseudo())
+                continue;
+
+            int count = alleles.stream().filter(x -> x.Gene == gene).collect(Collectors.toSet()).size();
+            countsByGene.put(gene, count);
+        }
+
+        if(countsByGene.values().stream().anyMatch(x -> x == 0))
+        {
+            StringJoiner msgBuilder = new StringJoiner(", ");
+            countsByGene.forEach((key, value) -> msgBuilder.add(value + " " + key.shortName() + " alleles"));
+            LL_LOGGER.warn("  UNMATCHED ALLELE: {}", msgBuilder.toString());
         }
 
         /*
@@ -96,7 +101,7 @@ public class CoverageQC {
         - discardedHLA_YFragments - fragments matching HLA-Y
         - uninformativeFragments - fragment does not overlap any heterozygous location considered in evidence phase
         - unmatchedFragments - fragment does not match any allele exactly in solution at all heterozygous location (eg. due to sequencing error or mapping error)
-        - aTypes/bTypes/cTypes - # of distinct HLA-A alleles fitted (0,1 or 2), etc
+        - geneTypes - # of distinct alleles fitted (0,1 or 2), etc
         - proportionUnique - Percentage of fitted fragments that are uniquely assigned to 1 allele
         - proportionShared - Percentage of fitted fragments allocated across multiple alleles
         - proportionWildcard - Percentage of fitted fragments uniquely assigned to wildcard regions
@@ -134,27 +139,27 @@ public class CoverageQC {
                     totalFragments, solutionFragments, unmatchedFragments, uninformativeFragments, hlaYFragments, unassignedFragments);
         }
 
-        return new CoverageQC(
-                aTypes, bTypes, cTypes,
-                totalFragments, unmatchedFragments, uninformativeFragments, hlaYFragments,
+        return new CoverageQC(countsByGene, totalFragments, unmatchedFragments, uninformativeFragments, hlaYFragments,
                 winner.UniqueCoverage, winner.SharedCoverage, winner.WildCoverage);
     }
 
-    public List<String> header()
+    public static List<String> header()
     {
-        return Lists.newArrayList(
-                "ATypes", "BTypes", "CTypes",
-                "TotalFragments", "FittedFragments", "UnmatchedFragments", "UninformativeFragments", "HlaYFragments",
-                "PercentUnique", "PercentShared", "PercentWildcard");
+        return List.of("geneTypes", "TotalFragments", "FittedFragments", "UnmatchedFragments", "UninformativeFragments", "HlaYFragments", "PercentUnique", "PercentShared", "PercentWildcard");
     }
 
     public List<String> body()
     {
-        return Lists.newArrayList(
-                String.valueOf(ATypes), String.valueOf(BTypes), String.valueOf(CTypes),
-                String.valueOf(TotalFragments), String.valueOf(FittedFragments),
+        StringJoiner geneTypesStrBuilder = new StringJoiner(";");
+        GENE_CACHE.GeneNames.stream()
+                .filter(x -> !x.isPseudo())
+                .map(gene -> format("%s=%d", gene.shortName(), CountsByGene.getOrDefault(gene, 0)))
+                .forEach(geneTypesStrBuilder::add);
+
+        return List.of(
+                geneTypesStrBuilder.toString(), String.valueOf(TotalFragments), String.valueOf(FittedFragments),
                 String.valueOf(UnmatchedFragments), String.valueOf(UninformativeFragments), String.valueOf(HlaYFragments),
-                String.format("%.3f", PercentUnique), String.format("%.3f", PercentShared), String.format("%.3f", PercentWildcard));
+                format("%.3f", PercentUnique), format("%.3f", PercentShared), format("%.3f", PercentWildcard));
     }
 
     /*

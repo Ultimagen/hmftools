@@ -297,7 +297,6 @@ CREATE TABLE `somaticVariant`
     `mappability` DOUBLE PRECISION NOT NULL,
     `germlineStatus` VARCHAR(50) NOT NULL,
     `minorAlleleCopyNumber` DOUBLE PRECISION NOT NULL,
-    `recovered` TINYINT(1) NOT NULL,
     `kataegis` VARCHAR(20) NOT NULL,
     `referenceAlleleReadCount` INT,
     `referenceTotalReadCount` INT,
@@ -511,6 +510,7 @@ CREATE TABLE `driverCatalog`
     `category` VARCHAR(50) NOT NULL,
     `driver` VARCHAR(50) NOT NULL,
     `likelihoodMethod` VARCHAR(50) NOT NULL,
+    `reportedStatus` VARCHAR(50) NOT NULL,
     `driverLikelihood` DOUBLE PRECISION NOT NULL,
     `missense` INT NOT NULL,
     `nonsense` INT NOT NULL,
@@ -526,12 +526,13 @@ CREATE TABLE `driverCatalog`
 CREATE INDEX `driverCatalog_sampleId_gene` ON `driverCatalog` (`sampleId`, `gene`);
 CREATE INDEX `driverCatalog_gene` ON `driverCatalog` (`gene`);
 
-DROP TABLE IF EXISTS `germlineDeletion`;
-CREATE TABLE `germlineDeletion`
+DROP TABLE IF EXISTS `germlineCopyNumber`;
+CREATE TABLE `germlineCopyNumber`
 (   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `modified` DATETIME NOT NULL,
     `sampleId` VARCHAR(50) NOT NULL,
     `gene` VARCHAR(50) NOT NULL,
+    `transcriptId` VARCHAR(128) NOT NULL,
     `chromosome` VARCHAR(10) NOT NULL,
     `chromosomeBand` VARCHAR(50) NOT NULL,
     `regionStart` INT NOT NULL,
@@ -542,7 +543,7 @@ CREATE TABLE `germlineDeletion`
     `detectionMethod` VARCHAR(20) NOT NULL,
     `germlineStatus` VARCHAR(20) NOT NULL,
     `tumorStatus` VARCHAR(20) NOT NULL,
-    `germlineCopyNumber` DOUBLE PRECISION NOT NULL,
+    `normalCopyNumber` DOUBLE PRECISION NOT NULL,
     `tumorCopyNumber` DOUBLE PRECISION NOT NULL,
     `filter` VARCHAR(50) NOT NULL,
     `cohortFrequency` INT NOT NULL,
@@ -550,8 +551,8 @@ CREATE TABLE `germlineDeletion`
     PRIMARY KEY (`id`)
 );
 
-CREATE INDEX `germlineDeletion_sampleId_gene` ON `germlineDeletion` (`sampleId`, `gene`);
-CREATE INDEX `germlineDeletion_gene` ON `germlineDeletion` (`gene`);
+CREATE INDEX `germlineCopyNumber_sampleId_gene` ON `germlineCopyNumber` (`sampleId`, `gene`);
+CREATE INDEX `germlineCopyNumber_gene` ON `germlineCopyNumber` (`gene`);
 
 DROP TABLE IF EXISTS `structuralVariant`;
 CREATE TABLE `structuralVariant`
@@ -711,7 +712,7 @@ CREATE TABLE `svBreakend`
     `canonicalTranscript` TINYINT(1) NOT NULL,
     `geneOrientation` VARCHAR(20) NOT NULL,
     `disruptive` TINYINT(1) NOT NULL,
-    `reportedDisruption` TINYINT(1) NOT NULL,
+    `reportedStatus` VARCHAR(50) NOT NULL,
     `undisruptedCopyNumber` DOUBLE PRECISION,
     `regionType` VARCHAR(20) NOT NULL,
     `codingContext` VARCHAR(20),
@@ -818,7 +819,7 @@ CREATE TABLE `svBreakendGermline`
     `canonicalTranscript` TINYINT(1) NOT NULL,
     `geneOrientation` VARCHAR(20) NOT NULL,
     `disruptive` TINYINT(1) NOT NULL,
-    `reportedDisruption` TINYINT(1) NOT NULL,
+    `reportedStatus` VARCHAR(50) NOT NULL,
     `undisruptedCopyNumber` DOUBLE PRECISION,
     `regionType` VARCHAR(20) NOT NULL,
     `codingType` VARCHAR(20),
@@ -957,7 +958,6 @@ CREATE TABLE `rnaStatistics`
     `fragmentLengthPct05` DOUBLE PRECISION NOT NULL,
     `fragmentLengthPct50` DOUBLE PRECISION NOT NULL,
     `fragmentLengthPct95` DOUBLE PRECISION NOT NULL,
-    `enrichedGenePercent` DOUBLE PRECISION NOT NULL,
     `medianGCRatio` DOUBLE PRECISION NOT NULL,
     PRIMARY KEY (`id`)
 );

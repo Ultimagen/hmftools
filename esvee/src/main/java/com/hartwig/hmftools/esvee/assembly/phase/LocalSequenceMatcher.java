@@ -7,9 +7,9 @@ import static com.hartwig.hmftools.common.genome.region.Orientation.FORWARD;
 import static com.hartwig.hmftools.common.genome.region.Orientation.REVERSE;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.ASSEMBLY_LINK_OVERLAP_BASES;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.MATCH_SUBSEQUENCE_LENGTH;
-import static com.hartwig.hmftools.esvee.assembly.AssemblyUtils.createMinBaseQuals;
+import static com.hartwig.hmftools.esvee.assembly.AssemblyUtils.createBaseQualsAboveMinThreshold;
 import static com.hartwig.hmftools.esvee.assembly.phase.AssemblyLinker.findBestSequenceMatch;
-import static com.hartwig.hmftools.esvee.assembly.types.JunctionSequence.PHASED_ASSEMBLY_MATCH_SEQ_LENGTH;
+import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_VARIANT_LENGTH;
 
 import java.util.List;
 
@@ -40,12 +40,12 @@ public class LocalSequenceMatcher
 
         int chromosomeEnd = mRefGenome.getChromosomeLength(assembly.junction().Chromosome);
 
-        if(localRegionEnd >= chromosomeEnd)
+        if(localRegionStart < 1 || localRegionEnd >= chromosomeEnd)
             return null;
 
         byte[] refGenomeBases = mRefGenome.getBases(assembly.junction().Chromosome, localRegionStart, localRegionEnd);
 
-        byte[] refBaseQuals = createMinBaseQuals(refGenomeBases.length);
+        byte[] refBaseQuals = createBaseQualsAboveMinThreshold(refGenomeBases.length);
 
         JunctionSequence assemblySeq = JunctionSequence.formStraddlingMatchSequence(assembly);
 
@@ -64,23 +64,11 @@ public class LocalSequenceMatcher
 
         if(assemblySeqIndexInRef >= 0)
         {
-            // simple sequence match, so can form a link between these 2 assemblies
+            // if a second match location can be found, skip making this link
+            int nextStartIndex = assemblySeqIndexInRef + assemblyJunctionSeqLength;
 
-            // TODO: check for other matches..
-            /*
-            List<AssemblyLink> candidateLinks = Lists.newArrayList(formLocalLink(assembly, localRegionStart, assemblySeqIndexInRef));
-
-            int assemblySeqIndexInRefNext = assemblySeqIndexInRef;
-            while(true)
-            {
-                assemblySeqIndexInRefNext = localRefSeq.FullSequence.indexOf(assemblyExtBases, assemblySeqIndexInRefNext + 1);
-
-                if(assemblySeqIndexInRefNext > 0)
-                    candidateLinks.add(formLocalLink(assembly, localRegionStart, assemblySeqIndexInRefNext));
-                else
-                    break;
-            }
-            */
+            if(localRefSeq.FullSequence.indexOf(assemblyExtBases, nextStartIndex) >= 0)
+                return null;
 
             return formLocalLink(assembly, localRegionStart, assemblySeqIndexInRef);
         }
@@ -162,7 +150,9 @@ public class LocalSequenceMatcher
             localRefJunctionIndex = assemblyExtBases.length() - 1;
         }
 
-        Junction localRefJunction = new Junction(assembly.junction().Chromosome, localRefJunctionPos, localRefOrientation);
+        Junction localRefJunction = new Junction(
+                assembly.junction().Chromosome, localRefJunctionPos, localRefOrientation,
+                false, false, false, 0, null);
 
         // trim the local ref sequence to 100 bases from the junction - no point in storing and writing 1000 bases
 
@@ -174,7 +164,7 @@ public class LocalSequenceMatcher
             localAssemblySequence = assemblyRefBases + assemblyExtBases;
 
         byte[] localAssemblyBases = localAssemblySequence.getBytes();
-        byte[] localAssemblyQuals = createMinBaseQuals(localAssemblyBases.length);
+        byte[] localAssemblyQuals = createBaseQualsAboveMinThreshold(localAssemblyBases.length);
 
         JunctionAssembly localRefAssembly = new JunctionAssembly(
                 localRefJunction, localAssemblyBases, localAssemblyQuals, Lists.newArrayList(), Lists.newArrayList());

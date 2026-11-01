@@ -10,7 +10,8 @@ import java.util.StringJoiner;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.linx.LinxBreakend;
-import com.hartwig.hmftools.compar.common.Category;
+import com.hartwig.hmftools.common.purple.ReportedStatus;
+import com.hartwig.hmftools.compar.common.CategoryType;
 import com.hartwig.hmftools.compar.ComparableItem;
 import com.hartwig.hmftools.compar.common.DiffThresholds;
 import com.hartwig.hmftools.compar.common.MatchLevel;
@@ -20,11 +21,12 @@ public class DisruptionData implements ComparableItem
 {
     public final String GeneName;
     public final List<BreakendData> Breakends;
-    private final Category mSubCategory;
+    private final CategoryType mSubCategory;
 
     protected static final String FLD_BREAKEND_INFO = "BreakendInfo";
+    protected static final String FLD_UNMATCHED_SV = "unmatchedSv";
 
-    public DisruptionData(final Category category, final String geneName, final List<BreakendData> breakends)
+    public DisruptionData(final CategoryType category, final String geneName, final List<BreakendData> breakends)
     {
         mSubCategory = category;
         GeneName = geneName;
@@ -32,7 +34,7 @@ public class DisruptionData implements ComparableItem
     }
 
     @Override
-    public Category category() { return mSubCategory; }
+    public CategoryType category() { return mSubCategory; }
 
     @Override
     public String key()
@@ -51,7 +53,7 @@ public class DisruptionData implements ComparableItem
 
         for(BreakendData breakendData : Breakends)
         {
-            sj.add(breakendData.fullStr());
+            sj.add(breakendData.fullStr(true));
         }
 
         values.add(sj.toString());
@@ -59,12 +61,10 @@ public class DisruptionData implements ComparableItem
     }
 
     @Override
-    public boolean reportable() { return Breakends.stream().anyMatch(x -> x.Breakend.reportedDisruption()); }
+    public boolean reportable() { return Breakends.stream().anyMatch(x -> x.Breakend.reportedStatus() == ReportedStatus.REPORTED); }
 
     @Override
-    public boolean isPass() {
-        return true;
-    }
+    public String geneName() { return GeneName; }
 
     @Override
     public boolean matches(final ComparableItem other)
@@ -106,10 +106,10 @@ public class DisruptionData implements ComparableItem
                             breakendData.svInfoStr(), breakendData.transcriptStr(), otherBreakendData.transcriptStr()));
                 }
 
-                if(breakend.reportedDisruption() != otherBreakend.reportedDisruption())
+                if(breakend.reportedStatus() != otherBreakend.reportedStatus())
                 {
                     diffs.add(format("breakend(%s reported %s/%s)",
-                            breakendData.svInfoStr(), breakend.reportedDisruption(), otherBreakend.reportedDisruption()));
+                            breakendData.svInfoStr(), breakend.reportedStatus(), otherBreakend.reportedStatus()));
                 }
 
                 breakends.remove(index);
@@ -118,7 +118,7 @@ public class DisruptionData implements ComparableItem
             else
             {
                 // record an unmatched breakend or SV
-                diffs.add(format("unmatchedSv(%s/)", breakendData.svInfoStr()));
+                diffs.add(format(FLD_UNMATCHED_SV + "(%s/)", breakendData.svInfoStr()));
 
                 ++index;
             }
@@ -127,7 +127,7 @@ public class DisruptionData implements ComparableItem
         for(BreakendData otherBreakendData : otherBreakends)
         {
             // record an unmatched breakend or SV on the other side
-            diffs.add(format("unmatchedSv(/%s)", otherBreakendData.svInfoStr()));
+            diffs.add(format(FLD_UNMATCHED_SV + "(/%s)", otherBreakendData.svInfoStr()));
         }
 
         return createMismatchFromDiffs(this, other, diffs, matchLevel, includeMatches);

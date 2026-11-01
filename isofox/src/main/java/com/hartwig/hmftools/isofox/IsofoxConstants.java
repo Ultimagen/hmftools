@@ -19,11 +19,8 @@ public class IsofoxConstants
 
     public static final double GC_RATIO_BUCKET = 0.01;
 
-    public static final short DEFAULT_SINGLE_MAP_QUALITY = 255;
+    public static final short DEFAULT_SINGLE_MAP_QUALITY = 60;
     public static short SINGLE_MAP_QUALITY = DEFAULT_SINGLE_MAP_QUALITY;
-    public static short MULTI_MAP_QUALITY_THRESHOLD = 3; // multi-mapped fragments are given map quals of 3 or lower
-
-    public static final int ENRICHED_GENE_BUFFER = 1000;
 
     public static final int MAX_NOVEL_SJ_DISTANCE = 500000; // beyond which a fragment will be considered chimeric
 
@@ -31,27 +28,9 @@ public class IsofoxConstants
 
     public static final double PANEL_LOW_COVERAGE_FACTOR = 5; // expected rate for panel vs full genome
 
-    public static void populateEnrichedGeneIds(final List<String> geneIds, final RefGenomeVersion version)
-    {
-        if(version == RefGenomeVersion.V38)
-        {
-            geneIds.add("ENSG00000276168"); // RN7SL1
-            geneIds.add("ENSG00000274012"); // RN7SL2
-            geneIds.add("ENSG00000278771"); // RN7SL3
-            geneIds.add("ENSG00000263740"); // RN7SL4P
-            geneIds.add("ENSG00000283293"); // RN7SK
-            geneIds.add("ENSG00000265735"); // RN7SL5P
-        }
-        else
-        {
-            geneIds.add("ENSG00000265150");
-            geneIds.add("ENSG00000258486");
-            geneIds.add("ENSG00000202198");
-            geneIds.add("ENSG00000266037");
-            geneIds.add("ENSG00000263740");
-            geneIds.add("ENSG00000265735");
-        }
-    }
+    public static final double HIGH_EXPRESSION_FOLD_CHANGE_LOW = 1.0;
+    public static final double HIGH_EXPRESSION_FOLD_CHANGE_HIGH = 2.3;
+    public static final double HIGH_EXPRESSION_PERCENTILE_HIGH = 0.98;
 
     // process genes with longer expected processing times first
     public static final List<String> PRIORITISED_CHROMOSOMES = Lists.newArrayList("14", "22", "2", "3", "6", "9", "16", "17");
@@ -68,4 +47,12 @@ public class IsofoxConstants
     }
 
     public static final String DEFAULT_EXPECTED_RATE_LENGTHS = "50-1;75-1;100-1;125-1;150-1;200-1;250-1;300-1;400-1;550-1";
+
+    public static final List<ChrBaseRegion> CHIMERIC_EXCLUDED_REGIONS_V37 = List.of(
+            new ChrBaseRegion("2",118847180, 118847191),
+            new ChrBaseRegion("7",101270000, 101280000));
+
+    public static final List<ChrBaseRegion> CHIMERIC_EXCLUDED_REGIONS_V38 = List.of(
+            new ChrBaseRegion("chr2",118089000, 118091000),
+            new ChrBaseRegion("chr7",101625000, 101635000));
 }

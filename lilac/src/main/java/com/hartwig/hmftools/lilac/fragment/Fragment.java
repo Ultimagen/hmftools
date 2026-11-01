@@ -1,8 +1,10 @@
 package com.hartwig.hmftools.lilac.fragment;
 
 import static com.hartwig.hmftools.common.codon.Codons.isCodonMultiple;
+import static com.hartwig.hmftools.common.redux.BaseQualAdjustment.isUncertainBaseQual;
 import static com.hartwig.hmftools.lilac.LilacConfig.LL_LOGGER;
-import static com.hartwig.hmftools.lilac.LilacUtils.aboveMinQual;
+import static com.hartwig.hmftools.lilac.LilacConfig.isUltima;
+import static com.hartwig.hmftools.lilac.evidence.Nucleotide.MISSING_BASE_QUAL;
 import static com.hartwig.hmftools.lilac.fragment.FragmentScope.HLA_Y;
 import static com.hartwig.hmftools.lilac.fragment.FragmentScope.UNSET;
 
@@ -19,13 +21,14 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.lilac.evidence.AminoAcid;
 import com.hartwig.hmftools.lilac.evidence.Nucleotide;
+import com.hartwig.hmftools.lilac.hla.HlaGene;
 import com.hartwig.hmftools.lilac.read.Read;
 
 public class Fragment
 {
     private final List<Read> mReads;
-    private final String mReadGene; // mapped gene
-    private final Set<String> mGenes; // other potentially applicable genes
+    private final HlaGene mReadGene; // mapped gene
+    private final Set<HlaGene> mGenes; // other potentially applicable genes
 
     // initial nucleotide values
     private final NavigableMap<Integer, Nucleotide> mRawNucleotidesByLoci;
@@ -40,17 +43,26 @@ public class Fragment
 
     private FragmentScope mScope;
 
-    public Fragment(final Read read, final String readGene, final Set<String> genes, final List<Integer> nucleotideLoci,
-            final List<Byte> nucleotidesQualities, final List<String> nucleotidesBases)
+    public static Fragment createFromQuals(final Read read, final HlaGene readGene, final Set<HlaGene> genes,
+            final List<Integer> nucleotideLoci, final List<Byte> nucleotidesQualities, final List<String> nucleotidesBases)
     {
-        this(read, readGene, genes,
+        return new Fragment(read, readGene, genes,
                 IntStream.range(0, nucleotideLoci.size())
-                        .mapToObj(i -> new Nucleotide(nucleotideLoci.get(i), nucleotidesQualities.get(i), nucleotidesBases.get(i)))
+                        .mapToObj(i -> Nucleotide.create(nucleotideLoci.get(i), nucleotidesQualities.get(i), nucleotidesBases.get(i)))
+                        .toList());
+    }
+
+    public static Fragment createFromIsLowQuals(final Read read, final HlaGene readGene, final Set<HlaGene> genes,
+            final List<Integer> nucleotideLoci, final List<Boolean> isLowQuals, final List<String> nucleotidesBases)
+    {
+        return new Fragment(read, readGene, genes,
+                IntStream.range(0, nucleotideLoci.size())
+                        .mapToObj(i -> Nucleotide.create(nucleotideLoci.get(i), isLowQuals.get(i), nucleotidesBases.get(i)))
                         .toList());
     }
 
     public Fragment(
-            final Read read, final String readGene, final Set<String> genes, final Iterable<Nucleotide> nucleotides)
+            final Read read, final HlaGene readGene, final Set<HlaGene> genes, final Iterable<Nucleotide> nucleotides)
     {
         mReads = Lists.newArrayListWithCapacity(2);
         mReads.add(read);
@@ -88,10 +100,10 @@ public class Fragment
     }
 
     public String readInfo() { return mReads.get(0).readInfo(); }
-    public Set<String> genes() { return mGenes; }
-    public void addGene(final String gene) { mGenes.add(gene); }
-    public String readGene() { return mReadGene; }
-    public boolean containsGene(final String gene) { return mGenes.stream().anyMatch(x -> x.equals(gene)); }
+    public Set<HlaGene> genes() { return mGenes; }
+    public void addGene(final HlaGene gene) { mGenes.add(gene); }
+    public HlaGene readGene() { return mReadGene; }
+    public boolean containsGene(final HlaGene gene) { return mGenes.contains(gene); }
 
     public NavigableMap<Integer, Nucleotide> nucleotidesByLoci() { return mNucleotidesByLoci; }
     public NavigableMap<Integer, Nucleotide> rawNucleotidesByLoci() { return mRawNucleotidesByLoci; }
@@ -116,7 +128,13 @@ public class Fragment
 
     public void addNucleotide(int locus, final String bases, byte quality)
     {
-        Nucleotide nucleotide = new Nucleotide(locus, quality, bases);
+        Nucleotide nucleotide = Nucleotide.create(locus, quality, bases);
+        addNucleotide(nucleotide);
+    }
+
+    public void addHighQualNucleotide(int locus, final String bases)
+    {
+        Nucleotide nucleotide = Nucleotide.createHighQual(locus, bases);
         addNucleotide(nucleotide);
     }
 
@@ -171,7 +189,7 @@ public class Fragment
         List<Integer> lociToRemove = Lists.newArrayList();
         for(Map.Entry<Integer, Nucleotide> entry : mNucleotidesByLoci.entrySet())
         {
-            if(!aboveMinQual(entry.getValue().qual()))
+            if(entry.getValue().isLowQual())
                 lociToRemove.add(entry.getKey());
         }
 
@@ -235,16 +253,24 @@ public class Fragment
         mAminoAcidsByLoci.keySet().removeIf(l -> !loci.contains(l));
     }
 
-    public String getRawNucleotide(int locus)
+    public String getRawNucleotide(int locus, boolean checkUncertainBaseQual)
     {
         Nucleotide nucleotide = mRawNucleotidesByLoci.get(locus);
         if(nucleotide == null)
+            return "";
+
+        if(checkUncertainBaseQual && !isUltima() && nucleotide.qual() != MISSING_BASE_QUAL && isUncertainBaseQual(nucleotide.qual()))
             return "";
 
         return nucleotide.bases();
     }
 
     public String getLowQualAminoAcid(int locus)
+    {
+        return getLowQualAminoAcid(locus, false);
+    }
+
+    public String getLowQualAminoAcid(int locus, boolean checkUncertainBaseQual)
     {
         int startNucleotideLocus = locus * 3;
         if(!mRawNucleotidesByLoci.containsKey(startNucleotideLocus))
@@ -255,6 +281,16 @@ public class Fragment
 
         if(!mRawNucleotidesByLoci.containsKey(startNucleotideLocus + 2))
             return "";
+
+        if(checkUncertainBaseQual && !isUltima())
+        {
+            for(int i = 0; i < 3; i++)
+            {
+                Nucleotide nuc = mRawNucleotidesByLoci.get(startNucleotideLocus + i);
+                if(nuc.qual() != MISSING_BASE_QUAL && isUncertainBaseQual(nuc.qual()))
+                    return "";
+            }
+        }
 
         return FragmentUtils.formCodonAminoAcid(locus, mRawNucleotidesByLoci);
     }

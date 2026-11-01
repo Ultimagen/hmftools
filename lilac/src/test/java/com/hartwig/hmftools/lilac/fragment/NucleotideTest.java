@@ -1,16 +1,14 @@
 package com.hartwig.hmftools.lilac.fragment;
 
 import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_MIN_DEPTH_FILTER;
-import static com.hartwig.hmftools.lilac.LilacConstants.HLA_A;
-import static com.hartwig.hmftools.lilac.LilacConstants.HLA_B;
-import static com.hartwig.hmftools.lilac.LilacConstants.HLA_C;
 import static com.hartwig.hmftools.lilac.LilacUtils.namesMatch;
-import static com.hartwig.hmftools.lilac.ReferenceData.A_EXON_BOUNDARIES;
-import static com.hartwig.hmftools.lilac.ReferenceData.B_EXON_BOUNDARIES;
-import static com.hartwig.hmftools.lilac.ReferenceData.C_EXON_BOUNDARIES;
-import static com.hartwig.hmftools.lilac.app.LilacAppTest.buildGeneCache;
+import static com.hartwig.hmftools.lilac.ReferenceData.GENE_EXON_BOUNDARIES;
 import static com.hartwig.hmftools.lilac.fragment.FragmentUtils.expandIndices;
+import static com.hartwig.hmftools.lilac.hla.HlaGene.HLA_A;
+import static com.hartwig.hmftools.lilac.hla.HlaGene.HLA_B;
+import static com.hartwig.hmftools.lilac.hla.HlaGene.HLA_C;
 import static com.hartwig.hmftools.lilac.misc.LilacTestUtils.createReadRecord;
+import static com.hartwig.hmftools.lilac.util.GeneCacheSetup.buildGeneCache;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -29,16 +27,24 @@ import com.google.common.collect.Multiset;
 import com.google.common.collect.Sets;
 import com.hartwig.hmftools.lilac.LilacConstants;
 import com.hartwig.hmftools.lilac.evidence.Nucleotide;
+import com.hartwig.hmftools.lilac.hla.HlaGene;
 import com.hartwig.hmftools.lilac.read.Read;
 import com.hartwig.hmftools.lilac.seq.SequenceCount;
 import com.hartwig.hmftools.lilac.util.ThrowOnUnstubbed;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import htsjdk.samtools.SAMRecord;
 
 public class NucleotideTest
 {
+    @Before
+    public void setUp()
+    {
+        buildGeneCache();
+    }
+
     @Test
     public void testCreateNucleotidesFromAminoAcid()
     {
@@ -50,9 +56,7 @@ public class NucleotideTest
     @Test
     public void testGeneEnrichment()
     {
-        buildGeneCache();
-
-        NucleotideGeneEnrichment enricher = new NucleotideGeneEnrichment(A_EXON_BOUNDARIES, B_EXON_BOUNDARIES, C_EXON_BOUNDARIES);
+        NucleotideGeneEnrichment enricher = NucleotideGeneEnrichment.create(GENE_EXON_BOUNDARIES);
 
         List<Integer> indices = Lists.newArrayList();
         indices.add(337);
@@ -73,8 +77,8 @@ public class NucleotideTest
         LilacConstants.MIN_DEPTH_FILTER = DEFAULT_MIN_DEPTH_FILTER;
 
         List<Nucleotide> fragmentNucleotides = Lists.newArrayList(
-                new Nucleotide(0, (byte) 40, "A"),
-                new Nucleotide(1, (byte) 40, "T"));
+                Nucleotide.create(0, (byte) 40, "A"),
+                Nucleotide.create(1, (byte) 40, "T"));
         final NavigableMap<Integer, Nucleotide> fragmentNucleotidesByLoci = Maps.newTreeMap();
         fragmentNucleotides.forEach(x -> fragmentNucleotidesByLoci.put(x.locus(), x));
 
@@ -86,8 +90,8 @@ public class NucleotideTest
         Fragment fragment = mock(Fragment.class, new ThrowOnUnstubbed());
         doReturn(fragmentNucleotidesByLoci).when(fragment).nucleotidesByLoci();
         doReturn(reads).when(fragment).reads();
-        doReturn("HLA-A").when(fragment).readGene();
-        doReturn(Sets.newHashSet("HLA-A")).when(fragment).genes();
+        doReturn(HLA_A).when(fragment).readGene();
+        doReturn(Sets.newHashSet(HLA_A)).when(fragment).genes();
 
         List<String> minEvidenceSequences = Lists.newArrayList("A");
         SequenceCount pooledCounts = mock(SequenceCount.class, new ThrowOnUnstubbed());
@@ -112,8 +116,8 @@ public class NucleotideTest
         LilacConstants.MIN_DEPTH_FILTER = DEFAULT_MIN_DEPTH_FILTER;
 
         List<Nucleotide> fragmentNucleotides = Lists.newArrayList(
-                new Nucleotide(0, (byte) 40, "A"),
-                new Nucleotide(1, (byte) 40, "T"));
+                Nucleotide.create(0, (byte) 40, "A"),
+                Nucleotide.create(1, (byte) 40, "T"));
         final NavigableMap<Integer, Nucleotide> fragmentNucleotidesByLoci = Maps.newTreeMap();
         fragmentNucleotides.forEach(x -> fragmentNucleotidesByLoci.put(x.locus(), x));
 
@@ -125,8 +129,8 @@ public class NucleotideTest
         Fragment fragment = mock(Fragment.class, new ThrowOnUnstubbed());
         doReturn(fragmentNucleotidesByLoci).when(fragment).nucleotidesByLoci();
         doReturn(reads).when(fragment).reads();
-        doReturn("HLA-A").when(fragment).readGene();
-        doReturn(Sets.newHashSet("HLA-A")).when(fragment).genes();
+        doReturn(HLA_A).when(fragment).readGene();
+        doReturn(Sets.newHashSet(HLA_A)).when(fragment).genes();
 
         List<String> minEvidenceSequences = Lists.newArrayList("A");
         SequenceCount pooledCounts = mock(SequenceCount.class, new ThrowOnUnstubbed());
@@ -148,7 +152,7 @@ public class NucleotideTest
 
     private static void assertGene(
             final NucleotideGeneEnrichment enricher,
-            final Set<String> expectedGenes, final String alignedGene, final List<Integer> aminoAcideIndices)
+            final Set<HlaGene> expectedGenes, final HlaGene alignedGene, final Iterable<Integer> aminoAcideIndices)
     {
         Fragment fragment = create(alignedGene, expandIndices(aminoAcideIndices));
 
@@ -156,7 +160,7 @@ public class NucleotideTest
         assertTrue(namesMatch(fragment.genes(), expectedGenes));
     }
 
-    private static Fragment create(final String gene, final List<Integer> indices)
+    private static Fragment create(final HlaGene gene, final List<Integer> indices)
     {
         List<Byte> qualities = Lists.newArrayListWithCapacity(indices.size());
         List<String> nucleotides = Lists.newArrayListWithCapacity(indices.size());
@@ -167,6 +171,6 @@ public class NucleotideTest
             nucleotides.add("G");
         }
 
-        return new Fragment(createReadRecord("01"), gene, Sets.newHashSet(gene), indices, qualities, nucleotides);
+        return Fragment.createFromQuals(createReadRecord("01"), gene, Sets.newHashSet(gene), indices, qualities, nucleotides);
     }
 }

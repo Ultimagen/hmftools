@@ -7,6 +7,10 @@ import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource.addRe
 import static com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion.V37;
 import static com.hartwig.hmftools.common.perf.TaskExecutor.addThreadOptions;
 import static com.hartwig.hmftools.common.perf.TaskExecutor.parseThreads;
+import static com.hartwig.hmftools.common.sequencing.SequencingType.ILLUMINA;
+import static com.hartwig.hmftools.common.sequencing.SequencingType.SBX;
+import static com.hartwig.hmftools.common.sequencing.SequencingType.SEQUENCING_TYPE_CFG;
+import static com.hartwig.hmftools.common.sequencing.SequencingType.ULTIMA;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.PURPLE_DIR_CFG;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.PURPLE_DIR_DESC;
 import static com.hartwig.hmftools.common.utils.config.CommonConfig.REFERENCE_BAM;
@@ -26,13 +30,13 @@ import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDir
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkCreateOutputDir;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.parseOutputDir;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.pathFromFile;
+import static com.hartwig.hmftools.lilac.GeneSelector.ALL_GENES;
 import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_FATAL_TOTAL_LOW_COVERAGE_POSITIONS;
 import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_FRAGS_PER_ALLELE;
 import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_FRAGS_REMOVE_SGL;
 import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_FREQUENCY_SCORE_PENALTY;
 import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_HLA_Y_FRAGMENT_THRESHOLD;
 import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_MAX_REF_FRAGMENTS;
-import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_MIN_BASE_QUAL;
 import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_MIN_DEPTH_FILTER;
 import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_MIN_EVIDENCE_FACTOR;
 import static com.hartwig.hmftools.lilac.LilacConstants.DEFAULT_MIN_EVIDENCE_SUPPORT;
@@ -44,13 +48,16 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.hartwig.hmftools.common.bam.BamUtils;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.purple.GeneCopyNumberFile;
 import com.hartwig.hmftools.common.purple.PurpleCommon;
+import com.hartwig.hmftools.common.sequencing.SequencingType;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.lilac.hla.HlaAllele;
 
@@ -72,14 +79,11 @@ public class LilacConfig
     public final String SampleDataDir;
     public final String OutputDir;
 
-    public final MhcClass ClassType;
+    public final Set<GeneSelector> Genes;
 
-    /*
-    public final int MinEvidenceSupport;
-    public final double MinEvidenceFactor;
-    public final double MinHighQualEvidenceFactor;
-    public final int MinDepthFilter;
-    */
+    // global for convenience
+    public static SequencingType SEQUENCING_TYPE = ILLUMINA;
+
     public final double HlaYPercentThreshold;
 
     public final int MinFragmentsPerAllele;
@@ -110,11 +114,11 @@ public class LilacConfig
 
     private static final String SOMATIC_VCF = "somatic_vcf";
     private static final String GENE_COPY_NUMBER = "gene_copy_number";
+    private static final String TARGETED_PANEL = "targeted_panel";
 
-    public static final String MHC_CLASS = "mhc_class";
+    public static final String GENES = "genes";
 
     // constant overrides
-    private static final String MIN_BASE_QUAL = "min_base_qual";
     private static final String MAX_REF_FRAGMENTS = "max_ref_fragments";
     private static final String MIN_EVIDENCE_FACTOR = "min_evidence_factor";
     private static final String MIN_HIGH_QUAL_EVIDENCE_FACTOR = "min_high_qual_evidence_factor";
@@ -196,12 +200,19 @@ public class LilacConfig
 
         ResourceDir = checkAddDirSeparator(configBuilder.getValue(RESOURCE_DIR));
         RefGenome = configBuilder.getValue(REF_GENOME, "");
-
         RefGenVersion = RefGenomeVersion.from(configBuilder);
 
-        ClassType = MhcClass.valueOf(configBuilder.getValue(MHC_CLASS));
+        SEQUENCING_TYPE = SequencingType.valueOf(configBuilder.getValue(SEQUENCING_TYPE_CFG));
 
-        LilacConstants.LOW_BASE_QUAL_THRESHOLD = (byte)configBuilder.getInteger(MIN_BASE_QUAL);
+        if(configBuilder.hasFlag(TARGETED_PANEL) || SEQUENCING_TYPE != ILLUMINA)
+        {
+            // increase rates due to higher variability in coverage or noise
+            LilacConstants.WARN_UNMATCHED_HAPLOTYPE_SUPPORT *= 2;
+            LilacConstants.WARN_INDEL_THRESHOLD *= 2;
+        }
+
+        Genes = GeneSelector.parseArg(configBuilder.getValue(GENES));
+
         LilacConstants.MIN_EVIDENCE_FACTOR = configBuilder.getDecimal(MIN_EVIDENCE_FACTOR);
         LilacConstants.MIN_HIGH_QUAL_EVIDENCE_FACTOR = configBuilder.getDecimal(MIN_HIGH_QUAL_EVIDENCE_FACTOR);
         LilacConstants.MIN_EVIDENCE_SUPPORT = configBuilder.getInteger(MIN_EVIDENCE_SUPPORT);
@@ -235,27 +246,27 @@ public class LilacConfig
             LL_LOGGER.error("failed to create output directory: {}", OutputDir);
             System.exit(1);
         }
+
+        LL_LOGGER.info("writing output to {}", OutputDir);
     }
 
     public boolean tumorOnly() { return ReferenceBam.isEmpty() && !TumorBam.isEmpty(); }
+    public String alleleCallingBam() { return !ReferenceBam.isEmpty() ? ReferenceBam : TumorBam; }
 
     private static String checkFileExists(final String filename)
     {
         return Files.exists(Paths.get(filename)) ? filename : "";
     }
 
-    public String formFileId(final String fileId) { return OutputDir + Sample + LILAC_FILE_ID + fileId; }
+    public String formFileId(final String fileId)
+    {
+        return OutputDir + Sample + LILAC_FILE_ID + fileId;
+    }
 
     public void logParams()
     {
         LL_LOGGER.info("sample({}) inputs: referenceBam({}) tumorBam({}) somaticVCF({}) geneCopyNumber({}) rnaBam({})",
                 Sample, !ReferenceBam.isEmpty(), !TumorBam.isEmpty(), !SomaticVariantsFile.isEmpty(), !CopyNumberFile.isEmpty(), !RnaBam.isEmpty());
-
-        /*
-        LL_LOGGER.info("minBaseQual({}), minEvidence({}) minFragmentsPerAllele({}) "
-                + "minFragmentsToRemoveSingle({}) maxDistanceFromTopScore({})",
-                MinBaseQual, MinEvidence, MinFragmentsPerAllele, MinFragmentsToRemoveSingle, TopScoreThreshold);
-        */
 
         if(RunValidation)
         {
@@ -285,14 +296,14 @@ public class LilacConfig
         RefGenome = "";
         RefGenVersion = V37;
 
-        ClassType = MhcClass.CLASS_1;
+        Genes = Sets.newHashSet(GeneSelector.MHC_CLASS_1);
 
         MaxRefFragments = DEFAULT_MAX_REF_FRAGMENTS;
 
         MinFragmentsPerAllele = DEFAULT_FRAGS_PER_ALLELE;
         MinFragmentsToRemoveSingle = DEFAULT_FRAGS_REMOVE_SGL;
         TopScoreThreshold = DEFAULT_TOP_SCORE_THRESHOLD;
-        FatalTotalLowCoveragePositions = DEFAULT_FATAL_TOTAL_LOW_COVERAGE_POSITIONS;
+        FatalTotalLowCoveragePositions = DEFAULT_FATAL_TOTAL_LOW_COVERAGE_POSITIONS * 2;
         HlaYPercentThreshold = DEFAULT_HLA_Y_FRAGMENT_THRESHOLD;
 
         CopyNumberFile = "";
@@ -321,7 +332,10 @@ public class LilacConfig
 
         registerCommonConfig(configBuilder);
 
-        configBuilder.addInteger(MIN_BASE_QUAL, "Min base quality threshold", DEFAULT_MIN_BASE_QUAL);
+        configBuilder.addConfigItem(GENES, false, "Gene sets to use", ALL_GENES);
+        SequencingType.registerConfig(configBuilder);
+
+        configBuilder.addFlag(TARGETED_PANEL, "Run with targeted panel settings");
         configBuilder.addDecimal(MIN_EVIDENCE_FACTOR, "Min fragment evidence required", DEFAULT_MIN_EVIDENCE_FACTOR);
         configBuilder.addInteger(MAX_REF_FRAGMENTS, "Cap ref fragments in solution search, 0 uses all", DEFAULT_MAX_REF_FRAGMENTS);
         configBuilder.addDecimal(MIN_HIGH_QUAL_EVIDENCE_FACTOR, "Min high-qual fragment evidence factor", DEFAULT_MIN_HIGH_QUAL_EVIDENCE_FACTOR);
@@ -362,8 +376,6 @@ public class LilacConfig
     public static void registerCommonConfig(final ConfigBuilder configBuilder)
     {
         configBuilder.addPath(RESOURCE_DIR, true, "Path to resource files");
-
-        configBuilder.addConfigItem(MHC_CLASS, false, "MHC Class Type", MhcClass.CLASS_1.toString());
     }
 
     private static List<HlaAllele> parseAlleleList(final String allelesStr)
@@ -374,4 +386,8 @@ public class LilacConfig
         String[] alleles = allelesStr.split(ITEM_DELIM, -1);
         return Arrays.stream(alleles).map(HlaAllele::fromString).collect(Collectors.toList());
     }
+
+    public static boolean isIllumina() { return SEQUENCING_TYPE == ILLUMINA; }
+    public static boolean isSbx() { return SEQUENCING_TYPE == SBX; }
+    public static boolean isUltima() { return SEQUENCING_TYPE == ULTIMA; }
 }

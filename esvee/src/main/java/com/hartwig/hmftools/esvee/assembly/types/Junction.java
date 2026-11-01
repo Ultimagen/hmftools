@@ -10,12 +10,16 @@ import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileReaderUtils.createFieldsIndexMap;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.common.CommonUtils.compareJunctions;
+import static com.hartwig.hmftools.esvee.common.FileCommon.FLD_SAGA_MATCH;
+import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_VARIANT_LENGTH;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_EXACT_SUPPORT_FRAGS;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_EXTRA_INFO;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_HOTSPOT_JUNCTION;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_INDEL_JUNCTION;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_JUNCTION_FRAGS;
+import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_MAX_VALID_SC;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_OTHER_SUPPORT_FRAGS;
+import static com.hartwig.hmftools.esvee.prep.PrepConstants.FLD_REMOTE_FRAGS;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -25,11 +29,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.genome.region.Orientation;
 import com.hartwig.hmftools.common.region.SpecificRegions;
 import com.hartwig.hmftools.esvee.common.IndelCoords;
+
+import org.jetbrains.annotations.Nullable;
 
 public class Junction implements Comparable<Junction>
 {
@@ -39,28 +46,31 @@ public class Junction implements Comparable<Junction>
 
     public final boolean DiscordantOnly;
     public final boolean Hotspot;
+    public final int MaxSoftClipLength;
 
     private boolean mIndelBased;
     public final String mDetails;
     private int mRawDiscordantPosition;
     private IndelCoords mIndelCoords; // the consensus indel if applicable
 
-    public Junction(final String chromosome, final int position, final Orientation orientation)
-    {
-        this(chromosome, position, orientation, false, false, false);
-        mRawDiscordantPosition = -1;
-    }
+    private final String mSagaMatchId;
+
+    public static final String INDEL_TYPE = "I";
+    public static final String HOTSPOT_TYPE = "H";
+    public static final String DISCORDANT_TYPE = "D";
 
     public Junction(
             final String chromosome, final int position, final Orientation orientation, final boolean discordantOnly,
-            final boolean indelBased, final boolean hotspot)
+            final boolean indelBased, final boolean hotspot, final int maxSoftClipLength, @Nullable final String sagaMatchId)
     {
         Chromosome = chromosome;
         Position = position;
         Orient = orientation;
         DiscordantOnly = discordantOnly;
-        mIndelBased = indelBased;
         Hotspot = hotspot;
+        MaxSoftClipLength = maxSoftClipLength;
+
+        mIndelBased = indelBased;
 
         if(DiscordantOnly || mIndelBased || Hotspot)
         {
@@ -80,13 +90,15 @@ public class Junction implements Comparable<Junction>
         }
 
         mIndelCoords = null;
+        mSagaMatchId = sagaMatchId;
     }
 
     public boolean isForward() { return Orient.isForward(); }
     public boolean isReverse() { return Orient.isReverse(); }
 
-    public void markAsIndel() { mIndelBased = true; }
+    public void setIndelStatus(boolean isIndel) { mIndelBased = isIndel; }
     public boolean indelBased() { return mIndelBased; }
+    public boolean softClipBased() { return !indelBased() && !DiscordantOnly; }
 
     public void setIndelCoords(final IndelCoords indelCoords) { mIndelCoords = indelCoords; }
     public IndelCoords indelCoords() { return mIndelCoords; }
@@ -98,7 +110,7 @@ public class Junction implements Comparable<Junction>
     {
         if(DiscordantOnly || mIndelBased || Hotspot)
         {
-            return format("%s:%d:%d %s",Chromosome, Position, Orient.asByte(), mDetails);
+            return format("%s:%d:%d %s", Chromosome, Position, Orient.asByte(), mDetails);
         }
 
         return format("%s:%d:%d", Chromosome, Position, Orient.asByte());
@@ -121,6 +133,17 @@ public class Junction implements Comparable<Junction>
     public boolean isLocalMatch(final Junction other)
     {
         return Position == other.Position && Orient == other.Orient;
+    }
+
+    public boolean isSagaMatched()
+    {
+        return mSagaMatchId != null;
+    }
+
+    @Nullable
+    public String sagaMatch()
+    {
+        return mSagaMatchId;
     }
 
     public boolean lower(final Junction other)
@@ -164,11 +187,15 @@ public class Junction implements Comparable<Junction>
             Integer indelIndex = fieldsIndexMap.get(FLD_INDEL_JUNCTION);
             Integer hotspotIndex = fieldsIndexMap.get(FLD_HOTSPOT_JUNCTION);
             Integer extraInfoIndex = fieldsIndexMap.get(FLD_EXTRA_INFO);
+            Integer remoteFragsIndex = fieldsIndexMap.get(FLD_REMOTE_FRAGS);
+            Integer sagaMatchIndex = fieldsIndexMap.get(FLD_SAGA_MATCH);
+            Integer maxScLengthIndex = fieldsIndexMap.get(FLD_MAX_VALID_SC);
 
             List<Junction> junctionDataList = null;
             String currentChromosome = "";
 
             int junctionCount = 0;
+            int rawJunctionCount = 0;
             int discordantCount = 0;
             int indelCount = 0;
             int hotspotCount = 0;
@@ -187,13 +214,19 @@ public class Junction implements Comparable<Junction>
                 if(!specificRegions.includePosition(chromosome, position))
                     continue;
 
+                ++rawJunctionCount;
+
                 int junctionFrags = juncFragsIndex != null ? Integer.parseInt(values[juncFragsIndex]) : 0;
                 int otherJunctionFrags = otherSupportFragsIndex != null ? Integer.parseInt(values[otherJuncFragsIndex]) : 0;
                 int otherSupportFrags = otherSupportFragsIndex != null ? Integer.parseInt(values[otherSupportFragsIndex]) : 0;
+                int maxSoftClipLength = maxScLengthIndex != null ? Integer.parseInt(values[maxScLengthIndex]) : MIN_VARIANT_LENGTH;
 
                 boolean discordantOnly = junctionFrags == 0 && otherSupportFrags > 0;
                 boolean indel = indelIndex != null && Boolean.parseBoolean(values[indelIndex]);
                 boolean hotspot = hotspotIndex != null && Boolean.parseBoolean(values[hotspotIndex]);
+
+                // the first part is the variant ID, the second part is the breakends which isn't needed
+                String sagaMatchVariant = sagaMatchIndex != null ? values[sagaMatchIndex].split(" ")[0] : null;
 
                 if(hotspot)
                 {
@@ -204,7 +237,12 @@ public class Junction implements Comparable<Junction>
                 }
                 else if(discordantOnly)
                 {
-                    int maxRemoteFrags = extraInfoIndex != null ? Integer.parseInt(values[extraInfoIndex]) : otherSupportFrags;
+                    int maxRemoteFrags = otherSupportFrags;
+
+                    if(remoteFragsIndex != null)
+                        maxRemoteFrags = Integer.parseInt(values[remoteFragsIndex]);
+                    else if(extraInfoIndex != null)
+                        maxRemoteFrags = Integer.parseInt(values[extraInfoIndex]); // for v2.0 backwards compatibility
 
                     if(maxRemoteFrags < minDiscordantFrags)
                         continue;
@@ -227,13 +265,14 @@ public class Junction implements Comparable<Junction>
                     chrJunctionsMap.put(chromosome, junctionDataList);
                 }
 
-                junctionDataList.add(new Junction(chromosome, position, orientation, discordantOnly, indel, hotspot));
+                junctionDataList.add(new Junction(
+                        chromosome, position, orientation, discordantOnly, indel, hotspot, maxSoftClipLength, sagaMatchVariant));
                 ++junctionCount;
             }
 
-            int splitCount = junctionCount - discordantCount;
-            SV_LOGGER.info("loaded {} junctions, types(split={} discordant={} indel={} hotspot={}) from file: {}",
-                    junctionCount, splitCount, discordantCount, indelCount, hotspotCount, filename);
+            int splitCount = junctionCount - discordantCount - indelCount;
+            SV_LOGGER.info("loaded junctions({} raw={}) types(split={} indel={} discordant={} hotspot={}) from file: {}",
+                    junctionCount, rawJunctionCount, splitCount, indelCount, discordantCount, hotspotCount, filename);
 
             chrJunctionsMap.values().forEach(x -> Collections.sort(x));
 
@@ -258,16 +297,22 @@ public class Junction implements Comparable<Junction>
 
         boolean discordantOnly = false;
         boolean indelBased = false;
+        boolean hotspot = false;
 
         if(values.length >= 4)
         {
-            if(values[3].equals("D"))
+            if(values[3].equals(DISCORDANT_TYPE))
                 discordantOnly = true;
-            else if(values[3].equals("I"))
+            else if(values[3].equals(INDEL_TYPE))
                 indelBased = true;
         }
 
-        return new Junction(chromosome, position, orientation, discordantOnly, indelBased, false);
+        if(values.length >= 5 && values[4].equals(HOTSPOT_TYPE))
+        {
+            hotspot = true;
+        }
+
+        return new Junction(chromosome, position, orientation, discordantOnly, indelBased, hotspot, MIN_VARIANT_LENGTH, null);
     }
 
     public static void mergeJunctions(final Map<String,List<Junction>> existingMap, final Map<String,List<Junction>> newMap)
@@ -396,5 +441,13 @@ public class Junction implements Comparable<Junction>
         }
 
         return true;
+    }
+
+    // could also move to test utils so it's clearer this isn't a valid assembly constructor
+    @VisibleForTesting
+    public Junction(final String chromosome, final int position, final Orientation orientation)
+    {
+        this(chromosome, position, orientation, false, false, false, MIN_VARIANT_LENGTH, null);
+        mRawDiscordantPosition = -1;
     }
 }

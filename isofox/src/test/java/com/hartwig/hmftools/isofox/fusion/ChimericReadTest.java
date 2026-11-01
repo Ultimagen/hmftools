@@ -22,6 +22,7 @@ import static com.hartwig.hmftools.isofox.TestUtils.createIsofoxConfig;
 import static com.hartwig.hmftools.isofox.TestUtils.createMappedRead;
 import static com.hartwig.hmftools.isofox.TestUtils.createReadRecord;
 import static com.hartwig.hmftools.isofox.TestUtils.createRegion;
+import static com.hartwig.hmftools.isofox.common.ReadTranscriptUtils.processOverlappingRegions;
 import static com.hartwig.hmftools.isofox.common.TransMatchType.ALT;
 import static com.hartwig.hmftools.isofox.common.TransMatchType.SPLICE_JUNCTION;
 
@@ -40,7 +41,7 @@ import com.hartwig.hmftools.isofox.IsofoxConfig;
 import com.hartwig.hmftools.isofox.common.BaseDepth;
 import com.hartwig.hmftools.isofox.common.FragmentTracker;
 import com.hartwig.hmftools.isofox.common.GeneCollection;
-import com.hartwig.hmftools.isofox.common.ReadRecord;
+import com.hartwig.hmftools.isofox.common.Read;
 import com.hartwig.hmftools.isofox.common.RegionReadData;
 
 import org.junit.Test;
@@ -50,14 +51,14 @@ public class ChimericReadTest
     @Test
     public void testBasicReads()
     {
-        final EnsemblDataCache geneTransCache = createGeneDataCache();
+        EnsemblDataCache geneTransCache = createGeneDataCache();
 
         addTestGenes(geneTransCache);
         addTestTranscripts(geneTransCache);
 
         int gcId = 0;
 
-        final GeneCollection gc1 =
+        GeneCollection gc1 =
                 createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_1)));
 
         IsofoxConfig config = createIsofoxConfig();
@@ -72,23 +73,23 @@ public class ChimericReadTest
 
         // chimeric read pair (eg a BND)
         int readId = 0;
-        ReadRecord read1 = createMappedRead(readId, gc1, 1050, 1089, createCigar(0, 40, 0));
+        Read read1 = createMappedRead(readId, gc1, 1050, 1089, createCigar(0, 40, 0));
         read1.setFlag(FIRST_OF_PAIR, true);
-        ReadRecord read2 = createMappedRead(readId, gc1, 1081, 1100, createCigar(0, 20, 20));
+        Read read2 = createMappedRead(readId, gc1, 1081, 1100, createCigar(0, 20, 20));
         read2.setSuppAlignment(TEST_SUPP_DATA);
 
         chimericRT.addChimericReadPair(read1, read2);
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertEquals(1, chimericRT.getReadMap().size());
-        assertEquals(2, chimericRT.getReadMap().get(read1.Id).size());
+        assertEquals(1, chimericRT.fusionReadGroupMap().size());
+        assertEquals(2, chimericRT.fusionReadGroupMap().get(read1.id()).size());
         assertEquals(1, chimericRT.getJunctionRacGroups().junctionCount());
         assertTrue(chimericRT.getJunctionRacGroups().getJunctionGroups(ORIENT_FWD).containsKey(1100));
 
         // single read in this gene
-        chimericRT.clear();
+        chimericRT.clearData();
 
-        ReadRecord read3 = createMappedRead(++readId, gc1, 1081, 1100, createCigar(0, 20, 20));
+        Read read3 = createMappedRead(++readId, gc1, 1081, 1100, createCigar(0, 20, 20));
         read3.setSuppAlignment(TEST_SUPP_DATA);
         fragTracker.checkRead(read3);
 
@@ -101,7 +102,7 @@ public class ChimericReadTest
 
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertEquals(1, chimericRT.getReadMap().size());
+        assertEquals(1, chimericRT.fusionReadGroupMap().size());
         assertEquals(1, chimericRT.getJunctionRacGroups().fragmentCount());
         assertEquals(1, chimericRT.getJunctionRacGroups().junctionCount());
         assertTrue(chimericRT.getJunctionRacGroups().getJunctionGroups(ORIENT_FWD).containsKey(1100));
@@ -112,7 +113,7 @@ public class ChimericReadTest
     @Test
     public void testSameGeneCollection()
     {
-        final EnsemblDataCache geneTransCache = createGeneDataCache();
+        EnsemblDataCache geneTransCache = createGeneDataCache();
 
         addTestGenes(geneTransCache);
         addTestTranscripts(geneTransCache);
@@ -123,7 +124,7 @@ public class ChimericReadTest
         List<GeneData> geneDataList = Lists.newArrayList(
                 geneTransCache.getGeneDataById(GENE_ID_1), geneTransCache.getGeneDataById(GENE_ID_2));
 
-        final GeneCollection gc1 = createGeneCollection(geneTransCache, gcId++, geneDataList);
+        GeneCollection gc1 = createGeneCollection(geneTransCache, gcId++, geneDataList);
 
         IsofoxConfig config = createIsofoxConfig();
         config.Functions.add(FUSIONS);
@@ -137,19 +138,19 @@ public class ChimericReadTest
 
         // DEL only covering 1 gene isn't considered chimeric
         int readId = 0;
-        ReadRecord read1 = createMappedRead(readId, gc1, 1081, 1100, createCigar(0, 20, 20));
+        Read read1 = createMappedRead(readId, gc1, 1081, 1100, createCigar(0, 20, 20));
         read1.setFlag(FIRST_OF_PAIR, true);
-        ReadRecord read2 = createMappedRead(readId, gc1, 1500, 1519, createCigar(20, 20, 0));
+        Read read2 = createMappedRead(readId, gc1, 1500, 1519, createCigar(20, 20, 0));
         read2.setStrand(true, false);
 
         chimericRT.addChimericReadPair(read1, read2);
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertTrue(chimericRT.getReadMap().isEmpty());
+        assertTrue(chimericRT.fusionReadGroupMap().isEmpty());
         assertEquals(1, chimericRT.getLocalChimericReads().size());
         assertTrue(chimericRT.getJunctionRacGroups().junctionCount() == 0);
 
-        chimericRT.clear();
+        chimericRT.clearData();
 
         // DEL linking 2 genes at known splice sites is considered chimeric
         read1 = createMappedRead(++readId, gc1, 1081, 10419, createCigar(0, 20, 9299, 20, 0));
@@ -162,12 +163,12 @@ public class ChimericReadTest
         chimericRT.addChimericReadPair(read1, read2);
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertEquals(1, chimericRT.getReadMap().size());
+        assertEquals(1, chimericRT.fusionReadGroupMap().size());
         assertEquals(2, chimericRT.getJunctionRacGroups().junctionCount());
         assertTrue(chimericRT.getJunctionRacGroups().getJunctionGroups(ORIENT_FWD).containsKey(1100));
         assertTrue(chimericRT.getJunctionRacGroups().getJunctionGroups(ORIENT_REV).containsKey(10400));
 
-        chimericRT.clear();
+        chimericRT.clearData();
         chimericRT.getJunctionRacGroups().clear(); // force a clean-up
 
         // this DEL doesn't splice at known sites
@@ -179,17 +180,17 @@ public class ChimericReadTest
         chimericRT.addChimericReadPair(read1, read2);
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertTrue(chimericRT.getReadMap().isEmpty());
+        assertTrue(chimericRT.fusionReadGroupMap().isEmpty());
         assertEquals(1, chimericRT.getLocalChimericReads().size());
         assertEquals(0, chimericRT.getJunctionRacGroups().junctionCount());
 
-        chimericRT.clear();
+        chimericRT.clearData();
 
         // unless the junction could be explained by a single gene, as is the case for 10500 below
         geneDataList = Lists.newArrayList(
                 geneTransCache.getGeneDataById(GENE_ID_5), geneTransCache.getGeneDataById(GENE_ID_6));
 
-        final GeneCollection gc2 = createGeneCollection(geneTransCache, gcId++, geneDataList);
+        GeneCollection gc2 = createGeneCollection(geneTransCache, gcId++, geneDataList);
 
         read1 = createMappedRead(++readId, gc2, 10481, 10500, createCigar(0, 20, 20));
         read1.setFlag(FIRST_OF_PAIR, true);
@@ -201,14 +202,14 @@ public class ChimericReadTest
         chimericRT.addChimericReadPair(read1, read2);
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertTrue(chimericRT.getReadMap().isEmpty());
+        assertTrue(chimericRT.fusionReadGroupMap().isEmpty());
         assertEquals(1, chimericRT.getLocalChimericReads().size());
         assertTrue(chimericRT.getJunctionRacGroups().junctionCount() == 0);
 
-        chimericRT.clear();
+        chimericRT.clearData();
 
         // a DEL more than 500K from the gene boundary is considered chimeric
-        int geneEnd = gc2.genes().stream().mapToInt(x -> x.GeneData.GeneEnd).max().orElse(0);
+        int geneEnd = gc2.genes().stream().mapToInt(x -> x.Gene.GeneEnd).max().orElse(0);
         int chimericJunc = geneEnd + MAX_NOVEL_SJ_DISTANCE + 1; // 511501
         read1 = createMappedRead(
                 ++readId, gc2, 10481, chimericJunc + 19,
@@ -225,7 +226,7 @@ public class ChimericReadTest
         chimericRT.addChimericReadPair(read1, read2);
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertEquals(1, chimericRT.getReadMap().size());
+        assertEquals(1, chimericRT.fusionReadGroupMap().size());
         assertEquals(2, chimericRT.getJunctionRacGroups().junctionCount());
         assertTrue(chimericRT.getJunctionRacGroups().getJunctionGroups(ORIENT_FWD).containsKey(10500));
         assertTrue(chimericRT.getJunctionRacGroups().getJunctionGroups(ORIENT_REV).containsKey(chimericJunc));
@@ -235,15 +236,15 @@ public class ChimericReadTest
     public void testPrePosGeneReads()
     {
         // 2 gene collections, testing reads before, inside and after the genes
-        final EnsemblDataCache geneTransCache = createGeneDataCache();
+        EnsemblDataCache geneTransCache = createGeneDataCache();
 
         addTestGenes(geneTransCache);
         addTestTranscripts(geneTransCache);
 
         int gcId = 0;
 
-        final GeneCollection gc1 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_1)));
-        final GeneCollection gc2 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_2)));
+        GeneCollection gc1 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_1)));
+        GeneCollection gc2 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_2)));
 
         IsofoxConfig config = createIsofoxConfig();
         config.Functions.add(FUSIONS);
@@ -257,51 +258,51 @@ public class ChimericReadTest
 
         // pre and post reads are discarded since they don't affect the gene
         int readId = 0;
-        ReadRecord read1 = createMappedRead(readId, gc1, 481, 500, createCigar(0, 20, 20));
+        Read read1 = createMappedRead(readId, gc1, 481, 500, createCigar(0, 20, 20));
         read1.setFlag(FIRST_OF_PAIR, true);
-        ReadRecord read2 = createMappedRead(readId, gc1, 2000, 2019, createCigar(20, 20, 0));
+        Read read2 = createMappedRead(readId, gc1, 2000, 2019, createCigar(20, 20, 0));
         read2.setStrand(true, false);
 
         chimericRT.addChimericReadPair(read1, read2);
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertTrue(chimericRT.getReadMap().isEmpty());
+        assertTrue(chimericRT.fusionReadGroupMap().isEmpty());
         assertTrue(chimericRT.getLocalChimericReads().isEmpty());
         assertTrue(chimericRT.getJunctionRacGroups().junctionCount() == 0);
-        chimericRT.clear();
+        chimericRT.clearData();
 
         chimericRT.initialise(gc2);
         baseDepth.initialise(gc2.regionBounds());
         fragTracker.checkRead(read2);
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertTrue(chimericRT.getReadMap().isEmpty());
+        assertTrue(chimericRT.fusionReadGroupMap().isEmpty());
         assertTrue(chimericRT.getLocalChimericReads().isEmpty());
         assertTrue(chimericRT.getJunctionRacGroups().junctionCount() == 0);
 
         // pre and post gene reads are kept if relating to other genes / have supp alignments
-        chimericRT.clear();
+        chimericRT.clearData();
         fragTracker.clear();
         chimericRT.initialise(gc1);
         baseDepth.initialise(gc1.regionBounds());
 
         read1 = createMappedRead(++readId, gc1, 481, 500, createCigar(0, 20, 20));
         read1.setFlag(FIRST_OF_PAIR, true);
-        read1.setSuppAlignment("supp");
+        read1.setSuppAlignment(TEST_SUPP_DATA);
 
         read2 = createMappedRead(++readId, gc1, 2000, 2019, createCigar(20, 20, 0));
         read2.setStrand(true, false);
-        read2.setSuppAlignment("supp");
+        read2.setSuppAlignment(TEST_SUPP_DATA);
 
         // these post-gene reads will be skipped in this gene collection
-        ReadRecord read3 = createMappedRead(readId, gc1, 2010, 2049, createCigar(0, 40, 0));
+        Read read3 = createMappedRead(readId, gc1, 2010, 2049, createCigar(0, 40, 0));
 
         // will also be skipped since relates to next gene collection
-        ReadRecord read4 = createMappedRead(++readId, gc1, 2000, 2019, createCigar(20, 20, 0));
+        Read read4 = createMappedRead(++readId, gc1, 2000, 2019, createCigar(20, 20, 0));
 
         // will be processed (as local alt-SJ candidates) and the post gene read cached so as not to handle again in gc2
-        ReadRecord read5 = createMappedRead(++readId, gc1, 1081, 1100, createCigar(0, 20, 20));
-        ReadRecord read6 = createMappedRead(readId, gc1, 2100, 2119, createCigar(20, 20, 0));
+        Read read5 = createMappedRead(++readId, gc1, 1081, 1100, createCigar(0, 20, 20));
+        Read read6 = createMappedRead(readId, gc1, 2100, 2119, createCigar(20, 20, 0));
 
         fragTracker.checkRead(read1);
         fragTracker.checkRead(read4);
@@ -310,11 +311,11 @@ public class ChimericReadTest
 
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertEquals(1, chimericRT.getReadMap().size());
-        assertTrue(chimericRT.getReadMap().containsKey(read1.Id));
-        assertFalse(chimericRT.getReadMap().containsKey(read2.Id));
-        assertFalse(chimericRT.getReadMap().containsKey(read4.Id));
-        assertFalse(chimericRT.getReadMap().containsKey(read5.Id));
+        assertEquals(1, chimericRT.fusionReadGroupMap().size());
+        assertTrue(chimericRT.fusionReadGroupMap().containsKey(read1.id()));
+        assertFalse(chimericRT.fusionReadGroupMap().containsKey(read2.id()));
+        assertFalse(chimericRT.fusionReadGroupMap().containsKey(read4.id()));
+        assertFalse(chimericRT.fusionReadGroupMap().containsKey(read5.id()));
 
         assertEquals(1, chimericRT.getLocalChimericReads().size());
         assertTrue(chimericRT.getLocalChimericReads().get(0).contains(read5));
@@ -322,7 +323,7 @@ public class ChimericReadTest
         assertTrue(chimericRT.getJunctionRacGroups().getJunctionGroups(ORIENT_FWD).containsKey(500));
         assertFalse(chimericRT.getJunctionRacGroups().getJunctionGroups(ORIENT_REV).containsKey(2000));
 
-        chimericRT.clear();
+        chimericRT.clearData();
         fragTracker.clear();
         chimericRT.initialise(gc2);
         baseDepth.initialise(gc2.regionBounds());
@@ -333,25 +334,25 @@ public class ChimericReadTest
 
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertEquals(2, chimericRT.getReadMap().size());
-        assertTrue(chimericRT.getReadMap().containsKey(read2.Id));
-        assertTrue(chimericRT.getReadMap().containsKey(read4.Id));
+        assertEquals(2, chimericRT.fusionReadGroupMap().size());
+        assertTrue(chimericRT.fusionReadGroupMap().containsKey(read2.id()));
+        assertTrue(chimericRT.fusionReadGroupMap().containsKey(read4.id()));
         assertTrue(chimericRT.getLocalChimericReads().isEmpty());
     }
 
     @Test
     public void testJunctionPositionTracking()
     {
-        final EnsemblDataCache geneTransCache = createGeneDataCache();
+        EnsemblDataCache geneTransCache = createGeneDataCache();
 
         addTestGenes(geneTransCache);
         addTestTranscripts(geneTransCache);
 
         int gcId = 0;
 
-        final GeneCollection gc1 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_1)));
-        final GeneCollection gc2 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_2)));
-        final GeneCollection gc3 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_3)));
+        GeneCollection gc1 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_1)));
+        GeneCollection gc2 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_2)));
+        GeneCollection gc3 = createGeneCollection(geneTransCache, gcId++, Lists.newArrayList(geneTransCache.getGeneDataById(GENE_ID_3)));
 
         IsofoxConfig config = createIsofoxConfig();
         config.Functions.add(FUSIONS);
@@ -366,10 +367,10 @@ public class ChimericReadTest
         int readId = 0;
 
         // a split read between the first and second genes
-        ReadRecord read1 = createMappedRead(readId, gc1, 1081, 10219, createCigar(0, 20, 9100, 20, 0));
+        Read read1 = createMappedRead(readId, gc1, 1081, 10219, createCigar(0, 20, 9100, 20, 0));
         read1.setFlag(FIRST_OF_PAIR, true);
         // read1.setGeneCollection(SE_END, gc2.id(), true);
-        ReadRecord read2 = createMappedRead(readId, gc1, 1050, 1089, createCigar(0, 40, 0));
+        Read read2 = createMappedRead(readId, gc1, 1050, 1089, createCigar(0, 40, 0));
         read2.setStrand(true, false);
 
         chimericRT.addChimericReadPair(read1, read2);
@@ -392,10 +393,10 @@ public class ChimericReadTest
 
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertEquals(2, chimericRT.getReadMap().size());
+        assertEquals(2, chimericRT.fusionReadGroupMap().size());
         assertEquals(4, chimericRT.getJunctionRacGroups().junctionCount());
 
-        chimericRT.clear();
+        chimericRT.clearData();
         chimericRT.initialise(gc2);
         baseDepth.initialise(gc2.regionBounds());
 
@@ -409,11 +410,11 @@ public class ChimericReadTest
 
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertEquals(0, chimericRT.getReadMap().size());
+        assertEquals(0, chimericRT.fusionReadGroupMap().size());
         assertEquals(0, chimericRT.getJunctionRacGroups().junctionCount());
 
         // same again with the 3rd gene
-        chimericRT.clear();
+        chimericRT.clearData();
         chimericRT.initialise(gc3);
         baseDepth.initialise(gc3.regionBounds());
 
@@ -426,7 +427,7 @@ public class ChimericReadTest
 
         chimericRT.postProcessChimericReads(baseDepth, fragTracker);
 
-        assertEquals(0, chimericRT.getReadMap().size());
+        assertEquals(0, chimericRT.fusionReadGroupMap().size());
         assertEquals(0, chimericRT.getJunctionRacGroups().junctionCount());
     }
 
@@ -453,23 +454,23 @@ public class ChimericReadTest
         region4.addPostRegion(region5);
         region5.addPreRegion(region4);
 
-        ReadRecord read = createReadRecord(1, CHR_1, 391, 409, REF_BASE_STR_1,
+        Read read = createReadRecord(1, CHR_1, 391, 409, REF_BASE_STR_1,
                 createCigar(0, 10, 99, 10, 0));
 
         List<RegionReadData> allRegions = Lists.newArrayList(region1, region2, region3, region4, region5);
-        read.processOverlappingRegions(ReadRecord.findOverlappingRegions(allRegions, read));
+        processOverlappingRegions(read, Read.findOverlappingRegions(allRegions, read));
 
         assertEquals(SPLICE_JUNCTION, read.getTranscriptClassification(trans1));
         assertEquals(SPLICE_JUNCTION, read.getTranscriptClassification(trans2));
 
-        final List<String[]> knownPairGeneIds = Lists.newArrayList();
+        List<String[]> knownPairGeneIds = Lists.newArrayList();
         assertFalse(ChimericUtils.setHasMultipleKnownSpliceGenes(Lists.newArrayList(read), knownPairGeneIds));
 
         // now a ready which doesn't support any known junction but is still within just one gene
         read = createReadRecord(1, CHR_1, 191, 509, REF_BASE_STR_1,
                 createCigar(0, 10, 299, 10, 0));
 
-        read.processOverlappingRegions(ReadRecord.findOverlappingRegions(allRegions, read));
+        processOverlappingRegions(read, Read.findOverlappingRegions(allRegions, read));
         assertEquals(ALT, read.getTranscriptClassification(trans1));
 
         assertFalse(ChimericUtils.setHasMultipleKnownSpliceGenes(Lists.newArrayList(read), knownPairGeneIds));

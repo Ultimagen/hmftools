@@ -94,12 +94,6 @@ public class BaseRegion implements Cloneable, Comparable<BaseRegion>
         return positionsWithin(region.start(), region.end(), mStart, mEnd);
     }
 
-    public boolean containsRegion(final ChrBaseRegion region)
-    {
-        // assumes chromosome check is not relevant
-        return positionsWithin(region.start(), region.end(), mStart, mEnd);
-    }
-
     public boolean containsPosition(int position)
     {
         return positionWithin(position, start(), end());
@@ -192,12 +186,12 @@ public class BaseRegion implements Cloneable, Comparable<BaseRegion>
         return (innerStart <= innerEnd && innerStart >= outerStart && innerEnd <= outerEnd);
     }
 
-    public static void checkMergeOverlaps(final List<BaseRegion> regions)
+    public static <R extends BaseRegion> void checkMergeOverlaps(final List<R> regions)
     {
         checkMergeOverlaps(regions, true);
     }
 
-    public static void checkMergeOverlaps(final List<BaseRegion> regions, boolean checkSorted)
+    public static <R extends BaseRegion> void checkMergeOverlaps(final List<R> regions, boolean checkSorted)
     {
         if(checkSorted)
         {
@@ -208,8 +202,8 @@ public class BaseRegion implements Cloneable, Comparable<BaseRegion>
         int index = 0;
         while(index < regions.size() - 1)
         {
-            BaseRegion region = regions.get(index);
-            BaseRegion nextRegion = regions.get(index + 1);
+            R region = regions.get(index);
+            R nextRegion = regions.get(index + 1);
 
             if(region.end() >= nextRegion.start() - 2)
             {

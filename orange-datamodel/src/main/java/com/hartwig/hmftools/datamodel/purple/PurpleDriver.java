@@ -1,5 +1,9 @@
 package com.hartwig.hmftools.datamodel.purple;
 
+import com.hartwig.hmftools.datamodel.driver.DriverCategory;
+import com.hartwig.hmftools.datamodel.driver.DriverInterpretation;
+import com.hartwig.hmftools.datamodel.driver.ReportedStatus;
+
 import org.immutables.gson.Gson;
 import org.immutables.value.Value;
 import org.jetbrains.annotations.NotNull;
@@ -24,5 +28,14 @@ public interface PurpleDriver
     @NotNull
     PurpleLikelihoodMethod likelihoodMethod();
 
+    @NotNull
+    ReportedStatus reportedStatus();
+
+    @NotNull
+    DriverInterpretation driverInterpretation();
+
     boolean isCanonical();
+
+    @NotNull
+    DriverCategory category();
 }

@@ -2,12 +2,15 @@ package com.hartwig.hmftools.common.driver.panel;
 
 import static com.hartwig.hmftools.common.driver.panel.DriverGeneGermlineReporting.ANY;
 import static com.hartwig.hmftools.common.driver.panel.DriverGeneGermlineReporting.NONE;
+import static com.hartwig.hmftools.common.purple.PurpleCommon.DEFAULT_DRIVER_AMPLIFICATION_PLOIDY_RATIO;
+import static com.hartwig.hmftools.common.purple.PurpleCommon.DEFAULT_DRIVER_HET_DELETION_THRESHOLD;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileReaderUtils.createFieldsIndexMap;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -17,28 +20,56 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.driver.DriverCategory;
 
-import org.jetbrains.annotations.NotNull;
-
 public final class DriverGeneFile
 {
     private static final String OTHER_TRANS_DELIM = ";";
 
     private DriverGeneFile() {}
 
-    public static void write(@NotNull final String filename, @NotNull final List<DriverGene> driverGenes) throws IOException
+    public static void write(final String filename, final List<DriverGene> driverGenes) throws IOException
     {
         List<DriverGene> sorted = Lists.newArrayList(driverGenes);
         Files.write(new File(filename).toPath(), toLines(sorted));
     }
 
-    @NotNull
-    public static List<DriverGene> read(@NotNull final String filename) throws IOException
+    public static List<DriverGene> read(final String filename) throws IOException
     {
-        return fromLines(Files.readAllLines(new File(filename).toPath()));
+        return read(new File(filename).toPath());
     }
 
-    @NotNull
-    public static List<DriverGene> fromLines(@NotNull final List<String> lines)
+    public static List<DriverGene> read(final Path path) throws IOException
+    {
+        return fromLines(Files.readAllLines(path));
+    }
+
+    private enum Columns
+    {
+        gene,
+        reportMissense,
+        reportNonsense,
+        reportSplice,
+        reportDeletion,
+        reportHetDeletion,
+        reportLoh,
+        hetDeletionThreshold,
+        reportDisruption,
+        reportAmplification,
+        amplificationRatio,
+        reportSomaticHotspot,
+        likelihoodType,
+        reportGermlineVariant,
+        reportGermlineHotspot,
+        reportGermlineDisruption,
+        reportGermlineDeletion,
+        reportGermlineAmplification,
+        additionalReportedTranscripts,
+        reportPGX,
+        reportHighExpression,
+        reportLowExpression,
+        reportNovelSpliceJunction;
+    }
+
+    public static List<DriverGene> fromLines(final List<String> lines)
     {
         List<DriverGene> driverGenes = Lists.newArrayList();
 
@@ -46,26 +77,32 @@ public final class DriverGeneFile
         Map<String,Integer> fieldsIndexMap = createFieldsIndexMap(header, TSV_DELIM);
         lines.remove(0);
 
-        int geneIndex = fieldsIndexMap.get("gene");
-        int missenseIndex = fieldsIndexMap.get("reportMissense");
-        int nonsenseIndex = fieldsIndexMap.get("reportNonsense");
-        int spliceIndex = fieldsIndexMap.get("reportSplice");
-        int deletionIndex = fieldsIndexMap.get("reportDeletion");
-        int disruptionIndex = fieldsIndexMap.get("reportDisruption");
-        int amplificationIndex = fieldsIndexMap.get("reportAmplification");
+        int geneIndex = fieldsIndexMap.get(Columns.gene.toString());
+        int missenseIndex = fieldsIndexMap.get(Columns.reportMissense.toString());
+        int nonsenseIndex = fieldsIndexMap.get(Columns.reportNonsense.toString());
+        int spliceIndex = fieldsIndexMap.get(Columns.reportSplice.toString());
+        int deletionIndex = fieldsIndexMap.get(Columns.reportDeletion.toString());
+        Integer hetDelIndex = fieldsIndexMap.get(Columns.reportHetDeletion.toString());
+        Integer lohIndex = fieldsIndexMap.get(Columns.reportLoh.toString());
+        Integer hetDelThresholdIndex = fieldsIndexMap.get(Columns.hetDeletionThreshold.toString());
+        int disruptionIndex = fieldsIndexMap.get(Columns.reportDisruption.toString());
+        int amplificationIndex = fieldsIndexMap.get(Columns.reportAmplification.toString());
+        Integer ampRatioIndex = fieldsIndexMap.get(Columns.amplificationRatio.toString());
 
-        int somaticHotspotIndex = fieldsIndexMap.containsKey("reportSomaticHotspot") ?
-                fieldsIndexMap.get("reportSomaticHotspot") : fieldsIndexMap.get("reportHotspot"); // for older files
+        int somaticHotspotIndex = fieldsIndexMap.get(Columns.reportSomaticHotspot.toString());
 
-        int likelihoodTypeIndex = fieldsIndexMap.get("likelihoodType");
-        int germlineVariantIndex = fieldsIndexMap.get("reportGermlineVariant");
-        int germlineHotspotIndex = fieldsIndexMap.get("reportGermlineHotspot");
-        int germlineDisruptionIndex = fieldsIndexMap.get("reportGermlineDisruption");
+        int likelihoodTypeIndex = fieldsIndexMap.get(Columns.likelihoodType.toString());
+        int germlineVariantIndex = fieldsIndexMap.get(Columns.reportGermlineVariant.toString());
+        int germlineHotspotIndex = fieldsIndexMap.get(Columns.reportGermlineHotspot.toString());
+        int germlineDisruptionIndex = fieldsIndexMap.get(Columns.reportGermlineDisruption.toString());
+        int germlineDeletionIndex = fieldsIndexMap.get(Columns.reportGermlineDeletion.toString());
+        Integer germlineAmpIndex = fieldsIndexMap.get(Columns.reportGermlineAmplification.toString());
+        int altTransIndex = fieldsIndexMap.get(Columns.additionalReportedTranscripts.toString());
+        int reportPGXIndex = fieldsIndexMap.get(Columns.reportPGX.toString());
 
-        Integer germlineDeletionIndex = fieldsIndexMap.get("reportGermlineDeletion");
-
-        int altTransIndex = fieldsIndexMap.get("additionalReportedTranscripts");
-        Integer reportPGXIndex = fieldsIndexMap.get("reportPGX");
+        Integer rnaExpLowIndex = fieldsIndexMap.get(Columns.reportLowExpression.toString());
+        Integer rnaExpHighIndex = fieldsIndexMap.get(Columns.reportHighExpression.toString());
+        Integer rnaNovelSjIndex = fieldsIndexMap.get(Columns.reportNovelSpliceJunction.toString());
 
         ImmutableDriverGene.Builder builder = ImmutableDriverGene.builder();
 
@@ -88,24 +125,33 @@ public final class DriverGeneFile
             else
                 reportGermlineDisruption = DriverGeneGermlineReporting.valueOf(reportGermlineDisruptionStr);
 
-            DriverGeneGermlineReporting reportGermlineDeletion = germlineDeletionIndex != null ?
-                    DriverGeneGermlineReporting.valueOf(values[germlineDeletionIndex]) : reportGermlineDisruption;
+            DriverGeneGermlineReporting reportGermlineDeletion = DriverGeneGermlineReporting.valueOf(values[germlineDeletionIndex]);
 
             builder.gene(values[geneIndex])
                     .reportMissenseAndInframe(Boolean.parseBoolean(values[missenseIndex]))
                     .reportNonsenseAndFrameshift(Boolean.parseBoolean(values[nonsenseIndex]))
                     .reportSplice(Boolean.parseBoolean(values[spliceIndex]))
                     .reportDeletion(Boolean.parseBoolean(values[deletionIndex]))
+                    .reportHetDeletion(hetDelIndex != null ? Boolean.parseBoolean(values[hetDelIndex]) : false)
+                    .reportLoh(lohIndex != null ? Boolean.parseBoolean(values[lohIndex]) : false)
+                    .hetDeletionThreshold(hetDelThresholdIndex != null ?
+                            Double.parseDouble(values[hetDelThresholdIndex]) : DEFAULT_DRIVER_HET_DELETION_THRESHOLD)
                     .reportDisruption(Boolean.parseBoolean(values[disruptionIndex]))
                     .reportAmplification(Boolean.parseBoolean(values[amplificationIndex]))
+                    .amplificationRatio(ampRatioIndex != null ?
+                            Double.parseDouble(values[ampRatioIndex]) : DEFAULT_DRIVER_AMPLIFICATION_PLOIDY_RATIO)
                     .reportSomaticHotspot(Boolean.parseBoolean(values[somaticHotspotIndex]))
                     .likelihoodType(DriverCategory.valueOf(values[likelihoodTypeIndex]))
                     .reportGermlineVariant(DriverGeneGermlineReporting.valueOf(values[germlineVariantIndex].toUpperCase()))
                     .reportGermlineHotspot(DriverGeneGermlineReporting.valueOf(values[germlineHotspotIndex].toUpperCase()))
                     .reportGermlineDisruption(reportGermlineDisruption)
                     .reportGermlineDeletion(reportGermlineDeletion)
+                    .reportGermlineAmplification(germlineAmpIndex != null ? Boolean.parseBoolean(values[germlineAmpIndex]) : false)
                     .additionalReportedTranscripts(otherReportableTrans)
-                    .reportPGX(reportPGXIndex != null ? Boolean.parseBoolean(values[reportPGXIndex]) : false);
+                    .reportPGX(Boolean.parseBoolean(values[reportPGXIndex]))
+                    .reportLowExpression(rnaExpLowIndex != null ? Boolean.parseBoolean(values[rnaExpLowIndex]) : false)
+                    .reportHighExpression(rnaExpHighIndex != null ? Boolean.parseBoolean(values[rnaExpHighIndex]) : false)
+                    .reportNovelSpliceJunction(rnaNovelSjIndex != null ? Boolean.parseBoolean(values[rnaNovelSjIndex]) : false);
 
             driverGenes.add(builder.build());
         }
@@ -125,22 +171,14 @@ public final class DriverGeneFile
 
     private static String header()
     {
-        return new StringJoiner(TSV_DELIM).add("gene")
-                .add("reportMissense")
-                .add("reportNonsense")
-                .add("reportSplice")
-                .add("reportDeletion")
-                .add("reportDisruption")
-                .add("reportAmplification")
-                .add("reportSomaticHotspot")
-                .add("likelihoodType")
-                .add("reportGermlineVariant")
-                .add("reportGermlineHotspot")
-                .add("reportGermlineDisruption")
-                .add("reportGermlineDeletion")
-                .add("additionalReportedTranscripts")
-                .add("reportPGX")
-                .toString();
+        StringJoiner sj = new StringJoiner(TSV_DELIM);
+
+        for(Columns column : Columns.values())
+        {
+            sj.add(column.toString());
+        }
+
+        return sj.toString();
     }
 
     private static String toString(final DriverGene gene)
@@ -151,16 +189,24 @@ public final class DriverGeneFile
                 .add(String.valueOf(gene.reportNonsenseAndFrameshift()))
                 .add(String.valueOf(gene.reportSplice()))
                 .add(String.valueOf(gene.reportDeletion()))
+                .add(String.valueOf(gene.reportHetDeletion()))
+                .add(String.valueOf(gene.reportLoh()))
+                .add(String.valueOf(gene.hetDeletionThreshold()))
                 .add(String.valueOf(gene.reportDisruption()))
                 .add(String.valueOf(gene.reportAmplification()))
+                .add(String.valueOf(gene.amplificationRatio()))
                 .add(String.valueOf(gene.reportSomaticHotspot()))
                 .add(String.valueOf(gene.likelihoodType()))
                 .add(String.valueOf(gene.reportGermlineVariant()))
                 .add(String.valueOf(gene.reportGermlineHotspot()))
                 .add(String.valueOf(gene.reportGermlineDisruption()))
                 .add(String.valueOf(gene.reportGermlineDeletion()))
+                .add(String.valueOf(gene.reportGermlineAmplification()))
                 .add(otherReportableTransStr(gene.additionalReportedTranscripts()))
                 .add(String.valueOf(gene.reportPGX()))
+                .add(String.valueOf(gene.reportLowExpression()))
+                .add(String.valueOf(gene.reportHighExpression()))
+                .add(String.valueOf(gene.reportNovelSpliceJunction()))
                 .toString();
     }
 

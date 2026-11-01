@@ -1,6 +1,6 @@
 package com.hartwig.hmftools.esvee.common;
 
-import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS_FILTER;
 
 import java.util.Arrays;
 import java.util.Set;
@@ -22,6 +22,13 @@ public enum FilterType
     INV_SHORT_FRAG_LOW_VAF("invShortFragLowVaf", "Short (<300b) low-VAF INV artefacts", false),
     INV_SHORT_ISOLATED("invShortIsolated", "Short (<100b) isolated INV artefacts", false),
     DEL_SHORT_LOW_VAF("delShortLowVaf", "Short low-VAF DEL artefacts with homology", false),
+    UNPAIRED_THREE_PRIME_RANGE("unpairedPositionRange", "Unpaired position range", false),
+    LINE_SOURCE("lineSource", "Remote LINE source", false),
+    SBX_STRAND_BIAS("sbxStrandBias", "SBX strand-bias", false),
+    SBX_ARTEFACT("sbxArtefact", "SBX artefact", false),
+    SBX_INV_ZERO_MOTIF("sbxInvZeroMotif", "SBX artefact, zero-length INV with known motif", false),
+    OFF_TARGET("offTarget", "Outside target panel", false),
+    WEAK_JUNC_MIN_AF("weakJuncMinAF", "Low allele fraction at weak junction", false),
     PON("PON", "Found in panel of normals", true);
 
     private final String mVcfTag;
@@ -42,7 +49,7 @@ public enum FilterType
     public static String filtersAsStr(final Set<FilterType> filters)
     {
         if(filters.isEmpty())
-            return PASS;
+            return PASS_FILTER;
 
         return filters.stream().map(x -> x.vcfTag()).collect(Collectors.joining(";"));
     }

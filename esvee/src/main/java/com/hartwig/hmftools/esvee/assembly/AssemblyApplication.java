@@ -11,17 +11,17 @@ import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.BAM_READ_JUN
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.DISC_RATE_DISC_ONLY_INCREMENT;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.DISC_RATE_JUNC_INCREMENT;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.MAX_OBSERVED_CONCORDANT_FRAG_LENGTH;
-import static com.hartwig.hmftools.esvee.assembly.alignment.Alignment.skipUnlinkedJunctionAssembly;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyUtils.setAssemblyOutcome;
+import static com.hartwig.hmftools.esvee.assembly.alignment.AlignerUtils.createAligner;
+import static com.hartwig.hmftools.esvee.assembly.alignment.Alignment.skipUnlinkedJunctionAssembly;
 import static com.hartwig.hmftools.esvee.assembly.types.AssemblyOutcome.DECOY;
+import static com.hartwig.hmftools.esvee.assembly.types.JunctionGroup.buildJunctionGroups;
 import static com.hartwig.hmftools.esvee.assembly.types.ThreadTask.mergePerfCounters;
 import static com.hartwig.hmftools.esvee.common.FileCommon.APP_NAME;
-import static com.hartwig.hmftools.esvee.assembly.types.JunctionGroup.buildJunctionGroups;
-import static com.hartwig.hmftools.esvee.assembly.output.WriteType.JUNC_ASSEMBLY;
-import static com.hartwig.hmftools.esvee.assembly.output.WriteType.ASSEMBLY_BAM;
-import static com.hartwig.hmftools.esvee.assembly.output.WriteType.ASSEMBLY_READ;
 import static com.hartwig.hmftools.esvee.common.FileCommon.formDiscordantStatsFilename;
 import static com.hartwig.hmftools.esvee.common.FileCommon.formFragmentLengthDistFilename;
+import static com.hartwig.hmftools.esvee.common.WriteType.ASSEMBLY_READ;
+import static com.hartwig.hmftools.esvee.common.WriteType.JUNC_ASSEMBLY;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.DISCORDANT_GROUP_MIN_FRAGMENTS_SHORT;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.MIN_HOTSPOT_JUNCTION_SUPPORT;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.MIN_JUNCTION_SUPPORT;
@@ -35,47 +35,58 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.hartwig.hmftools.common.bwa.BwaMemAligner;
 import com.hartwig.hmftools.common.perf.PerformanceCounter;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.esvee.assembly.alignment.Alignment;
 import com.hartwig.hmftools.esvee.assembly.alignment.AssemblyAlignment;
 import com.hartwig.hmftools.esvee.assembly.alignment.Breakend;
-import com.hartwig.hmftools.esvee.assembly.alignment.BwaAligner;
-import com.hartwig.hmftools.esvee.assembly.output.BreakendWriter;
-import com.hartwig.hmftools.esvee.assembly.types.PhaseSet;
-import com.hartwig.hmftools.esvee.common.FragmentLengthBounds;
 import com.hartwig.hmftools.esvee.assembly.output.AssemblyReadWriter;
 import com.hartwig.hmftools.esvee.assembly.output.AssemblyWriter;
-import com.hartwig.hmftools.esvee.assembly.output.BamWriter;
+import com.hartwig.hmftools.esvee.assembly.output.BreakendWriter;
+import com.hartwig.hmftools.esvee.assembly.output.ResultsWriter;
+import com.hartwig.hmftools.esvee.assembly.output.VcfWriter;
 import com.hartwig.hmftools.esvee.assembly.phase.PhaseGroupBuilder;
 import com.hartwig.hmftools.esvee.assembly.phase.PhaseSetTask;
-import com.hartwig.hmftools.esvee.prep.FragmentSizeDistribution;
+import com.hartwig.hmftools.esvee.assembly.read.BamReader;
+import com.hartwig.hmftools.esvee.assembly.read.ReadStats;
 import com.hartwig.hmftools.esvee.assembly.types.Junction;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionGroup;
 import com.hartwig.hmftools.esvee.assembly.types.PhaseGroup;
+import com.hartwig.hmftools.esvee.assembly.types.PhaseSet;
 import com.hartwig.hmftools.esvee.assembly.types.ThreadTask;
-import com.hartwig.hmftools.esvee.assembly.output.ResultsWriter;
-import com.hartwig.hmftools.esvee.assembly.output.WriteType;
-import com.hartwig.hmftools.esvee.assembly.read.BamReader;
-import com.hartwig.hmftools.esvee.assembly.output.VcfWriter;
-import com.hartwig.hmftools.esvee.assembly.read.ReadStats;
+import com.hartwig.hmftools.esvee.assembly.vis.AssemblyVisualiser;
+import com.hartwig.hmftools.esvee.common.FragmentLengthBounds;
+import com.hartwig.hmftools.esvee.common.saga.SagaMatcherFactory;
+import com.hartwig.hmftools.esvee.common.WriteType;
+import com.hartwig.hmftools.esvee.common.saga.SagaSequenceMatcher;
+import com.hartwig.hmftools.esvee.prep.FragmentSizeDistribution;
 import com.hartwig.hmftools.esvee.prep.types.DiscordantStats;
+
+import org.jetbrains.annotations.Nullable;
 
 public class AssemblyApplication
 {
     private final AssemblyConfig mConfig;
     private final ResultsWriter mResultsWriter;
 
+    private DiscordantStats mDiscordantStats;
     private final Map<String,List<Junction>> mChrJunctionsMap;
     private final Map<String,List<JunctionGroup>> mJunctionGroupMap;
 
     private final List<BamReader> mBamReaders;
+
+    @Nullable
+    private final SagaMatcherFactory mSagaMatcherFactory;
+
+    public static double SampleDiscordantRate = 0; // global property for accessibility
 
     private final List<PerformanceCounter> mPerfCounters;
 
@@ -88,13 +99,16 @@ public class AssemblyApplication
     {
         mConfig = new AssemblyConfig(configBuilder, asSubRoutine);
 
+        mDiscordantStats = null;
         mChrJunctionsMap = Maps.newHashMap();
-        mJunctionGroupMap = Maps.newHashMap();
+        mJunctionGroupMap = new TreeMap<>();
         mBamReaders = Lists.newArrayList();
 
         mResultsWriter = new ResultsWriter(mConfig);
 
         mPerfCounters = Lists.newArrayList();
+
+        mSagaMatcherFactory = mConfig.SagaFastaFile == null ? null : new SagaMatcherFactory(mConfig.SagaFastaFile);
     }
 
     public void run()
@@ -105,6 +119,7 @@ public class AssemblyApplication
                 mConfig.OutputDir, mConfig.OutputId != null ? format(" outputId(%s)", mConfig.OutputId) : "");
 
         loadFragmentLengthBounds();
+        loadDiscordantData();
 
         if(!loadJunctionFiles())
         {
@@ -150,9 +165,8 @@ public class AssemblyApplication
 
             writeVariants(assemblyAlignments, breakends);
 
-            // note this is written after the VCF since writing reassigns the reads to the output BAM, there-by removing their association
-            // with the BAM they were read from (ie as used in tumor vs ref counts)
-            writeAssemblyBam(finalAssemblies);
+            if(mConfig.RunVisualiser)
+                runVisualiser(assemblyAlignments);
 
             if(mConfig.PerfDebug)
             {
@@ -167,6 +181,14 @@ public class AssemblyApplication
         }
 
         SV_LOGGER.info("Esvee assembly complete, mins({})", runTimeMinsStr(startTimeMs));
+    }
+
+    private void loadDiscordantData()
+    {
+        String discStatsFilename = formDiscordantStatsFilename(mConfig.PrepDir, mConfig.sampleId(), mConfig.OutputId);
+        mDiscordantStats = loadDiscordantStats(discStatsFilename);
+
+        SampleDiscordantRate = mDiscordantStats.discordantRate();
     }
 
     private boolean loadJunctionFiles()
@@ -188,43 +210,29 @@ public class AssemblyApplication
             return true;
         }
 
-        String discStatsFilename = formDiscordantStatsFilename(mConfig.PrepDir, mConfig.sampleId(), mConfig.OutputId);
-        DiscordantStats discordantStats = loadDiscordantStats(discStatsFilename);
+        if(mConfig.JunctionFile == null || !Files.exists(Paths.get(mConfig.JunctionFile)))
+        {
+            SV_LOGGER.error("invalid junction file({})", mConfig.JunctionFile);
+            System.exit(1);
+        }
 
         int minJunctionFrags = MIN_JUNCTION_SUPPORT;
         int minHotspotFrags = MIN_HOTSPOT_JUNCTION_SUPPORT;
         int minDiscordantFrags = DISCORDANT_GROUP_MIN_FRAGMENTS_SHORT;
 
-        double discordantRate = discordantStats.discordantRate();
-
-        if(discordantRate >= mConfig.DiscordantRateIncrement)
+        if(SampleDiscordantRate >= mConfig.DiscordantRateIncrement)
         {
-            minJunctionFrags += (int)floor(discordantRate / mConfig.DiscordantRateIncrement) * DISC_RATE_JUNC_INCREMENT;
-            minHotspotFrags += (int)floor(discordantRate / mConfig.DiscordantRateIncrement) * DISC_RATE_JUNC_INCREMENT;
-            minDiscordantFrags += (int)floor(discordantRate / mConfig.DiscordantRateIncrement) * DISC_RATE_DISC_ONLY_INCREMENT;
+            int discordantRateFactor = (int)floor(SampleDiscordantRate / mConfig.DiscordantRateIncrement);
+            minJunctionFrags += discordantRateFactor * DISC_RATE_JUNC_INCREMENT;
+            minHotspotFrags += discordantRateFactor * DISC_RATE_JUNC_INCREMENT;
+            minDiscordantFrags += discordantRateFactor * DISC_RATE_DISC_ONLY_INCREMENT;
 
             SV_LOGGER.info("raised min fragments(hotspot={} junction={} disc-only={}) for discordantRate({})",
-                    minHotspotFrags, minJunctionFrags, minDiscordantFrags, format("%.3f", discordantRate));
+                    minHotspotFrags, minJunctionFrags, minDiscordantFrags, format("%.3f", SampleDiscordantRate));
         }
 
-        for(String junctionFile : mConfig.JunctionFiles)
-        {
-            Map<String,List<Junction>> newJunctionsMap = Junction.loadJunctions(
-                    junctionFile, mConfig.SpecificChrRegions, minJunctionFrags, minHotspotFrags, minDiscordantFrags);
-
-            if(newJunctionsMap == null)
-                return false;
-
-            Junction.mergeJunctions(mChrJunctionsMap, newJunctionsMap);
-        }
-
-        // if(AssemblyConfig.DevDebug && !validateJunctionMap(mChrJunctionsMap))
-        //    System.exit(1);
-
-        if(mConfig.JunctionFiles.size() > 1)
-        {
-            SV_LOGGER.debug("merged into {} junctions", mChrJunctionsMap.values().stream().mapToInt(x -> x.size()).sum());
-        }
+        mChrJunctionsMap.putAll(Junction.loadJunctions(
+                mConfig.JunctionFile, mConfig.SpecificChrRegions, minJunctionFrags, minHotspotFrags, minDiscordantFrags));
 
         return true;
     }
@@ -272,7 +280,7 @@ public class AssemblyApplication
         List<Thread> threadTasks = new ArrayList<>();
 
         List<JunctionGroupAssembler> primaryAssemblyTasks = JunctionGroupAssembler.createThreadTasks(
-                junctionGroups, mBamReaders, mConfig, mResultsWriter, taskCount, threadTasks);
+                junctionGroups, mBamReaders, mConfig, mSagaMatcherFactory, mResultsWriter, taskCount, threadTasks);
 
         if(!runThreadTasks(threadTasks))
             System.exit(1);
@@ -360,7 +368,8 @@ public class AssemblyApplication
 
     private void runAlignment(final List<AssemblyAlignment> assemblyAlignments)
     {
-        Alignment alignment = new Alignment(mConfig, new BwaAligner(mConfig.RefGenomeImageFile));
+        BwaMemAligner aligner = createAligner(mConfig.RefGenomeImageFile);
+        Alignment alignment = new Alignment(mConfig, aligner, mSagaMatcherFactory);
         alignment.run(assemblyAlignments, mPerfCounters);
         alignment.close();
     }
@@ -385,6 +394,19 @@ public class AssemblyApplication
                     }
 
                     allAssemblies.add(assembly);
+                }
+            }
+        }
+
+        if(mSagaMatcherFactory != null)
+        {
+            // Apply SAGA matching to assemblies which were created during phasing and so didn't get matched yet.
+            SagaSequenceMatcher sagaMatcher = mSagaMatcherFactory.createSequenceMatcher();
+            for(PhaseGroup phaseGroup : phaseGroups)
+            {
+                for(JunctionAssembly assembly : phaseGroup.derivedAssemblies())
+                {
+                    assembly.matchToSaga(sagaMatcher);
                 }
             }
         }
@@ -416,6 +438,9 @@ public class AssemblyApplication
         for(JunctionAssembly assembly : allAssemblies)
         {
             assembly.setId(assemblyId++);
+
+            if(assembly.phaseSet() == null)
+                assembly.setNonPhaseSetId(assembly.phaseGroup().nextPhaseSetId());
         }
 
         int assemblyAlignmentId = 0;
@@ -446,18 +471,21 @@ public class AssemblyApplication
         }
     }
 
-    private void writeAssemblyBam(final List<JunctionAssembly> assemblies)
+    private void runVisualiser(final List<AssemblyAlignment> assemblyAlignments)
     {
-        // write BAM records
-        if(mConfig.WriteTypes.contains(ASSEMBLY_BAM) && mResultsWriter.bamWriter().isValid())
+        for(AssemblyAlignment assembly : assemblyAlignments)
         {
-            SV_LOGGER.debug("writing assembly BAM");
-
-            BamWriter bamWriter = mResultsWriter.bamWriter();
-
-            for(JunctionAssembly assembly : assemblies)
+            // TODO(mkcmkc): This try/catch is temporary to catch assemblies where the vis fails
+            try
             {
-                bamWriter.writeAssembly(assembly);
+                AssemblyVisualiser visualiser = AssemblyVisualiser.create(mConfig, assembly);
+                if(visualiser != null)
+                    visualiser.writeVisFile();
+            }
+            catch(Exception e)
+            {
+                SV_LOGGER.debug("EsveeVis failed for assemblyAlignments({})", assemblyAlignments.toString());
+                e.printStackTrace();
             }
         }
     }

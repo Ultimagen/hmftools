@@ -32,6 +32,9 @@ public final class SvVcfTags
     public static final String ASM_ID = "ASMID";
     public static final String ASM_ID_DESC = "Unique id(s) of assembly(s) containing the breakend";
 
+    public static final String ASM_INFO = "ASMINFO";
+    public static final String ASM_INFO_DESC = "Original junction coordinates";
+
     public static final String ASM_LENGTH = "ASMLEN";
     public static final String ASM_LENGTH_DESC = "Assembly sequence length";
 
@@ -78,8 +81,23 @@ public final class SvVcfTags
     public static final String UNIQUE_FRAG_POSITIONS = "UFP";
     public static final String UNIQUE_FRAG_POSITIONS_DESC = "Distinct fragment positions";
 
+    public static final String THREE_PRIME_RANGE = "TPR";
+    public static final String THREE_PRIME_RANGE_DESC = "Unpaired read three-prime position range";
+
     public static final String MAX_LOCAL_REPEAT = "MLR";
-    public static final String MAX_LOCAL_REPEAT_DESC = "Max local indel repeat round breakend";
+    public static final String MAX_LOCAL_REPEAT_DESC = "Max local indel repeat around breakend";
+
+    public static final String PROX_JUNC_READ_RATIO = "PJRR";
+    public static final String PROX_JUNC_READ_RATIO_DESC = "Proximate junction read ratio";
+
+    public static final String SUPP_REMOTE_REGION_RATIO = "SRRR";
+    public static final String SUPP_REMOTE_REGION_RATIO_DESC = "Supplementary remote region ratio";
+
+    public static final String SAGA_VARIANT = "SAGA";
+    public static final String SAGA_VARIANT_DESC = "ID and breakends of the matched SAGA variant";
+
+    public static final String SAGA_INFERRED_BREAKEND = "SAGAINF";
+    public static final String SAGA_INFERRED_BREAKEND_DESC = "Indicates the breakend is inferred from the matched SAGA variant";
 
     // per sample
     public static final String SPLIT_FRAGS = "SF";
@@ -120,7 +138,6 @@ public final class SvVcfTags
     public static final String REPEAT_MASK_ORIENTATION_DESC = "Inserted sequence repeatmasker orientation";
     public static final String REPEAT_MASK_COVERAGE = "INSRMP";
     public static final String REPEAT_MASK_COVERAGE_DESC = "Portion of inserted sequence whose alignment overlaps the repeatmasker repeat";
-
 
     // set by Purple
     public static final String INFERRED = "INFERRED";

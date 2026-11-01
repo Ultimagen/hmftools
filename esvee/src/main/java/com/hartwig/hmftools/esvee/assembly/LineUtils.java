@@ -4,6 +4,7 @@ import static java.lang.Math.abs;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
+import static com.hartwig.hmftools.common.redux.BaseQualAdjustment.isUncertainBaseQual;
 import static com.hartwig.hmftools.common.sv.LineElements.LINE_BASE_A;
 import static com.hartwig.hmftools.common.sv.LineElements.LINE_BASE_T;
 import static com.hartwig.hmftools.common.sv.LineElements.LINE_CHAR_A;
@@ -13,6 +14,7 @@ import static com.hartwig.hmftools.common.sv.LineElements.LINE_POLY_AT_TEST_LEN;
 import static com.hartwig.hmftools.esvee.assembly.read.ReadUtils.INVALID_INDEX;
 import static com.hartwig.hmftools.esvee.assembly.read.ReadUtils.getReadIndexAtReferencePosition;
 import static com.hartwig.hmftools.esvee.common.CommonUtils.aboveMinQual;
+import static com.hartwig.hmftools.esvee.common.SvConstants.LINE_REF_BASE_MAX_LENGTH;
 import static com.hartwig.hmftools.esvee.common.SvConstants.LINE_REF_BASE_REPEAT_FACTOR;
 import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_VARIANT_LENGTH;
 
@@ -20,10 +22,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.codon.Nucleotides;
+import com.hartwig.hmftools.common.utils.StartEndPair;
 import com.hartwig.hmftools.esvee.assembly.read.Read;
 import com.hartwig.hmftools.esvee.assembly.types.AssemblyLink;
 import com.hartwig.hmftools.esvee.assembly.types.Junction;
@@ -39,23 +44,6 @@ import htsjdk.samtools.SAMRecord;
 
 public final class LineUtils
 {
-    public static int findBaseRepeatCount(final byte[] bases, int index, boolean moveForward, byte testBase)
-    {
-        // count matching bases until the end of the read
-        int matchCount = 0;
-        while(index >= 0 && index < bases.length)
-        {
-            if(bases[index] == testBase)
-                ++matchCount;
-            else
-                break;
-
-            index += moveForward ? 1 : -1;
-        }
-
-        return matchCount;
-    }
-
     public static int findLineSequenceCount(final byte[] bases, final int indexStart, final int indexEnd, final byte lineBase)
     {
         if(indexStart < 0 || indexEnd >= bases.length)
@@ -91,9 +79,9 @@ public final class LineUtils
         if(cigarElements.size() <= 1)
             return false;
 
-        for(int i = 0; i <= 1; ++i)
+        for(StartEndPair se : StartEndPair.values())
         {
-            boolean fromStart = (i == 0);
+            boolean fromStart = se.isStart();
             CigarElement element = fromStart ? cigarElements.get(0) : cigarElements.get(cigarElements.size() - 1);
 
             if(element.getOperator() != CigarOperator.S)
@@ -108,14 +96,15 @@ public final class LineUtils
 
             int softClipIndex = fromStart ? scBaseCount - 1 : record.getReadBases().length - scBaseCount;
 
-            if(hasLineTail(record.getReadBases(), softClipIndex, fromStart, lineBase))
+            if(hasLineTail(record.getReadBases(), softClipIndex, fromStart, lineBase, record.getBaseQualities()))
                 return true;
         }
 
         return false;
     }
 
-    public static boolean hasLineTail(final byte[] bases, final int softClipIndex, boolean leftClipped, final byte lineBase)
+    public static boolean hasLineTail(
+            final byte[] bases, final int softClipIndex, boolean leftClipped, final byte lineBase, @Nullable final byte[] baseQuals)
     {
         int scLength = leftClipped ? softClipIndex + 1 : bases.length - softClipIndex;
 
@@ -131,32 +120,80 @@ public final class LineUtils
         {
             ++totalBaseCount;
 
-            if(bases[index] != lineBase)
+            if(bases[index] == lineBase)
             {
-                ++nonLineBaseCount;
-
+                ++lineBaseCount;
+            }
+            else if(baseQuals == null || !isUncertainBaseQual(baseQuals[index]))
+            {
                 if(totalBaseCount > LINE_POLY_AT_TEST_LEN)
                     break;
+
+                ++nonLineBaseCount;
 
                 if(nonLineBaseCount > LINE_POLY_AT_TEST_LEN - LINE_POLY_AT_REQ)
                     return false;
             }
-            else
-            {
-                ++lineBaseCount;
-            }
 
             index += leftClipped ? -1 : 1;
         }
+
+        if(lineBaseCount < LINE_POLY_AT_REQ || nonLineBaseCount > LINE_POLY_AT_TEST_LEN - LINE_POLY_AT_REQ)
+            return false;
 
         // will have returned if initial bases fail the line test, otherwise will be the total number of line bases
         // including the max permitted non-line bases
 
         // now look for a ref bases having the same line base
         int refIndexStart = leftClipped ? softClipIndex + 1 : softClipIndex - 1;
-        int refLineBaseCount = findBaseRepeatCount(bases, refIndexStart, leftClipped, lineBase);
+        int refLineBaseCount = findRefBaseRepeatCount(bases, refIndexStart, leftClipped, lineBase);
+
+        if(refLineBaseCount > LINE_REF_BASE_MAX_LENGTH)
+            return false;
 
         return lineBaseCount >= refLineBaseCount * LINE_REF_BASE_REPEAT_FACTOR;
+    }
+
+    @VisibleForTesting
+    public static int findRefBaseRepeatCount(final byte[] bases, int index, boolean moveForward, byte testBase)
+    {
+        // count matching bases and exit on a difference
+        int matchCount = 0;
+        int initialMatchCount = 0;
+        int mismatchCount = 0;
+        int baseCount = 0;
+
+        while(index >= 0 && index < bases.length)
+        {
+            ++baseCount;
+
+            if(bases[index] == testBase)
+            {
+                ++matchCount;
+
+                if(mismatchCount == 0)
+                    ++initialMatchCount;
+            }
+            else
+            {
+                ++mismatchCount;
+            }
+
+            if(baseCount >= 10)
+            {
+                // allow at most 1/10 mismatches
+                if(mismatchCount / (double)baseCount > 0.1)
+                    return initialMatchCount;
+            }
+            else if(mismatchCount >= 2)
+            {
+                return initialMatchCount;
+            }
+
+            index += moveForward ? 1 : -1;
+        }
+
+        return mismatchCount == 0 ? initialMatchCount : matchCount;
     }
 
     public static int findConsensusLineExtension(final List<Read> reads, final Junction junction)
@@ -191,7 +228,7 @@ public final class LineUtils
 
         for(Read read : reads)
         {
-            if(!read.hasLineTail())
+            if(!read.hasLineTail(isForward))
                 continue;
 
             if(fivePrimeOnly)

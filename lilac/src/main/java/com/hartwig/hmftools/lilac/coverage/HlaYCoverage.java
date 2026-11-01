@@ -1,19 +1,20 @@
 package com.hartwig.hmftools.lilac.coverage;
 
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
+import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.lilac.LilacConfig.LL_LOGGER;
-import static com.hartwig.hmftools.lilac.LilacConstants.GENE_A;
-import static com.hartwig.hmftools.lilac.LilacConstants.HLA_A;
 import static com.hartwig.hmftools.lilac.LilacConstants.LILAC_FILE_HLA_Y_COVERAGE;
 import static com.hartwig.hmftools.lilac.LilacConstants.LILAC_FILE_HLA_Y_FRAGMENTS;
 import static com.hartwig.hmftools.lilac.ReferenceData.getAminoAcidExonBoundaries;
 import static com.hartwig.hmftools.lilac.fragment.FragmentScope.HLA_Y;
 import static com.hartwig.hmftools.lilac.fragment.FragmentSource.REFERENCE;
+import static com.hartwig.hmftools.lilac.hla.HlaGene.HLA_A;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,6 +28,7 @@ import com.hartwig.hmftools.lilac.LilacConfig;
 import com.hartwig.hmftools.lilac.fragment.Fragment;
 import com.hartwig.hmftools.lilac.fragment.FragmentSource;
 import com.hartwig.hmftools.lilac.hla.HlaAllele;
+import com.hartwig.hmftools.lilac.hla.HlaGene;
 import com.hartwig.hmftools.lilac.seq.HlaSequenceLoci;
 import com.hartwig.hmftools.lilac.seq.SequenceMatchType;
 
@@ -38,8 +40,8 @@ public class HlaYCoverage
 
     private boolean mExceedsThreshold;
 
-    private final Map<FragmentSource,Map<HlaAllele,int[]>> mSourceAlleleFragmentCounts;
-    private final Map<FragmentSource,int[]> mSourceMiscCounts;
+    private final Map<FragmentSource, Map<HlaAllele, int[]>> mSourceAlleleFragmentCounts;
+    private final Map<FragmentSource, int[]> mSourceMiscCounts;
 
     private BufferedWriter mWriter;
     private final LilacConfig mConfig;
@@ -53,11 +55,11 @@ public class HlaYCoverage
     private static final int EXON_3 = 1;
 
     public HlaYCoverage(
-            final List<HlaSequenceLoci> hlaYSequences, final Map<String,Map<Integer,Set<String>>> geneAminoAcidHetLociMap,
+            final List<HlaSequenceLoci> hlaYSequences, final Map<HlaGene, Map<Integer, Set<String>>> geneAminoAcidHetLociMap,
             final LilacConfig config)
     {
         mHlaYSequences = hlaYSequences;
-        mAminoAcidHetLoci = Sets.newHashSet(geneAminoAcidHetLociMap.get(GENE_A).keySet());
+        mAminoAcidHetLoci = Sets.newHashSet(geneAminoAcidHetLociMap.get(HLA_A).keySet());
         mConfig = config;
 
         mSourceAlleleFragmentCounts = Maps.newHashMap();
@@ -73,7 +75,7 @@ public class HlaYCoverage
         if(!mExceedsThreshold)
             return null;
 
-        Map<HlaAllele,int[]> alleleCounts = mSourceAlleleFragmentCounts.get(REFERENCE);
+        Map<HlaAllele, int[]> alleleCounts = mSourceAlleleFragmentCounts.get(REFERENCE);
 
         if(alleleCounts == null)
             return null;
@@ -81,7 +83,7 @@ public class HlaYCoverage
         HlaAllele maxAllele = null;
         int maxUniqueCount = 0;
 
-        for(Map.Entry<HlaAllele,int[]> entry : alleleCounts.entrySet())
+        for(Map.Entry<HlaAllele, int[]> entry : alleleCounts.entrySet())
         {
             int uniqueCount = entry.getValue()[UNIQUE];
 
@@ -95,13 +97,13 @@ public class HlaYCoverage
         return maxAllele;
     }
 
-    public void updateAminoAcidLoci(final Map<String,Map<Integer,Set<String>>> geneAminoAcidHetLociMap)
+    public void updateAminoAcidLoci(final Map<HlaGene, Map<Integer, Set<String>>> geneAminoAcidHetLociMap)
     {
         mAminoAcidHetLoci.clear();
-        mAminoAcidHetLoci.addAll(geneAminoAcidHetLociMap.get(GENE_A).keySet());
+        mAminoAcidHetLoci.addAll(geneAminoAcidHetLociMap.get(HLA_A).keySet());
     }
 
-    public void checkThreshold(final List<FragmentAlleles> fragAlleles, final List<Fragment> fragments)
+    public void checkThreshold(final List<FragmentAlleles> fragAlleles, final Collection<Fragment> fragments)
     {
         // test for presence of HLA-Y and strip out from consideration any fragment mapping to it
         int uniqueHlaY = 0;
@@ -112,9 +114,7 @@ public class HlaYCoverage
         // only test heterozygous locations in A since HLA-Y matches its exon boundaries
         for(Fragment fragment : fragments)
         {
-            List<Integer> fragAminoAcidLoci = fragment.aminoAcidsByLoci().keySet().stream()
-                    .filter(x -> mAminoAcidHetLoci.contains(x))
-                    .collect(Collectors.toList());
+            List<Integer> fragAminoAcidLoci = fragment.aminoAcidsByLoci().keySet().stream().filter(mAminoAcidHetLoci::contains).toList();
 
             if(fragAminoAcidLoci.isEmpty())
                 continue;
@@ -154,7 +154,7 @@ public class HlaYCoverage
             }
         }
 
-        int totalHlaYFrags = uniqueHlaY  + matchedFragmentAlleles.size();
+        int totalHlaYFrags = uniqueHlaY + matchedFragmentAlleles.size();
         double threshold = fragments.size() * mConfig.HlaYPercentThreshold;
         mExceedsThreshold = uniqueHlaY >= threshold;
 
@@ -166,7 +166,7 @@ public class HlaYCoverage
 
             if(mExceedsThreshold)
             {
-                matchedFragmentAlleles.forEach(x -> fragAlleles.remove(x));
+                matchedFragmentAlleles.forEach(fragAlleles::remove);
 
                 mRemovedRefFragAlleles.addAll(matchedFragmentAlleles); // remember for later counting purposes
                 mRemovedRefFragAlleles.forEach(x -> x.getFragment().setScope(HLA_Y, true));
@@ -175,7 +175,7 @@ public class HlaYCoverage
     }
 
     public void assignReferenceFragments(
-            final List<HlaAllele> alleles, final List<FragmentAlleles> fragAlleles, final List<Fragment> fragments)
+            final Collection<HlaAllele> alleles, final Iterable<FragmentAlleles> fragAlleles, final Iterable<Fragment> fragments)
     {
         // put back those fragments previously excluded due to being matched to HLA-Y
         List<FragmentAlleles> allFragAlleles = Lists.newArrayList(fragAlleles);
@@ -185,9 +185,10 @@ public class HlaYCoverage
     }
 
     public void assignFragments(
-            final List<HlaAllele> alleles, final List<FragmentAlleles> fragAlleles, final List<Fragment> fragments, final FragmentSource source)
+            final Collection<HlaAllele> alleles, final List<FragmentAlleles> fragAlleles, final Iterable<Fragment> fragments,
+            final FragmentSource source)
     {
-        Map<HlaAllele,int[]> sourceAlleleCounts = Maps.newHashMap();
+        Map<HlaAllele, int[]> sourceAlleleCounts = Maps.newHashMap();
         mSourceAlleleFragmentCounts.put(source, sourceAlleleCounts);
 
         int[] miscCounts = new int[2];
@@ -200,7 +201,7 @@ public class HlaYCoverage
         for(Fragment fragment : fragments)
         {
             List<Integer> fragAminoAcidLoci = fragment.aminoAcidsByLoci().keySet().stream()
-                    .filter(x -> mAminoAcidHetLoci.contains(x))
+                    .filter(mAminoAcidHetLoci::contains)
                     .collect(Collectors.toList());
 
             if(fragAminoAcidLoci.isEmpty())
@@ -244,13 +245,7 @@ public class HlaYCoverage
 
             for(HlaAllele allele : matchedAlleles)
             {
-                int[] alleleCounts = sourceAlleleCounts.get(allele);
-
-                if(alleleCounts == null)
-                {
-                    alleleCounts = new int[MAX];
-                    sourceAlleleCounts.put(allele, alleleCounts);
-                }
+                int[] alleleCounts = sourceAlleleCounts.computeIfAbsent(allele, k -> new int[MAX]);
 
                 if(matchedFragment != null)
                     ++alleleCounts[SHARED];
@@ -261,26 +256,26 @@ public class HlaYCoverage
             }
         }
 
-        if(!source.equals(REFERENCE))
+        if(source != REFERENCE)
         {
             LL_LOGGER.info("HLA-Y src({}) fragments({} unique={}) shared={})",
                     source, uniqueHlaY + matchedFragmentAlleles.size(), uniqueHlaY, matchedFragmentAlleles.size());
 
             if(mExceedsThreshold)
-                matchedFragmentAlleles.forEach(x -> fragAlleles.remove(x));
+                matchedFragmentAlleles.forEach(fragAlleles::remove);
         }
     }
 
-    private static boolean fragmentSupportsSolution(final FragmentAlleles fragmentAlleles, final List<HlaAllele> alleles)
+    private static boolean fragmentSupportsSolution(final FragmentAlleles fragmentAlleles, final Collection<HlaAllele> alleles)
     {
-        return alleles.stream().anyMatch(x -> fragmentAlleles.contains(x));
+        return alleles.stream().anyMatch(fragmentAlleles::contains);
     }
 
     private static final int Y0101_X_LOCUS = 227;
 
-    private void updateMiscCounts(final Fragment fragment, final int[] miscCounts)
+    private static void updateMiscCounts(final Fragment fragment, final int[] miscCounts)
     {
-        if(fragment.aminoAcidsByLoci().containsKey(Y0101_X_LOCUS) && fragment.aminoAcid(Y0101_X_LOCUS).equals("X"))
+        if(fragment.aminoAcidsByLoci().containsKey(Y0101_X_LOCUS) && "X".equals(fragment.aminoAcid(Y0101_X_LOCUS)))
             ++miscCounts[Y0101_X];
 
         List<Integer> hlaAExonBoundaries = getAminoAcidExonBoundaries(HLA_A);
@@ -296,14 +291,14 @@ public class HlaYCoverage
         if(mConfig.OutputDir.isEmpty() || !mExceedsThreshold)
             return;
 
-        for(Map.Entry<FragmentSource,int[]> entry : mSourceMiscCounts.entrySet())
+        for(Map.Entry<FragmentSource, int[]> entry : mSourceMiscCounts.entrySet())
         {
             FragmentSource source = entry.getKey();
             final int[] miscCounts = entry.getValue();
 
             String outcome = (miscCounts[Y0101_X] == 0 && miscCounts[EXON_3] > 0) ? "NOVEL" : "REF";
 
-            LL_LOGGER.info("HLA-Y_MISC_COUNTS:{},{},{},{},{}",
+            LL_LOGGER.debug("HLA-Y_MISC_COUNTS:{},{},{},{},{}",
                     sampleId, source, miscCounts[Y0101_X], miscCounts[EXON_3], outcome);
         }
 
@@ -313,39 +308,45 @@ public class HlaYCoverage
         {
             BufferedWriter writer = createBufferedWriter(fileName, false);
 
-            writer.write("Source\tAllele\tTotal\tShared\tHlaYShared\tUnique");
+            StringJoiner sj = new StringJoiner(TSV_DELIM);
+            sj.add("Source").add("Allele").add("Total").add("Shared").add("HlaYShared").add("Unique");
+            writer.write(sj.toString());
             writer.newLine();
 
-            for(Map.Entry<FragmentSource,Map<HlaAllele,int[]>> sourceEntry : mSourceAlleleFragmentCounts.entrySet())
+            for(Map.Entry<FragmentSource, Map<HlaAllele, int[]>> sourceEntry : mSourceAlleleFragmentCounts.entrySet())
             {
                 FragmentSource source = sourceEntry.getKey();
-                for(Map.Entry<HlaAllele,int[]> alleleEntry : sourceEntry.getValue().entrySet())
+
+                for(Map.Entry<HlaAllele, int[]> alleleEntry : sourceEntry.getValue().entrySet())
                 {
-                    final HlaAllele allele = alleleEntry.getKey();
-                    final int[] counts = alleleEntry.getValue();
+                     HlaAllele allele = alleleEntry.getKey();
+                    int[] counts = alleleEntry.getValue();
 
                     int total = counts[SHARED] + counts[SHARED_HLAY] + counts[UNIQUE];
 
-                    writer.write(String.format("%s\t%s\t%d\t%d\t%d\t%d",
-                            source, allele, total, counts[SHARED], counts[SHARED_HLAY], counts[UNIQUE]));
+                    sj = new StringJoiner(TSV_DELIM);
+                    sj.add(source.toString());
+                    sj.add(allele.toString());
+                    sj.add(String.valueOf(total));
+                    sj.add(String.valueOf(counts[SHARED]));
+                    sj.add(String.valueOf(counts[SHARED_HLAY]));
+                    sj.add(String.valueOf(counts[UNIQUE]));
+                    writer.write(sj.toString());
 
                     writer.newLine();
                 }
             }
 
             writer.close();
-
-            closeBufferedWriter(mWriter);
         }
         catch(IOException e)
         {
             LL_LOGGER.error("failed to write HLA-Y coverage file({}): {}", fileName, e.toString());
-            return;
         }
     }
 
-    private void writeFragmentInfo(
-            final Fragment fragment, final List<Integer> fragAminoAcidLoci, final List<HlaAllele> hlayAlleles, boolean isShared)
+    private void writeFragmentInfo(final Fragment fragment, final Iterable<Integer> fragAminoAcidLoci,
+            final Iterable<HlaAllele> hlayAlleles, boolean isShared)
     {
         if(mConfig.OutputDir.isEmpty() || !mExceedsThreshold)
             return;
@@ -357,7 +358,9 @@ public class HlaYCoverage
                 String fileName = mConfig.formFileId(LILAC_FILE_HLA_Y_FRAGMENTS);
                 mWriter = createBufferedWriter(fileName, false);
 
-                mWriter.write("ReadId\tReadInfo\tAlleles\tShared\tLoci");
+                StringJoiner sj = new StringJoiner(TSV_DELIM);
+                sj.add("ReadId").add("ReadInfo").add("Alleles").add("Shared").add("Loci");
+                mWriter.write(sj.toString());
                 mWriter.newLine();
             }
 
@@ -367,15 +370,20 @@ public class HlaYCoverage
             StringJoiner sjLoci = new StringJoiner(ITEM_DELIM);
             fragAminoAcidLoci.forEach(x -> sjLoci.add(x.toString()));
 
-            mWriter.write(String.format("%s\t%s\t%s\t%s\t%s",
-                    fragment.id(), fragment.readInfo(), sjAlleles, isShared, sjLoci.toString()));
+            StringJoiner sj = new StringJoiner(TSV_DELIM);
+            sj.add(fragment.id());
+            sj.add(fragment.readInfo());
+            sj.add(sjAlleles.toString());
+            sj.add(String.valueOf(isShared));
+            sj.add(sjLoci.toString());
+
+            mWriter.write(sj.toString());
             mWriter.newLine();
 
         }
         catch(IOException e)
         {
             LL_LOGGER.error("failed to write HLA-Y fragments file: {}", e.toString());
-            return;
         }
     }
 }

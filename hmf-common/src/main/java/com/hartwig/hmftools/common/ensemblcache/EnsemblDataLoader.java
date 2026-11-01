@@ -1,9 +1,10 @@
 package com.hartwig.hmftools.common.ensemblcache;
 
+import static com.hartwig.hmftools.common.utils.file.FileDelimiters.CSV_EXTENSION;
 import static com.hartwig.hmftools.common.utils.file.FileReaderUtils.createFieldsIndexMap;
+import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDirSeparator;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -14,8 +15,8 @@ import java.util.Set;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.hartwig.hmftools.common.gene.GeneData;
 import com.hartwig.hmftools.common.gene.ExonData;
+import com.hartwig.hmftools.common.gene.GeneData;
 import com.hartwig.hmftools.common.gene.TranscriptAminoAcids;
 import com.hartwig.hmftools.common.gene.TranscriptData;
 import com.hartwig.hmftools.common.gene.TranscriptProteinData;
@@ -26,11 +27,11 @@ import org.apache.logging.log4j.Logger;
 
 public final class EnsemblDataLoader
 {
-    public static final String ENSEMBL_GENE_DATA_FILE = "ensembl_gene_data.csv";
-    public static final String ENSEMBL_TRANS_EXON_DATA_FILE = "ensembl_trans_exon_data.csv";
-    public static final String ENSEMBL_TRANS_SPLICE_DATA_FILE = "ensembl_trans_splice_data.csv";
-    public static final String ENSEMBL_PROTEIN_FEATURE_DATA_FILE = "ensembl_protein_features.csv";
-    public static final String ENSEMBL_TRANS_AMINO_ACIDS_FILE = "ensembl_trans_amino_acids.csv";
+    private static final String GENE_DATA_FILE_ID = "ensembl_gene_data";
+    private static final String TRANS_EXON_DATA_FILE_ID = "ensembl_trans_exon_data";
+    private static final String TRANS_SPLICE_DATA_FILE_ID = "ensembl_trans_splice_data";
+    private static final String PROTEIN_FEATURE_DATA_FILE_ID = "ensembl_protein_features";
+    private static final String TRANS_AMINO_ACIDS_FILE_ID = "ensembl_trans_amino_acids";
 
     public static final String ENS_FLD_GENE_ID = "GeneId";
     public static final String ENS_FLD_GENE_NAME = "GeneName";
@@ -49,18 +50,48 @@ public final class EnsemblDataLoader
     public static final String ENSEMBL_DELIM = ",";
     public static final String ENSEMBL_TRANSCRIPT_PREFIX = "ENST";
 
-    public static boolean loadEnsemblGeneData(final String dataPath, final List<String> restrictedGeneIds,
-            final Map<String,List<GeneData>> chrGeneDataMap, RefGenomeVersion version)
+    private EnsemblDataLoader() {}
+
+    public static boolean loadEnsemblGeneData(
+            final String dataPath, final List<String> restrictedGeneIds,
+            final Map<String, List<GeneData>> chrGeneDataMap, final RefGenomeVersion version)
     {
         return loadEnsemblGeneData(dataPath, restrictedGeneIds, chrGeneDataMap, version, false);
     }
 
-    public static boolean loadEnsemblGeneData(final String dataPath, final List<String> restrictedGeneIds,
+    public static String ensemblGeneDataFile(final RefGenomeVersion rgVersion) { return formFileName(GENE_DATA_FILE_ID, rgVersion); }
+    public static String ensemblTransExonDataFile(final RefGenomeVersion rgVersion) { return formFileName(TRANS_EXON_DATA_FILE_ID, rgVersion); }
+    public static String ensemblSpliceDataFile(final RefGenomeVersion rgVersion) { return formFileName(TRANS_SPLICE_DATA_FILE_ID, rgVersion); }
+    public static String ensemblProteinDataFile(final RefGenomeVersion rgVersion) { return formFileName(PROTEIN_FEATURE_DATA_FILE_ID, rgVersion); }
+    public static String ensemblAminoAcidDataFile(final RefGenomeVersion rgVersion) { return formFileName(TRANS_AMINO_ACIDS_FILE_ID, rgVersion); }
+
+    private static String resolveFilenameWithOldIfRequired(final String filename)
+    {
+        if(Files.exists(Paths.get(filename)))
+            return filename;
+
+        String oldFilename = filename.replaceAll("37.csv", "csv").replaceAll("38.csv", "csv");
+        if(Files.exists(Paths.get(oldFilename)))
+            return oldFilename;
+
+        return filename; // keep original even if invalid so loading attempt shows expected and invalid path
+    }
+
+    private static String formFileName(final String fileId, final RefGenomeVersion refGenomeVersion)
+    {
+        return fileId + "." + refGenomeVersion.identifier() + CSV_EXTENSION;
+    }
+
+    public static boolean loadEnsemblGeneData(
+            final String dataPath, final List<String> restrictedGeneIds,
             final Map<String,List<GeneData>> chrGeneDataMap, final RefGenomeVersion version, boolean loadSynonyms)
     {
-        String filename = dataPath;
+        if(dataPath == null)
+            return false;
 
-        filename += ENSEMBL_GENE_DATA_FILE;
+        String filename = checkAddDirSeparator(dataPath) + ensemblGeneDataFile(version);
+
+        filename = resolveFilenameWithOldIfRequired(filename);
 
         if(!Files.exists(Paths.get(filename)))
             return false;
@@ -71,7 +102,7 @@ public final class EnsemblDataLoader
 
             String line = fileReader.readLine();
 
-            final Map<String,Integer> fieldsIndexMap = createFieldsIndexMap(line, ENSEMBL_DELIM);
+            Map<String, Integer> fieldsIndexMap = createFieldsIndexMap(line, ENSEMBL_DELIM);
 
             if(line == null)
             {
@@ -95,7 +126,7 @@ public final class EnsemblDataLoader
             String currentChr = "";
             int geneCount = 0;
 
-            while (line != null)
+            while(line != null)
             {
                 String[] items = line.split(ENSEMBL_DELIM, -1);
 
@@ -107,7 +138,7 @@ public final class EnsemblDataLoader
                     continue;
                 }
 
-                final String chromosome = version.versionedChromosome(items[chromosomeIndex]);
+                String chromosome = version.versionedChromosome(items[chromosomeIndex]);
 
                 GeneData geneData = new GeneData(
                         geneId, items[geneNameIndex], chromosome, Byte.parseByte(items[strandIndex]),
@@ -119,13 +150,7 @@ public final class EnsemblDataLoader
                 if(!currentChr.equals(chromosome))
                 {
                     currentChr = chromosome;
-                    geneList = chrGeneDataMap.get(chromosome);
-
-                    if(geneList == null)
-                    {
-                        geneList = Lists.newArrayList();
-                        chrGeneDataMap.put(chromosome, geneList);
-                    }
+                    geneList = chrGeneDataMap.computeIfAbsent(chromosome, k -> Lists.newArrayList());
                 }
 
                 geneList.add(geneData);
@@ -145,14 +170,16 @@ public final class EnsemblDataLoader
         return true;
     }
 
-    protected static boolean loadTranscriptData(
-            final String dataPath, Map<String, List<TranscriptData>> transcriptDataMap,
+    private static final String NULL_STR = "NULL";
+
+    public static boolean loadTranscriptData(
+            final String dataPath, final RefGenomeVersion version, final Map<String, List<TranscriptData>> transcriptDataMap,
             final List<String> restrictedGeneIds, boolean cacheExons, boolean canonicalOnly, boolean includeNonEnsembl,
             final List<String> nonCanonicalTrans)
     {
-        String filename = dataPath;
+        String filename = checkAddDirSeparator(dataPath) + ensemblTransExonDataFile(version);
 
-        filename += ENSEMBL_TRANS_EXON_DATA_FILE;
+        filename = resolveFilenameWithOldIfRequired(filename);
 
         if(!Files.exists(Paths.get(filename)))
             return false;
@@ -163,7 +190,7 @@ public final class EnsemblDataLoader
 
             String line = fileReader.readLine();
 
-            final Map<String,Integer> fieldsIndexMap = createFieldsIndexMap(line, ENSEMBL_DELIM);
+            final Map<String, Integer> fieldsIndexMap = createFieldsIndexMap(line, ENSEMBL_DELIM);
 
             if(line == null)
             {
@@ -240,9 +267,12 @@ public final class EnsemblDataLoader
 
                     exonDataList = Lists.newArrayList();
 
-                    Integer codingStart = !items[codingStartIndex].equalsIgnoreCase("NULL") ? Integer.parseInt(items[codingStartIndex]) : null;
-                    Integer codingEnd = !items[codingEndIndex].equalsIgnoreCase("NULL") ? Integer.parseInt(items[codingEndIndex]) : null;
-                    String refSeqId = refSeqIdIndex > 0 && !items[refSeqIdIndex].equalsIgnoreCase("NULL")? items[refSeqIdIndex] : null;
+                    Integer codingStart = !NULL_STR.equalsIgnoreCase(items[codingStartIndex]) ?
+                            Integer.parseInt(items[codingStartIndex]) : null;
+
+                    Integer codingEnd = !NULL_STR.equalsIgnoreCase(items[codingEndIndex]) ? Integer.parseInt(items[codingEndIndex]) : null;
+
+                    String refSeqId = refSeqIdIndex > 0 && !NULL_STR.equalsIgnoreCase(items[refSeqIdIndex]) ? items[refSeqIdIndex] : null;
 
                     currentTrans = new TranscriptData(
                             transId, transName, geneId, isCanonical, Byte.parseByte(items[strandIndex]),
@@ -278,12 +308,13 @@ public final class EnsemblDataLoader
         return true;
     }
 
-    protected static boolean loadTranscriptProteinData(
-            final String dataPath, Map<Integer, List<TranscriptProteinData>> proteinDataMap, Set<Integer> restrictedTransIds)
+    public static boolean loadTranscriptProteinData(
+            final String dataPath, final RefGenomeVersion version, final Map<Integer, List<TranscriptProteinData>> proteinDataMap,
+            final Set<Integer> restrictedTransIds)
     {
-        String filename = dataPath;
+        String filename = checkAddDirSeparator(dataPath) + ensemblProteinDataFile(version);
 
-        filename += ENSEMBL_PROTEIN_FEATURE_DATA_FILE;
+        filename = resolveFilenameWithOldIfRequired(filename);
 
         if(!Files.exists(Paths.get(filename)))
             return false;
@@ -294,7 +325,7 @@ public final class EnsemblDataLoader
 
             String line = fileReader.readLine();
 
-            final Map<String,Integer> fieldsIndexMap = createFieldsIndexMap(line, ENSEMBL_DELIM);
+            final Map<String, Integer> fieldsIndexMap = createFieldsIndexMap(line, ENSEMBL_DELIM);
 
             if(line == null)
             {
@@ -316,7 +347,7 @@ public final class EnsemblDataLoader
 
             line = fileReader.readLine(); // skip header
 
-            while (line != null)
+            while(line != null)
             {
                 // parse CSV data
                 String[] items = line.split(ENSEMBL_DELIM);
@@ -358,12 +389,13 @@ public final class EnsemblDataLoader
         return true;
     }
 
-    protected static boolean loadTranscriptSpliceAcceptorData(
-            final String dataPath, Map<Integer,Integer> transSaPositionDataMap, final Set<Integer> restrictedTransIds)
+    public static boolean loadTranscriptSpliceAcceptorData(
+            final String dataPath, final RefGenomeVersion version, final Map<Integer, Integer> transSaPositionDataMap,
+            final Set<Integer> restrictedTransIds)
     {
-        String filename = dataPath;
+        String filename = checkAddDirSeparator(dataPath) + ensemblSpliceDataFile(version);
 
-        filename += ENSEMBL_TRANS_SPLICE_DATA_FILE;
+        filename = resolveFilenameWithOldIfRequired(filename);
 
         if(!Files.exists(Paths.get(filename)))
             return false;
@@ -374,7 +406,7 @@ public final class EnsemblDataLoader
 
             String line = fileReader.readLine();
 
-            final Map<String,Integer> fieldsIndexMap = createFieldsIndexMap(line, ENSEMBL_DELIM);
+            final Map<String, Integer> fieldsIndexMap = createFieldsIndexMap(line, ENSEMBL_DELIM);
 
             if(line == null)
             {
@@ -388,7 +420,7 @@ public final class EnsemblDataLoader
 
             line = fileReader.readLine(); // skip header
 
-            while (line != null)
+            while(line != null)
             {
                 String[] items = line.split(ENSEMBL_DELIM);
 
@@ -419,28 +451,23 @@ public final class EnsemblDataLoader
     }
 
     public static boolean loadTranscriptAminoAcidData(
-            final String dataPath, final Map<String,TranscriptAminoAcids> transAminoAcidMap,
+            final String dataPath, final RefGenomeVersion version, final Map<String, TranscriptAminoAcids> transAminoAcidMap,
             final List<String> restrictedGeneIds, boolean canonicalOnly)
     {
-        return loadTranscriptAminoAcidData(new File(dataPath), transAminoAcidMap, restrictedGeneIds, canonicalOnly);
-    }
+        String filename = checkAddDirSeparator(dataPath) + ensemblAminoAcidDataFile(version);
 
-    public static boolean loadTranscriptAminoAcidData(
-            final File dataDir, final Map<String,TranscriptAminoAcids> transAminoAcidMap,
-            final List<String> restrictedGeneIds, boolean canonicalOnly)
-    {
-        File dataFile = new File(dataDir, ENSEMBL_TRANS_AMINO_ACIDS_FILE);
+        filename = resolveFilenameWithOldIfRequired(filename);
 
-        if(!dataFile.exists())
+        if(!Files.exists(Paths.get(filename)))
             return false;
 
         try
         {
-            BufferedReader fileReader = new BufferedReader(new FileReader(dataFile));
+            BufferedReader fileReader = new BufferedReader(new FileReader(filename));
 
             String line = fileReader.readLine();
 
-            final Map<String,Integer> fieldsIndexMap = createFieldsIndexMap(line, ENSEMBL_DELIM);
+            final Map<String, Integer> fieldsIndexMap = createFieldsIndexMap(line, ENSEMBL_DELIM);
 
             int geneIdIndex = fieldsIndexMap.get(ENS_FLD_GENE_ID);
             int geneNameIndex = fieldsIndexMap.get(ENS_FLD_GENE_NAME);
@@ -448,7 +475,7 @@ public final class EnsemblDataLoader
             Integer isCanonicalIndex = fieldsIndexMap.get(ENS_FLD_CANONICAL);
             int aaIndex = fieldsIndexMap.get("AminoAcids");
 
-            while ((line = fileReader.readLine()) != null)
+            while((line = fileReader.readLine()) != null)
             {
                 String[] values = line.split(ENSEMBL_DELIM);
 
@@ -456,7 +483,7 @@ public final class EnsemblDataLoader
 
                 if(!restrictedGeneIds.isEmpty() && !restrictedGeneIds.contains(geneId))
                 {
-                    line = fileReader.readLine();
+                    fileReader.readLine();
                     continue;
                 }
 
@@ -474,30 +501,22 @@ public final class EnsemblDataLoader
         }
         catch(IOException e)
         {
-            LOGGER.warn("failed to load transcript amino-acid data({}): {}", dataFile.getAbsolutePath(), e.toString());
+            LOGGER.warn("failed to load transcript amino-acid data({}): {}", filename, e.toString());
             return false;
         }
 
         return true;
     }
 
-    public static Map<String,List<TranscriptAminoAcids>> convertAminoAcidsToGeneMap(final Map<String,TranscriptAminoAcids> transAminoAcidMap)
+    public static Map<String, List<TranscriptAminoAcids>> convertAminoAcidsToGeneMap(
+            final Map<String, TranscriptAminoAcids> transAminoAcidMap)
     {
-        Map<String,List<TranscriptAminoAcids>> geneTransMap = Maps.newHashMap();
+        Map<String, List<TranscriptAminoAcids>> geneTransMap = Maps.newHashMap();
 
-        for(Map.Entry<String,TranscriptAminoAcids> entry : transAminoAcidMap.entrySet())
+        for(Map.Entry<String, TranscriptAminoAcids> entry : transAminoAcidMap.entrySet())
         {
             TranscriptAminoAcids transAA = entry.getValue();
-
-            List<TranscriptAminoAcids> geneList = geneTransMap.get(transAA.GeneId);
-
-            if(geneList == null)
-            {
-                geneList = Lists.newArrayList();
-                geneTransMap.put(transAA.GeneId, geneList);
-            }
-
-            geneList.add(transAA);
+            geneTransMap.computeIfAbsent(transAA.GeneId, k -> Lists.newArrayList()).add(transAA);
         }
 
         return geneTransMap;

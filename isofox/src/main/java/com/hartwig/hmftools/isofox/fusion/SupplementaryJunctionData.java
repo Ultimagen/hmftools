@@ -16,7 +16,7 @@ import java.util.Map;
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.bam.ClippedSide;
 import com.hartwig.hmftools.common.bam.SupplementaryReadData;
-import com.hartwig.hmftools.isofox.common.ReadRecord;
+import com.hartwig.hmftools.isofox.common.Read;
 
 import htsjdk.samtools.Cigar;
 
@@ -55,21 +55,21 @@ public class SupplementaryJunctionData
 
     public static SupplementaryJunctionData fromReads(final ChimericReadGroup readGroup)
     {
-        ReadRecord read = readGroup.reads().stream().filter(x -> x.hasSuppAlignment()).findFirst().orElse(null);
+        Read read = readGroup.reads().stream().filter(x -> x.hasSuppAlignment()).findFirst().orElse(null);
         if(read == null)
             return null;
 
-        SupplementaryReadData suppData = SupplementaryReadData.extractAlignment(read.getSuppAlignment());
+        SupplementaryReadData suppData = read.supplementaryData();
 
         if(suppData == null)
             return null;
 
         // find the junction from this read's SC and same for the supp mapping data
-        ClippedSide scSide = ReadRecord.clippedSide(read);
+        Boolean maxSoftOnLeft = read.longestSoftClipIsLeft();
 
-        SupplementaryJunctionData suppJuncData = new SupplementaryJunctionData(read.Id);
+        SupplementaryJunctionData suppJuncData = new SupplementaryJunctionData(read.id());
 
-        if(scSide.isLeft())
+        if(maxSoftOnLeft != null && maxSoftOnLeft)
         {
             suppJuncData.LocalJunctionPos = read.getCoordsBoundary(SE_START);
             suppJuncData.LocalJunctionOrient = ORIENT_REV;
@@ -82,12 +82,12 @@ public class SupplementaryJunctionData
 
         suppJuncData.RemoteChromosome = suppData.Chromosome;
         Cigar remoteCigar = cigarFromStr(suppData.Cigar);
-        scSide = ClippedSide.fromCigar(remoteCigar, true);
+        ClippedSide remoteSoftClipSide = ClippedSide.fromCigar(remoteCigar, true);
 
-        if(scSide == null)
+        if(remoteSoftClipSide == null)
             return null;
 
-        if(scSide.isLeft())
+        if(remoteSoftClipSide.isLeft())
         {
             suppJuncData.RemoteJunctionPos = suppData.Position;
         }

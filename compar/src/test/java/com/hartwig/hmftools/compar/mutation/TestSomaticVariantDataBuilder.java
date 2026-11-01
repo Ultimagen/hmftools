@@ -1,11 +1,13 @@
 package com.hartwig.hmftools.compar.mutation;
 
+import java.util.Collections;
 import java.util.Set;
 import java.util.function.Consumer;
 
-import com.hartwig.hmftools.common.variant.Hotspot;
+import com.hartwig.hmftools.common.variant.HotspotType;
 import com.hartwig.hmftools.common.variant.VariantTier;
 import com.hartwig.hmftools.common.variant.VariantType;
+import com.hartwig.hmftools.compar.TestComparableItemBuilder;
 
 public class TestSomaticVariantDataBuilder
 {
@@ -16,9 +18,10 @@ public class TestSomaticVariantDataBuilder
     public VariantType type = VariantType.SNP;
     public String gene = "BRAF";
     public boolean reported = true;
-    public Hotspot hotspotStatus = Hotspot.HOTSPOT;
+    public HotspotType hotspotStatus = HotspotType.HOTSPOT;
     public VariantTier tier = VariantTier.HOTSPOT;
     public boolean biallelic = false;
+    public double biallelicProb = 0;
     public String canonicalEffect = "missense_variant";
     public String canonicalCodingEffect = "MISSENSE";
     public String canonicalHgvsCodingImpact = "c.1799T>A";
@@ -27,7 +30,7 @@ public class TestSomaticVariantDataBuilder
     public boolean hasLPS = false;
     public int qual = 275;
     public double subclonalLikelihood = 0.;
-    public Set<String> filters = Set.of("PASS");
+    public Set<String> filters = Collections.emptySet();
     public double variantCopyNumber = 1.1;
     public double purityAdjustedVaf = 0.45;
     public int tumorTotalReadCount = 116;
@@ -37,7 +40,7 @@ public class TestSomaticVariantDataBuilder
     public String comparisonChromosome = "7";
     public int comparisonPosition = 140453136;
 
-    private static final Consumer<TestSomaticVariantDataBuilder> ALTERNATE_DEFAULT_INITIALIZER = b ->
+    private static final Consumer<TestSomaticVariantDataBuilder> ALTERNATE_INITIALIZER = b ->
     {
         b.chromosome = "8";
         b.position = 10000;
@@ -46,9 +49,10 @@ public class TestSomaticVariantDataBuilder
         b.type = VariantType.INDEL;
         b.gene = "BRCA1";
         b.reported = false;
-        b.hotspotStatus = Hotspot.NEAR_HOTSPOT;
+        b.hotspotStatus = HotspotType.NEAR_HOTSPOT;
         b.tier = VariantTier.PANEL;
         b.biallelic = true;
+        b.biallelicProb = 1.0;
         b.canonicalEffect = "synonymous_variant";
         b.canonicalCodingEffect = "SYNONYMOUS";
         b.canonicalHgvsCodingImpact = "c.1800T>A";
@@ -66,40 +70,18 @@ public class TestSomaticVariantDataBuilder
         b.comparisonPosition = 10000;
     };
 
-    private TestSomaticVariantDataBuilder()
-    {
-    }
-
-    public static SomaticVariantData create(final Consumer<TestSomaticVariantDataBuilder> initializer)
-    {
-        TestSomaticVariantDataBuilder builder = new TestSomaticVariantDataBuilder();
-        initializer.accept(builder);
-        return builder.build();
-    }
-
-    public static SomaticVariantData create()
-    {
-        return create(b -> {});
-    }
-
-    public static SomaticVariantData createWithAlternateDefaults(final Consumer<TestSomaticVariantDataBuilder> initializer)
-    {
-        TestSomaticVariantDataBuilder builder = new TestSomaticVariantDataBuilder();
-        ALTERNATE_DEFAULT_INITIALIZER.accept(builder);
-        initializer.accept(builder);
-        return builder.build();
-    }
-
-    public static SomaticVariantData createWithAlternateDefaults()
-    {
-        return createWithAlternateDefaults(b -> {});
-    }
+    public static final TestComparableItemBuilder<TestSomaticVariantDataBuilder, SomaticVariantData> BUILDER =
+            new TestComparableItemBuilder<>(
+                    TestSomaticVariantDataBuilder::new,
+                    TestSomaticVariantDataBuilder::build,
+                    ALTERNATE_INITIALIZER
+            );
 
     private SomaticVariantData build()
     {
-        return new SomaticVariantData(chromosome, position, ref, alt, type, gene, reported, hotspotStatus, tier, biallelic, canonicalEffect,
-                canonicalCodingEffect, canonicalHgvsCodingImpact, canonicalHgvsProteinImpact, otherReportedEffects, hasLPS, qual,
-                subclonalLikelihood, filters, variantCopyNumber, purityAdjustedVaf, tumorSupportingReadCount, tumorTotalReadCount,
+        return new SomaticVariantData(chromosome, position, ref, alt, type, gene, reported, hotspotStatus, tier, biallelic, biallelicProb,
+                canonicalEffect, canonicalCodingEffect, canonicalHgvsCodingImpact, canonicalHgvsProteinImpact, otherReportedEffects, hasLPS,
+                qual, subclonalLikelihood, filters, variantCopyNumber, purityAdjustedVaf, tumorSupportingReadCount, tumorTotalReadCount,
                 isFromUnfilteredVcf, hasPurpleAnnotation, comparisonChromosome, comparisonPosition);
     }
 }

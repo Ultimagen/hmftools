@@ -1,19 +1,23 @@
 package com.hartwig.hmftools.common.variant;
 
 import static com.hartwig.hmftools.common.variant.AllelicDepth.NO_DEPTH;
+import static com.hartwig.hmftools.common.variant.CommonVcfTags.PASS_FILTER;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_AF;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_BIALLELIC_FLAG;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_BIALLELIC_PROB;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_CN;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_MINOR_ALLELE_CN_INFO;
 import static com.hartwig.hmftools.common.variant.PurpleVcfTags.PURPLE_VARIANT_CN;
+import static com.hartwig.hmftools.common.variant.PurpleVcfTags.REPORTABLE_TRANSCRIPTS;
+import static com.hartwig.hmftools.common.variant.PurpleVcfTags.REPORTABLE_TRANSCRIPTS_DELIM;
 import static com.hartwig.hmftools.common.variant.SageVcfTags.LOCAL_PHASE_SET;
 import static com.hartwig.hmftools.common.variant.SageVcfTags.MICROHOMOLOGY;
 import static com.hartwig.hmftools.common.variant.SageVcfTags.TRINUCLEOTIDE_CONTEXT;
-import static com.hartwig.hmftools.common.variant.SomaticVariantFactory.MAPPABILITY_TAG;
-import static com.hartwig.hmftools.common.variant.SomaticVariantFactory.localPhaseSetsStr;
+import static com.hartwig.hmftools.common.variant.PaveVcfTags.MAPPABILITY;
 import static com.hartwig.hmftools.common.variant.CommonVcfTags.REPORTED_FLAG;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -80,7 +84,7 @@ public class VariantContextDecorator implements GenomePosition
 
     public boolean isPass()
     {
-        return mFilter.equals(SomaticVariantFactory.PASS_FILTER);
+        return mFilter.equals(PASS_FILTER);
     }
 
     public PathogenicSummary clinvarPathogenicSummary()
@@ -98,28 +102,7 @@ public class VariantContextDecorator implements GenomePosition
         return mContext;
     }
 
-    public String filter()
-    {
-        return mFilter;
-    }
-
-    public VariantType type()
-    {
-        return mType;
-    }
-
-    public String ref()
-    {
-        return mRef;
-    }
-
-    public String alt()
-    {
-        return mAlt;
-    }
-
     @Override
-    @NotNull
     public String chromosome()
     {
         return mContext.getContig();
@@ -129,6 +112,23 @@ public class VariantContextDecorator implements GenomePosition
     public int position()
     {
         return mContext.getStart();
+    }
+
+    public String ref()
+    {
+        return mRef;
+    }
+    public String alt()
+    {
+        return mAlt;
+    }
+    public VariantType type()
+    {
+        return mType;
+    }
+    public String filter()
+    {
+        return mFilter;
     }
 
     public VariantImpact variantImpact()
@@ -178,12 +178,19 @@ public class VariantContextDecorator implements GenomePosition
 
     public boolean biallelic()
     {
-        return mContext.getAttributeAsBoolean(PURPLE_BIALLELIC_FLAG, false);
+        return biallelic(mContext);
     }
 
-    public double biallelicProbability()
+    public static boolean biallelic(final VariantContext context)
     {
-        return mContext.getAttributeAsDouble(PURPLE_BIALLELIC_PROB, biallelic() ? 1 : 0);
+        return context.getAttributeAsBoolean(PURPLE_BIALLELIC_FLAG, false);
+    }
+
+    public double biallelicProbability() { return biallelicProbability(mContext, biallelic()); }
+
+    public static double biallelicProbability(final VariantContext context, final boolean biallelic)
+    {
+        return context.getAttributeAsDouble(PURPLE_BIALLELIC_PROB, biallelic ? 1 : 0);
     }
 
     public double minorAlleleCopyNumber()
@@ -200,7 +207,7 @@ public class VariantContextDecorator implements GenomePosition
     public String localPhaseSetsToString()
     {
         List<Integer> localPhaseSets = mContext.getAttributeAsIntList(LOCAL_PHASE_SET, 0);
-        return localPhaseSetsStr(localPhaseSets);
+        return SageVcfTags.localPhaseSetsStr(localPhaseSets);
     }
 
     @Nullable
@@ -249,14 +256,14 @@ public class VariantContextDecorator implements GenomePosition
         return mContext.getAttributeAsString(SageVcfTags.REPEAT_SEQUENCE, Strings.EMPTY);
     }
 
-    public Hotspot hotspot()
+    public HotspotType hotspot()
     {
-        return Hotspot.fromVariant(mContext);
+        return HotspotType.fromVariant(mContext);
     }
 
     public boolean isHotspot()
     {
-        return hotspot() == Hotspot.HOTSPOT;
+        return hotspot() == HotspotType.HOTSPOT;
     }
 
     public String trinucleotideContext()
@@ -266,7 +273,7 @@ public class VariantContextDecorator implements GenomePosition
 
     public double mappability()
     {
-        return mContext.getAttributeAsDouble(MAPPABILITY_TAG, 0);
+        return mContext.getAttributeAsDouble(MAPPABILITY, 0);
     }
 
     public boolean reported()
@@ -279,20 +286,32 @@ public class VariantContextDecorator implements GenomePosition
         return mContext.getAttributeAsString(MICROHOMOLOGY, Strings.EMPTY);
     }
 
-    public boolean isPathogenic()
+    @Nullable
+    public List<String> reportableTranscripts()
     {
-        if(clinvarPathogenicSummary().Status == Pathogenicity.BENIGN_BLACKLIST)
+        if(mContext.hasAttribute(REPORTABLE_TRANSCRIPTS))
         {
+            String reportableTransStr = mContext.getAttributeAsString(REPORTABLE_TRANSCRIPTS, "");
+            return Arrays.stream(reportableTransStr.split("\\" + REPORTABLE_TRANSCRIPTS_DELIM, -1)).toList();
+        }
+
+        return Collections.emptyList();
+    }
+
+    public boolean isGermlinePathogenic()
+    {
+        return isGermlinePathogenic(clinvarPathogenicSummary(), isHotspot(), variantImpact());
+    }
+
+    public static boolean isGermlinePathogenic(final PathogenicSummary pathogenicSummary, final boolean isHotspot, final VariantImpact impact)
+    {
+        if(pathogenicSummary.Status == Pathogenicity.BENIGN_BLACKLIST)
             return false;
-        }
 
-        if(isHotspot() || clinvarPathogenicSummary().Status.isPathogenic())
-        {
+        if(isHotspot || pathogenicSummary.Status.isPathogenic())
             return true;
-        }
 
-        return clinvarPathogenicSummary().Status == Pathogenicity.UNKNOWN
-                && PATHOGENIC_EFFECT.contains(variantImpact().CanonicalCodingEffect);
+        return pathogenicSummary.Status == Pathogenicity.UNKNOWN && (PATHOGENIC_EFFECT.contains(impact.CanonicalCodingEffect));
     }
 
     private static String displayFilter(final VariantContext context)
@@ -305,7 +324,7 @@ public class VariantContextDecorator implements GenomePosition
         }
         else
         {
-            return SomaticVariantFactory.PASS_FILTER;
+            return PASS_FILTER;
         }
     }
 

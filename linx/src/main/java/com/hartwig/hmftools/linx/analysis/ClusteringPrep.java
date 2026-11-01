@@ -6,6 +6,8 @@ import static java.lang.Math.min;
 import static java.lang.Math.round;
 
 import static com.hartwig.hmftools.common.genome.region.Orientation.ORIENT_FWD;
+import static com.hartwig.hmftools.common.segmentation.Arm.P;
+import static com.hartwig.hmftools.common.segmentation.Arm.Q;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.BND;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DEL;
 import static com.hartwig.hmftools.common.sv.StructuralVariantType.DUP;
@@ -17,8 +19,6 @@ import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
 import static com.hartwig.hmftools.linx.analysis.ClusteringReason.SGL_MAPPING_INF;
 import static com.hartwig.hmftools.linx.analysis.SvUtilities.addSvToChrBreakendMap;
 import static com.hartwig.hmftools.linx.cn.LohEvent.CN_DATA_NO_SV;
-import static com.hartwig.hmftools.common.purple.ChromosomeArm.P_ARM;
-import static com.hartwig.hmftools.common.purple.ChromosomeArm.Q_ARM;
 import static com.hartwig.hmftools.linx.types.LinxConstants.MAX_SIMPLE_DUP_DEL_CUTOFF;
 import static com.hartwig.hmftools.linx.types.LinxConstants.MIN_SIMPLE_DUP_DEL_CUTOFF;
 import static com.hartwig.hmftools.linx.types.SvVarData.RELATION_TYPE_NEIGHBOUR;
@@ -47,7 +47,7 @@ public class ClusteringPrep
     public static void populateChromosomeBreakendMap(final List<SvVarData> allVariants, final ClusteringState state)
     {
         // add each SV's breakends to a map keyed by chromosome, with the breakends in order of position lowest to highest
-        for(final SvVarData var : allVariants)
+        for(SvVarData var : allVariants)
         {
             addSvToChrBreakendMap(var, state.getChrBreakendMap());
         }
@@ -64,7 +64,7 @@ public class ClusteringPrep
 
     public static void linkSglMappedInferreds(final List<SvVarData> allVariants)
     {
-        final List<SvVarData> sgls = allVariants.stream()
+        List<SvVarData> sgls = allVariants.stream()
                 .filter(x -> x.type() == SGL)
                 .filter(x -> !x.getSglMappings().isEmpty())
                 .collect(Collectors.toList());
@@ -91,7 +91,7 @@ public class ClusteringPrep
                         continue;
 
                     // a link has been found
-                    final SvVarData newVar = mergeSglMappedInferred(sgl, inf, mapping, sgl.id()); // ++nextSvId
+                    SvVarData newVar = mergeSglMappedInferred(sgl, inf, mapping, sgl.id()); // ++nextSvId
 
                     LNX_LOGGER.debug("new SV({}) from sgl({}) with mapping to inf({})", newVar.toString(), sgl.posId(), inf.posId());
 
@@ -114,8 +114,8 @@ public class ClusteringPrep
 
     public static SvVarData mergeSglMappedInferred(final SvVarData sgl, final SvVarData inf, final SglMapping mapping, final int svId)
     {
-        final StructuralVariantData sglSvData = sgl.getSvData();
-        final StructuralVariantData infSvData = inf.getSvData();
+        StructuralVariantData sglSvData = sgl.getSvData();
+        StructuralVariantData infSvData = inf.getSvData();
 
         StructuralVariantType newType;
 
@@ -203,26 +203,26 @@ public class ClusteringPrep
 
         int simpleArmCount = 0;
 
-        for(final Map.Entry<String, List<SvBreakend>> entry : state.getChrBreakendMap().entrySet())
+        for(Map.Entry<String, List<SvBreakend>> entry : state.getChrBreakendMap().entrySet())
         {
-            final String chromosome = entry.getKey();
-            final List<SvBreakend> breakendList = entry.getValue();
+            String chromosome = entry.getKey();
+            List<SvBreakend> breakendList = entry.getValue();
 
             // first check for complex events on the arm since these will be skipped
             boolean pArmHasInversions = false;
             boolean qArmHasInversions = false;
 
-            for(final SvBreakend breakend : breakendList)
+            for(SvBreakend breakend : breakendList)
             {
-                final SvVarData var = breakend.getSV();
+                SvVarData var = breakend.getSV();
 
                 if(var.type() != INV)
                     continue;
 
-                if(!pArmHasInversions && (var.arm(true) == P_ARM || var.arm(false) == P_ARM))
+                if(!pArmHasInversions && (var.arm(true) == P || var.arm(false) == P))
                     pArmHasInversions = true;
 
-                if(!qArmHasInversions && (var.arm(true) == Q_ARM || var.arm(false) == Q_ARM))
+                if(!qArmHasInversions && (var.arm(true) == Q || var.arm(false) == Q))
                     qArmHasInversions = true;
 
                 if(pArmHasInversions && qArmHasInversions)
@@ -239,22 +239,22 @@ public class ClusteringPrep
             if(!qArmHasInversions)
                 ++simpleArmCount;
 
-            for(final SvBreakend breakend : breakendList)
+            for(SvBreakend breakend : breakendList)
             {
                 if(!breakend.usesStart() || !(breakend.type() == DEL || breakend.type() == DUP))
                     continue;
 
-                final SvVarData var = breakend.getSV();
+                SvVarData var = breakend.getSV();
 
                 if(pArmHasInversions)
                 {
-                    if(var.arm(true) == P_ARM || var.arm(false) == P_ARM)
+                    if(var.arm(true) == P || var.arm(false) == P)
                         continue;
                 }
 
                 if(qArmHasInversions)
                 {
-                    if(var.arm(true) == Q_ARM || var.arm(false) == Q_ARM)
+                    if(var.arm(true) == Q || var.arm(false) == Q)
                         continue;
                 }
 
@@ -303,11 +303,11 @@ public class ClusteringPrep
 
             for(int i = 0; i < breakendList.size(); ++i)
             {
-                final SvBreakend breakend = breakendList.get(i);
+                SvBreakend breakend = breakendList.get(i);
                 SvVarData var = breakend.getSV();
 
-                final SvBreakend prevBreakend = (i > 0) ? breakendList.get(i - 1) : null;
-                final SvBreakend nextBreakend = (i < breakendCount-1) ? breakendList.get(i + 1) : null;
+                SvBreakend prevBreakend = (i > 0) ? breakendList.get(i - 1) : null;
+                SvBreakend nextBreakend = (i < breakendCount-1) ? breakendList.get(i + 1) : null;
 
                 // work out closest distance to breakends before and after if not the same SV
                 int closestDistance = -1;
@@ -361,7 +361,7 @@ public class ClusteringPrep
 
         if(state.getLohEventList() != null)
         {
-            for(final LohEvent lohEvent : state.getLohEventList())
+            for(LohEvent lohEvent : state.getLohEventList())
             {
                 if(!lohEvent.isSvEvent())
                     continue;
@@ -376,9 +376,9 @@ public class ClusteringPrep
                 if(breakendList == null)
                     continue;
 
-                for(final SvBreakend breakend : breakendList)
+                for(SvBreakend breakend : breakendList)
                 {
-                    final SvVarData var = breakend.getSV();
+                    SvVarData var = breakend.getSV();
 
                     if(breakend.orientation() == 1 && var.id() == lohEvent.StartSV)
                     {
@@ -429,7 +429,7 @@ public class ClusteringPrep
                 if(breakendList == null)
                     continue;
 
-                for(final SvBreakend breakend : breakendList)
+                for(SvBreakend breakend : breakendList)
                 {
                     if(breakend.orientation() == 1 && breakend.getSV().id() == homLossEvent.StartSV)
                     {

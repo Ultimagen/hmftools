@@ -1,12 +1,17 @@
 package com.hartwig.hmftools.common.genome.position;
 
-import org.immutables.value.Value;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
+import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 
-@Value.Immutable
-@Value.Style(passAnnotations = { NotNull.class, Nullable.class })
-public abstract class GenomePositionImpl implements GenomePosition
+public record GenomePositionImpl(String chromosome, int position) implements GenomePosition
 {
+    public GenomePositionImpl(HumanChromosome chromosome, RefGenomeVersion genomeVersion, int position)
+    {
+        this(genomeVersion.versionedChromosome(chromosome), position);
+    }
 
+    public GenomePositionImpl(GenomePosition position)
+    {
+        this(position.chromosome(), position.position());
+    }
 }

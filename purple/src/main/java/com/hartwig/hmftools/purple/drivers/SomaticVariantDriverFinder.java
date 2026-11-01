@@ -1,17 +1,23 @@
 package com.hartwig.hmftools.purple.drivers;
 
-import static com.hartwig.hmftools.purple.drivers.SomaticVariantDrivers.isReportable;
+import static com.hartwig.hmftools.common.driver.LikelihoodMethod.DNDS;
+import static com.hartwig.hmftools.common.driver.LikelihoodMethod.SPLICE_REGION;
+import static com.hartwig.hmftools.purple.drivers.SomaticVariantDrivers.hasTranscriptCodingEffect;
+import static com.hartwig.hmftools.purple.drivers.SomaticVariantDrivers.isCandidateReportable;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.driver.DriverCatalog;
 import com.hartwig.hmftools.common.driver.DriverCategory;
+import com.hartwig.hmftools.common.driver.LikelihoodMethod;
 import com.hartwig.hmftools.common.driver.dnds.DndsDriverGeneLikelihood;
 import com.hartwig.hmftools.common.driver.dnds.ImmutableDndsDriverGeneLikelihood;
 import com.hartwig.hmftools.common.driver.dnds.ImmutableDndsDriverImpactLikelihood;
-import com.hartwig.hmftools.common.driver.panel.DriverGenePanel;
+import com.hartwig.hmftools.common.purple.ReportedStatus;
+import com.hartwig.hmftools.purple.DriverGeneResource;
 import com.hartwig.hmftools.common.driver.panel.ReportablePredicate;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
 import com.hartwig.hmftools.common.variant.VariantType;
@@ -22,8 +28,8 @@ public abstract class SomaticVariantDriverFinder
 {
     protected final DriverCategory mCategory;
     protected final ReportablePredicate mReportablePredicate;
-    protected final Map<String, DndsDriverGeneLikelihood> mLikelihoodsByGene;
-    protected final List<SomaticVariant> mReportableVariants;
+    protected final Map<String,DndsDriverGeneLikelihood> mLikelihoodsByGene;
+    protected final List<SomaticVariant> mDriverVariants;
 
     public static final DndsDriverGeneLikelihood NO_GENE_DNDS_LIKELIHOOD = ImmutableDndsDriverGeneLikelihood.builder()
         .gene("")
@@ -33,29 +39,89 @@ public abstract class SomaticVariantDriverFinder
         .nonsense(ImmutableDndsDriverImpactLikelihood.builder().driversPerSample(0).passengersPerMutation(0).build())
         .build();
 
-    public SomaticVariantDriverFinder(final DriverGenePanel genePanel, final DriverCategory category)
+    public SomaticVariantDriverFinder(final DriverGeneResource genePanel, final DriverCategory category)
     {
         mCategory = category;
-        mLikelihoodsByGene = category == DriverCategory.ONCO ? genePanel.oncoLikelihood() : genePanel.tsgLikelihood();
-        mReportablePredicate = new ReportablePredicate(category, genePanel.driverGenes());
-        mReportableVariants = Lists.newArrayList();
+        mLikelihoodsByGene = category == DriverCategory.ONCO ? genePanel.OncoLikelihoodMap : genePanel.TsgLikelihoodMap;
+        mReportablePredicate = new ReportablePredicate(category, genePanel.DriverGeneList);
+        mDriverVariants = Lists.newArrayList();
     }
     
     public boolean checkVariant(final SomaticVariant variant)
     {
-        if(isReportable(mReportablePredicate, variant))
+        // first check if the variant has reportable criteria irrespective of its driver gene settings
+        // since these will be used to make driver catalog records
+        if(isCandidateReportable(mReportablePredicate, variant))
         {
-            mReportableVariants.add(variant);
-            return true;
+            mDriverVariants.add(variant);
+
+            // return true if the variant is configured true for reportability
+            return mReportablePredicate.isReportable(variant.variantImpact(), variant.isHotspot());
         }
         
         return false;
     }
 
-    public boolean hasVariant(final SomaticVariant variant) { return mReportableVariants.contains(variant); }
-    public void addVariant(final SomaticVariant variant) { mReportableVariants.add(variant); }
+    public boolean hasVariant(final SomaticVariant variant) { return mDriverVariants.contains(variant); }
+    public void addVariant(final SomaticVariant variant) { mDriverVariants.add(variant); }
 
-    public abstract List<DriverCatalog> findDrivers(
+    protected List<DriverCatalog> findDrivers(
             final Map<String,List<GeneCopyNumber>> geneCopyNumberMap, final Map<VariantType,Integer> variantTypeCounts,
-            final Map<VariantType,Integer> variantTypeCountsBiallelic, final List<DriverSourceData> driverSourceData);
+            final Map<VariantType,Integer> variantTypeCountsBiallelic, final List<DriverSourceData> driverSourceData)
+    {
+        List<DriverCatalog> driverCatalog = Lists.newArrayList();
+
+        Map<String,List<SomaticVariant>> codingVariants = mDriverVariants.stream().collect(Collectors.groupingBy(SomaticVariant::gene));
+
+        for(Map.Entry<String,List<SomaticVariant>> entry : codingVariants.entrySet())
+        {
+            String gene = entry.getKey();
+            List<SomaticVariant> geneVariants = entry.getValue();
+
+            DndsDriverGeneLikelihood dndsLikelihood = mLikelihoodsByGene.containsKey(gene) ?
+                    mLikelihoodsByGene.get(gene) : NO_GENE_DNDS_LIKELIHOOD;
+
+            List<GeneCopyNumber> geneCopyNumbers = geneCopyNumberMap.get(gene);
+
+            if(geneCopyNumbers == null)
+                continue;
+
+            if(!mReportablePredicate.isDriverGene(geneCopyNumbers.get(0).GeneName))
+                continue;
+
+            for(GeneCopyNumber geneCopyNumber : geneCopyNumbers)
+            {
+                if(geneCopyNumbers.size() == 1
+                || geneVariants.stream().anyMatch(x -> hasTranscriptCodingEffect(x.variantImpact(), x.type(), geneCopyNumber.TransName)))
+                {
+                    // check the driver-gene-panel reportable flag based on the type of mutation
+                    boolean hasCodingImpact = geneVariants.stream()
+                            .anyMatch(x -> x.isHotspot() || hasTranscriptCodingEffect(x.variantImpact(), x.type(), geneCopyNumber.TransName));
+
+                    boolean isReportable = hasCodingImpact
+                            && geneVariants.stream().anyMatch(x -> mReportablePredicate.isReportable(x.variantImpact(), x.isHotspot()));
+
+                    ReportedStatus reportedStatus = isReportable ? ReportedStatus.REPORTED : ReportedStatus.NOT_REPORTED;
+
+                    LikelihoodMethod likelihoodMethod = hasCodingImpact ? DNDS : SPLICE_REGION;
+
+                    DriverCatalog driverRecord = createDriverCatalog(
+                            geneVariants, variantTypeCounts, variantTypeCountsBiallelic, geneCopyNumber,
+                            dndsLikelihood, likelihoodMethod, reportedStatus);
+
+                    driverCatalog.add(driverRecord);
+
+                    driverSourceData.add(new DriverSourceData(driverRecord, geneVariants.get(0)));
+
+                }
+            }
+        }
+
+        return driverCatalog;
+    }
+
+    public abstract DriverCatalog createDriverCatalog(
+            final List<SomaticVariant> geneVariants, final Map<VariantType,Integer> variantTypeCounts,
+            final Map<VariantType,Integer> biallelicCounts, final GeneCopyNumber geneCopyNumber,
+            final DndsDriverGeneLikelihood likelihood, final LikelihoodMethod likelihoodMethod, final ReportedStatus reportedStatus);
 }

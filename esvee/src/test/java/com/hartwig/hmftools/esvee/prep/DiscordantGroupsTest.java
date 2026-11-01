@@ -7,7 +7,7 @@ import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_2;
 import static com.hartwig.hmftools.common.test.GeneTestUtils.CHR_3;
 import static com.hartwig.hmftools.esvee.TestUtils.READ_ID_GENERATOR;
 import static com.hartwig.hmftools.esvee.TestUtils.createSamRecord;
-import static com.hartwig.hmftools.esvee.prep.PrepConstants.DEFAULT_MAX_FRAGMENT_LENGTH;
+import static com.hartwig.hmftools.esvee.common.SvConstants.DEFAULT_MAX_FRAGMENT_LENGTH;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.DISCORDANT_GROUP_MAX_LOCAL_LENGTH;
 import static com.hartwig.hmftools.esvee.prep.TestUtils.REGION_1;
 import static com.hartwig.hmftools.esvee.prep.types.ReadType.CANDIDATE_SUPPORT;
@@ -46,8 +46,7 @@ public class DiscordantGroupsTest
                 new ChrBaseRegion(CHR_1, 100, 1000), FORWARD, new ChrBaseRegion(CHR_2, 100, 1000), REVERSE,
                 ""));
 
-        DiscordantGroups discordantGroups = new DiscordantGroups(
-                REGION_1, DEFAULT_MAX_FRAGMENT_LENGTH, knownHotspots, false);
+        DiscordantGroups discordantGroups = new DiscordantGroups(REGION_1, DEFAULT_MAX_FRAGMENT_LENGTH, knownHotspots);
 
         PrepRead read = PrepRead.from(createSamRecord(READ_ID_GENERATOR.nextId(), CHR_1, 500, CHR_2, 500,
                 true, false, null));
@@ -93,8 +92,7 @@ public class DiscordantGroupsTest
         addDiscordantCandidate(discordantCandidates, READ_ID_GENERATOR.nextId(), CHR_1, 431, CHR_2, 5150);
 
         List<KnownHotspot> knownHotspots = Lists.newArrayList();
-        DiscordantGroups discordantGroups = new DiscordantGroups(
-                REGION_1, DEFAULT_MAX_FRAGMENT_LENGTH, knownHotspots, false);
+        DiscordantGroups discordantGroups = new DiscordantGroups(REGION_1, DEFAULT_MAX_FRAGMENT_LENGTH, knownHotspots);
 
         List<JunctionData> junctions = discordantGroups.formDiscordantJunctions(discordantCandidates);
         assertEquals(0, junctions.size());
@@ -191,8 +189,7 @@ public class DiscordantGroupsTest
 
         List<KnownHotspot> knownHotspots = Lists.newArrayList();
 
-        DiscordantGroups discordantGroups = new DiscordantGroups(
-                REGION_1, 500, knownHotspots, false);
+        DiscordantGroups discordantGroups = new DiscordantGroups(REGION_1, 500, knownHotspots);
 
         List<JunctionData> junctions = discordantGroups.formDiscordantJunctions(discordantCandidates);
         assertEquals(2, junctions.size());

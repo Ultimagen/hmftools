@@ -1,6 +1,5 @@
 package com.hartwig.hmftools.esvee.prep;
 
-import static java.lang.Math.abs;
 import static java.lang.Math.floor;
 import static java.lang.Math.max;
 import static java.lang.Math.round;
@@ -8,18 +7,18 @@ import static java.lang.String.format;
 
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.MATE_CIGAR_ATTRIBUTE;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.NUM_MUTATONS_ATTRIBUTE;
-import static com.hartwig.hmftools.common.bam.SamRecordUtils.inferredInsertSize;
+import static com.hartwig.hmftools.common.bam.SamRecordUtils.inferredInsertSizeAbs;
 import static com.hartwig.hmftools.common.bam.SamRecordUtils.mateNegativeStrand;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.SV_LOGGER;
 import static com.hartwig.hmftools.esvee.common.FragmentLengthBounds.INVALID;
+import static com.hartwig.hmftools.esvee.common.WriteType.FRAGMENT_LENGTH_DIST;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FRAG_LENGTH_1_STD_DEV_PERCENTILE;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FRAG_LENGTH_DIST_MAX_LENGTH;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FRAG_LENGTH_DIST_MIN_QUAL;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FRAG_LENGTH_DIST_PERCENTILE;
 import static com.hartwig.hmftools.esvee.prep.PrepConstants.FRAG_LENGTH_DIST_SAMPLE_SIZE;
-import static com.hartwig.hmftools.esvee.prep.types.WriteType.FRAGMENT_LENGTH_DIST;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -278,7 +277,7 @@ public class FragmentSizeDistribution
             if(record.getDuplicateReadFlag())
                 return false;
 
-            int fragmentLength = abs(inferredInsertSize(record));
+            int fragmentLength = inferredInsertSizeAbs(record);
             if(fragmentLength > FRAG_LENGTH_DIST_MAX_LENGTH)
                 return false;
 
@@ -327,7 +326,7 @@ public class FragmentSizeDistribution
 
         private void addFragmentLength(final SAMRecord record)
         {
-            int fragmentLength = getLengthBucket(abs(inferredInsertSize(record)));
+            int fragmentLength = getLengthBucket(inferredInsertSizeAbs(record));
 
             if(fragmentLength <= 0)
                 return;

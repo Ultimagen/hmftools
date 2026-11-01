@@ -31,8 +31,9 @@ import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 public class NormalisationFileBuilder
 {
     private final NormalisationConfig mConfig;
-    private final Map<String,List<RegionData>> mChrRegionData;
+    private final Map<String, List<RegionData>> mChrRegionData;
     private final GcProfileCache mGcProfileCache;
+    private final WgsCopyNumberPercentiles mWgsCopyNumberPercentiles;
 
     public NormalisationFileBuilder(final ConfigBuilder configBuilder)
     {
@@ -47,6 +48,8 @@ public class NormalisationFileBuilder
         mChrRegionData = Maps.newHashMap();
 
         mGcProfileCache = new GcProfileCache(mConfig.GcProfile);
+
+        mWgsCopyNumberPercentiles = new WgsCopyNumberPercentiles(mConfig.WgsCopyNumberPercentiles, mConfig.RefGenVersion);
     }
 
     public void run()
@@ -59,7 +62,7 @@ public class NormalisationFileBuilder
         setGcProfileData();
 
         // load Amber files and establish gender
-        Map<String,Gender> sampleGenders = !mConfig.SampleGender.isEmpty() ? mConfig.SampleGender : determineAmberGenders();
+        Map<String, Gender> sampleGenders = !mConfig.SampleGender.isEmpty() ? mConfig.SampleGender : determineAmberGenders();
 
         // load per-sample Cobalt ratios
         loadSampleCobaltData(sampleGenders);
@@ -67,20 +70,22 @@ public class NormalisationFileBuilder
         // calculate per-sample normalised tumor GC ratios
         calcSampleAdjustedRatios(mConfig.SampleIds, mChrRegionData);
 
-        // calculate a final relative panel enichment ratio for each region
-        calcRelativeEnrichment(mChrRegionData, MIN_ENRICHMENT_RATIO);
+        // calculate a final relative panel enrichment ratio for each region
+        calcRelativeEnrichment(mChrRegionData, MIN_ENRICHMENT_RATIO, mWgsCopyNumberPercentiles);
 
         writeNormalisationFile(mChrRegionData, mConfig.RefGenVersion, mConfig.OutputFile);
 
         if(mConfig.DetailedFile != null)
+        {
             writeDetailedFile(mChrRegionData, mConfig.SampleIds, mConfig.DetailedFile);
+        }
 
         CB_LOGGER.info("Cobalt normalisation file generation complete");
     }
 
-    private Map<String,Gender> determineAmberGenders()
+    private Map<String, Gender> determineAmberGenders()
     {
-        Map<String,Gender> sampleGenders = Maps.newHashMap();
+        Map<String, Gender> sampleGenders = Maps.newHashMap();
 
         for(String sampleId : mConfig.SampleIds)
         {
@@ -90,7 +95,7 @@ public class NormalisationFileBuilder
                 final String amberFilename = AmberBAFFile.generateAmberFilenameForReading(sampleDir, sampleId);
 
                 Multimap<Chromosome, AmberBAF> chromosomeBafs = AmberBAFFile.read(amberFilename, true);
-                Gender gender = AmberGender.determineGender(mConfig.RefGenVersion, chromosomeBafs);
+                Gender gender = AmberGender.determineGender(mConfig.RefGenVersion, chromosomeBafs, null);
                 sampleGenders.put(sampleId, gender);
 
                 CB_LOGGER.debug("sample({}) Amber gender({})", sampleId, gender);
@@ -116,12 +121,12 @@ public class NormalisationFileBuilder
         addTargetRegions(regions, mChrRegionData);
 
         CB_LOGGER.info("loaded {} target regions from file({})",
-                mChrRegionData.values().stream().mapToInt(x -> x.size()).sum(), bedFile);
+                mChrRegionData.values().stream().mapToInt(List::size).sum(), bedFile);
     }
 
     private void setGcProfileData()
     {
-        for(Map.Entry<String,List<RegionData>> entry : mChrRegionData.entrySet())
+        for(Map.Entry<String, List<RegionData>> entry : mChrRegionData.entrySet())
         {
             String chromosome = entry.getKey();
 
@@ -129,12 +134,14 @@ public class NormalisationFileBuilder
             {
                 GCProfile gcProfile = mGcProfileCache.findGcProfile(chromosome, regionData.Position);
                 if(gcProfile != null)
+                {
                     regionData.setGcProfile(calcGcBucket(gcProfile.gcContent()), gcProfile.mappablePercentage());
+                }
             }
         }
     }
 
-    private void loadSampleCobaltData(final Map<String,Gender> sampleGenders)
+    private void loadSampleCobaltData(final Map<String, Gender> sampleGenders)
     {
         for(String sampleId : mConfig.SampleIds)
         {

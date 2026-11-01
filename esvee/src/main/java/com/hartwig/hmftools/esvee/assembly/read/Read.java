@@ -15,9 +15,7 @@ import static com.hartwig.hmftools.common.genome.region.Orientation.FORWARD;
 import static com.hartwig.hmftools.common.genome.region.Orientation.REVERSE;
 import static com.hartwig.hmftools.common.utils.Arrays.copyArray;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConfig.READ_ID_TRIMMER;
-import static com.hartwig.hmftools.esvee.assembly.read.ReadAdjustments.LOW_QUAL_SCORE;
 import static com.hartwig.hmftools.esvee.assembly.read.ReadAdjustments.findLowBaseQualTrimCount;
-import static com.hartwig.hmftools.esvee.common.CommonUtils.belowMinQual;
 import static com.hartwig.hmftools.esvee.common.IndelCoords.findIndelCoords;
 import static com.hartwig.hmftools.esvee.common.SvConstants.BAM_HEADER_SAMPLE_INDEX_TAG;
 import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_INDEL_SUPPORT_LENGTH;
@@ -25,6 +23,7 @@ import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_INDEL_SUPPORT_LE
 import static htsjdk.samtools.CigarOperator.S;
 import static htsjdk.samtools.util.StringUtil.bytesToString;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -33,6 +32,7 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.hartwig.hmftools.common.bam.SupplementaryReadData;
 import com.hartwig.hmftools.common.genome.region.Orientation;
+import com.hartwig.hmftools.esvee.assembly.SequenceDiffInfo;
 import com.hartwig.hmftools.esvee.common.IndelCoords;
 
 import htsjdk.samtools.CigarElement;
@@ -63,7 +63,6 @@ public class Read
     private SupplementaryReadData mSupplementaryData;
 
     private boolean mCheckedIndelCoords;
-
     private IndelCoords mIndelCoords;
     private boolean mInvalidIndel;
 
@@ -72,9 +71,13 @@ public class Read
     private Integer mIndelInferredUnclippedEnd;
 
     private boolean mIsReference;
-    private boolean mHasLineTail;
-    private int mTrimCount; // if non-zero this has been done to the 3' end
+    private boolean mHasLineTailStart;
+    private boolean mHasLineTailEnd;
+    private int mTrimCountStart;
+    private int mTrimCountEnd;
     private boolean mLowQualTrimmed;
+
+    private List<SequenceDiffInfo> mMismatches;
 
     public Read(final SAMRecord record)
     {
@@ -103,9 +106,13 @@ public class Read
         mIndelInferredUnclippedEnd = null;
         mInvalidIndel = false;
 
-        mHasLineTail = false;
-        mTrimCount = 0;
+        mHasLineTailStart = false;
+        mHasLineTailEnd = false;
+        mTrimCountStart = 0;
+        mTrimCountEnd = 0;
         mLowQualTrimmed = false;
+
+        mMismatches = null;
     }
 
     private void setBoundaries(int newReadStart)
@@ -353,9 +360,18 @@ public class Read
     public boolean isReference() { return mIsReference; }
     public void markReference() { mIsReference = true; }
 
-    public boolean hasLineTail() { return mHasLineTail; }
-    public void markLineTail() { mHasLineTail = true; }
+    public boolean hasLineTailStart() { return mHasLineTailStart; }
+    public boolean hasLineTailEnd() { return mHasLineTailEnd; }
 
+    public boolean hasLineTail(boolean isForwardJunction) { return isForwardJunction ? mHasLineTailEnd : mHasLineTailStart; }
+
+    public void markLineTail(boolean isStart)
+    {
+        if(isStart)
+            mHasLineTailStart = true;
+        else
+            mHasLineTailEnd = true;
+    }
 
     @VisibleForTesting
     public String getBasesString() { return bytesToString(getBases()); }
@@ -463,13 +479,19 @@ public class Read
 
         mBases = newBases;
         mBaseQuals = newBaseQuals;
-        mTrimCount = count;
+
+        if(fromStart)
+            mTrimCountStart += count;
+        else
+            mTrimCountEnd += count;
 
         updateCigarString();
         setBoundaries(newReadStart);
     }
 
-    public int baseTrimCount() { return mTrimCount; }
+    public int trimCount() { return mTrimCountStart + mTrimCountEnd; }
+    public int trimCountStart() { return mTrimCountStart; }
+    public int trimCountEnd() { return mTrimCountEnd; }
 
     public void markLowQualTrimmed() { mLowQualTrimmed = true; }
     public boolean lowQualTrimmed() { return mLowQualTrimmed; }
@@ -497,6 +519,13 @@ public class Read
     {
         return mIndelInferredUnclippedEnd == null ? mUnclippedEnd : max(mUnclippedEnd, mIndelInferredUnclippedEnd);
     }
+
+    public void setExtensionMismatches(final List<SequenceDiffInfo> seqMismatches)
+    {
+        mMismatches = seqMismatches;
+    }
+
+    public List<SequenceDiffInfo> mismatches() { return mMismatches != null ? mMismatches : Collections.emptyList(); }
 
     public synchronized void trimLowQualBases()
     {

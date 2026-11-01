@@ -29,7 +29,7 @@ import com.hartwig.hmftools.common.purple.FittedPurity;
 import com.hartwig.hmftools.common.purple.FittedPurityRangeFile;
 import com.hartwig.hmftools.common.purple.GeneCopyNumber;
 import com.hartwig.hmftools.common.purple.GeneCopyNumberFile;
-import com.hartwig.hmftools.common.purple.GermlineDeletion;
+import com.hartwig.hmftools.common.purple.GermlineAmpDel;
 import com.hartwig.hmftools.common.purple.PurityContext;
 import com.hartwig.hmftools.common.purple.PurityContextFile;
 import com.hartwig.hmftools.common.purple.PurpleCommon;
@@ -42,8 +42,8 @@ import com.hartwig.hmftools.common.sv.StructuralVariantData;
 import com.hartwig.hmftools.common.sv.StructuralVariantFileLoader;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 import com.hartwig.hmftools.common.utils.config.ConfigUtils;
-import com.hartwig.hmftools.common.variant.SomaticVariant;
-import com.hartwig.hmftools.common.variant.SomaticVariantFactory;
+import com.hartwig.hmftools.common.variant.SmallVariant;
+import com.hartwig.hmftools.common.variant.SmallVariantFactory;
 import com.hartwig.hmftools.common.variant.filter.AlwaysPassFilter;
 import com.hartwig.hmftools.patientdb.dao.BufferedWriter;
 import com.hartwig.hmftools.patientdb.dao.DatabaseAccess;
@@ -192,9 +192,9 @@ public class LoadPurpleData
         LOGGER.info("loading {} SVs", structuralVariants.size());
         dbAccess.writeStructuralVariants(dbSampleId, structuralVariants);
 
-        BufferedWriter<SomaticVariant> somaticWriter = dbAccess.somaticVariantWriter(dbSampleId);
+        BufferedWriter<SmallVariant> somaticWriter = dbAccess.somaticVariantWriter(dbSampleId);
 
-        SomaticVariantFactory somaticVariantFactory = new SomaticVariantFactory();
+        SmallVariantFactory somaticVariantFactory = new SmallVariantFactory();
         somaticVariantFactory.setDropDuplicates();
 
         somaticVariantFactory.fromVCFFile(sampleId, referenceId, rnaId, somaticVcf, referenceId != null, somaticWriter);
@@ -209,7 +209,7 @@ public class LoadPurpleData
             final DatabaseAccess dbAccess, final String purpleDir) throws Exception
     {
         final String germlineVcf = PurpleCommon.purpleGermlineVcfFile(purpleDir, sampleId);
-        final String germlineDeletionsFile = GermlineDeletion.generateFilename(purpleDir, sampleId);
+        final String germlineDeletionsFile = GermlineAmpDel.generateFilename(purpleDir, sampleId);
         final String germlineDriverFile = DriverCatalogFile.generateGermlineFilename(purpleDir, sampleId);
 
         // skip loading if any files are missing
@@ -225,7 +225,7 @@ public class LoadPurpleData
         if(hasMissingFiles(requiredFiles, "germline"))
             System.exit(1);
 
-        List<GermlineDeletion> germlineDeletions = GermlineDeletion.read(germlineDeletionsFile);
+        List<GermlineAmpDel> germlineDeletions = GermlineAmpDel.read(germlineDeletionsFile);
 
         List<DriverCatalog> germlineDriverCatalog = DriverCatalogFile.read(germlineDriverFile);
 

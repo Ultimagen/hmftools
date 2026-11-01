@@ -10,13 +10,16 @@ import static com.hartwig.hmftools.esvee.TestUtils.TEST_CIGAR_100;
 import static com.hartwig.hmftools.esvee.TestUtils.TEST_READ_ID;
 import static com.hartwig.hmftools.esvee.TestUtils.createRead;
 import static com.hartwig.hmftools.esvee.TestUtils.makeCigarString;
+import static com.hartwig.hmftools.esvee.assembly.LineUtils.findRefBaseRepeatCount;
 import static com.hartwig.hmftools.esvee.assembly.LineUtils.hasLineTail;
+import static com.hartwig.hmftools.esvee.assembly.SeqTechUtils.trimIlluminaAdapterBases;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.hartwig.hmftools.common.codon.Nucleotides;
+import com.hartwig.hmftools.common.redux.BaseQualAdjustment;
 import com.hartwig.hmftools.esvee.assembly.read.Read;
 import com.hartwig.hmftools.esvee.assembly.read.ReadAdjustments;
 import com.hartwig.hmftools.esvee.prep.ReadFilters;
@@ -209,7 +212,7 @@ public class ReadAdjustmentsTest
 
         assertTrue(read.lowQualTrimmed());
         assertEquals("90M", read.cigarString());
-        assertEquals(10, read.baseTrimCount());
+        assertEquals(10, read.trimCount());
         assertEquals(189, read.alignmentEnd());
 
         read = createRead(TEST_READ_ID, 100, readBases, TEST_CIGAR_100);
@@ -220,8 +223,57 @@ public class ReadAdjustmentsTest
 
         assertTrue(read.lowQualTrimmed());
         assertEquals("90M", read.cigarString());
-        assertEquals(10, read.baseTrimCount());
+        assertEquals(10, read.trimCount());
         assertEquals(110, read.alignmentStart());
+    }
+
+    @Test
+    public void testUncertainBaseQualTrimming()
+    {
+        String readBases = REF_BASES_RANDOM_100;
+
+        byte[] baseQualities = buildDefaultBaseQuals(readBases.length());
+
+        // low qual will be 70% of outer bases
+        for(int i = 3; i < 10; ++i)
+        {
+            baseQualities[i] = BaseQualAdjustment.BASE_QUAL_MINIMUM;
+            baseQualities[baseQualities.length - i - 1] = BaseQualAdjustment.BASE_QUAL_MINIMUM;
+        }
+
+        Read read = createRead(TEST_READ_ID, 100, readBases, TEST_CIGAR_100);
+        read.bamRecord().setBaseQualities(baseQualities);
+
+        int trimCountStart = ReadAdjustments.findLowBaseQualTrimCount(read, 0, read.basesLength() - 1, true, true);
+        int trimCountEnd = ReadAdjustments.findLowBaseQualTrimCount(read, 0, read.basesLength() - 1, false, true);
+        assertEquals(10, trimCountStart);
+        assertEquals(10, trimCountEnd);
+    }
+
+    @Test
+    public void testIlluminaAdapter()
+    {
+        String readBases = REF_BASES_RANDOM_100;
+
+        Read read = createRead(TEST_READ_ID, 110, readBases, "20S60M20S");
+        read.bamRecord().setMateNegativeStrandFlag(true);
+
+        Read mateRead = createRead(TEST_READ_ID, 100, readBases, "20S60M20S");
+        mateRead.bamRecord().setReadNegativeStrandFlag(true);
+
+        read.setMateRead(mateRead);
+        mateRead.setMateRead(read);
+
+        trimIlluminaAdapterBases(read);
+        trimIlluminaAdapterBases(mateRead);
+
+        assertEquals(10, read.trimCount());
+        assertEquals("20S60M10S", read.cigarString());
+        assertEquals(179, read.unclippedEnd());
+
+        assertEquals(10, mateRead.trimCount());
+        assertEquals("10S60M20S", mateRead.cigarString());
+        assertEquals(90, mateRead.unclippedStart());
     }
 
     @Test
@@ -232,38 +284,69 @@ public class ReadAdjustmentsTest
         String softClipBases = nonLineSequence + lineSequence;
         String readBases = softClipBases + REF_BASES_RANDOM_100;
 
-        assertTrue(hasLineTail(readBases.getBytes(), softClipBases.length() - 1, true, LINE_BASE_A));
+        byte[] defaultQuals = buildDefaultBaseQuals(readBases.length());
+
+        assertTrue(hasLineTail(readBases.getBytes(), softClipBases.length() - 1, true, LINE_BASE_A, defaultQuals));
 
         lineSequence = "AAAAAAGAAAAAATAAAA";
         softClipBases = nonLineSequence + lineSequence;
         readBases = softClipBases + REF_BASES_RANDOM_100;
 
-        assertTrue(hasLineTail(readBases.getBytes(), softClipBases.length() - 1, true, LINE_BASE_A));
+        assertTrue(hasLineTail(readBases.getBytes(), softClipBases.length() - 1, true, LINE_BASE_A, defaultQuals));
 
         // too many non-line bases
         lineSequence = "AAAAAAGAAACAATAAAA";
         softClipBases = nonLineSequence + lineSequence;
         readBases = softClipBases + REF_BASES_RANDOM_100;
 
-        assertFalse(hasLineTail(readBases.getBytes(), softClipBases.length() - 1, true, LINE_BASE_A));
+        assertFalse(hasLineTail(readBases.getBytes(), softClipBases.length() - 1, true, LINE_BASE_A, defaultQuals));
 
         // an extension of a local repeat
         lineSequence = "AAAAAAAAAAAAAAAA";
         softClipBases = nonLineSequence + lineSequence;
         readBases = softClipBases + "AAAAAAAAAA" + REF_BASES_RANDOM_100;
 
-        assertFalse(hasLineTail(readBases.getBytes(), softClipBases.length() - 1, true, LINE_BASE_A));
+        assertFalse(hasLineTail(readBases.getBytes(), softClipBases.length() - 1, true, LINE_BASE_A, defaultQuals));
 
         // reverse side
         lineSequence = "TTTTTCTTTTTTTGTTTT";
         softClipBases = lineSequence + nonLineSequence;
         readBases = REF_BASES_RANDOM_100 + softClipBases;
 
-        assertTrue(hasLineTail(readBases.getBytes(), REF_BASES_RANDOM_100.length(), false, LINE_BASE_T));
+        assertTrue(hasLineTail(readBases.getBytes(), REF_BASES_RANDOM_100.length(), false, LINE_BASE_T, defaultQuals));
 
         readBases = REF_BASES_RANDOM_100 + "TTTTTTTTTT" + softClipBases;
 
-        assertFalse(hasLineTail(readBases.getBytes(), REF_BASES_RANDOM_100.length() + 10, false, LINE_BASE_T));
+        assertFalse(hasLineTail(readBases.getBytes(), REF_BASES_RANDOM_100.length() + 10, false, LINE_BASE_T, defaultQuals));
+
+        // ref base repeats
+        String refBases = "AAAAAAAAAA";
+        int refBaseRepeat = findRefBaseRepeatCount(refBases.getBytes(), 0, true, LINE_BASE_A);
+        assertEquals(10, refBaseRepeat);
+
+        refBases = "AAAAAGAAAA";
+        refBaseRepeat = findRefBaseRepeatCount(refBases.getBytes(), 0, true, LINE_BASE_A);
+        assertEquals(9, refBaseRepeat);
+
+        refBases = "AAAAAGAAGA";
+        refBaseRepeat = findRefBaseRepeatCount(refBases.getBytes(), 0, true, LINE_BASE_A);
+        assertEquals(5, refBaseRepeat);
+
+        refBases = "AAAAAAAAAAGAAAA";
+        refBaseRepeat = findRefBaseRepeatCount(refBases.getBytes(), 0, true, LINE_BASE_A);
+        assertEquals(14, refBaseRepeat);
+
+        refBases = "AAAAAAAAAAGAAAAAAAAAAG";
+        refBaseRepeat = findRefBaseRepeatCount(refBases.getBytes(), 0, true, LINE_BASE_A);
+        assertEquals(20, refBaseRepeat);
+
+        refBases = "AAAAAAAAAAGAAAAG";
+        refBaseRepeat = findRefBaseRepeatCount(refBases.getBytes(), 0, true, LINE_BASE_A);
+        assertEquals(10, refBaseRepeat);
+
+        refBases = "AAAAAACGT";
+        refBaseRepeat = findRefBaseRepeatCount(refBases.getBytes(), 0, true, LINE_BASE_A);
+        assertEquals(6, refBaseRepeat);
     }
 
     @Test
@@ -312,8 +395,8 @@ public class ReadAdjustmentsTest
         read.bamRecord().setReadNegativeStrandFlag(true);
 
         ReadAdjustments.markLineSoftClips(read);
-        assertFalse(read.hasLineTail());
-
+        assertFalse(read.hasLineTailStart());
+        assertFalse(read.hasLineTailEnd());
 
         // test the other orientation
         lineSequence = Nucleotides.reverseComplementBases(lineSequence);
@@ -340,9 +423,31 @@ public class ReadAdjustmentsTest
         // expansion of local repeat
         readBases = REF_BASES_RANDOM_100 + lineSequence + softClipBases;
         read = createRead(TEST_READ_ID, 101, readBases, makeCigarString(readBases, 0, softClipBases.length()));
+
+        baseQualities = buildDefaultBaseQuals(readBases.length());
         read.bamRecord().setBaseQualities(baseQualities);
 
         ReadAdjustments.markLineSoftClips(read);
-        assertFalse(read.hasLineTail());
+        assertFalse(read.hasLineTailStart());
+        assertFalse(read.hasLineTailEnd());
+    }
+
+    @Test
+    public void testLowQualLineTailRead()
+    {
+        // uncertain qual bases can still rule out a LINE sequence
+
+        //                     012345678901234567890
+        String lineSequence = "AAAACAAAACAAAACAAAAC";
+        String nonLineSequence = "GCTGCTGTCGTGTCC";
+        String softClipBases = nonLineSequence + lineSequence;
+        String readBases = softClipBases + REF_BASES_RANDOM_100;
+
+        byte[] defaultQuals = buildDefaultBaseQuals(readBases.length());
+        defaultQuals[4] = 1;
+        defaultQuals[9] = 1;
+        defaultQuals[14] = 1;
+
+        assertFalse(hasLineTail(readBases.getBytes(), softClipBases.length() - 1, true, LINE_BASE_A, defaultQuals));
     }
 }

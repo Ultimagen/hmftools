@@ -1,55 +1,89 @@
 package com.hartwig.hmftools.orange.report.tables;
 
-import static com.hartwig.hmftools.orange.report.ReportResources.formatSingleDigitDecimal;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.formatSingleDigitDecimal;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.addEntry;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.stringArray;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.createStandardTable;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.createEmptyTable;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.toPercentages;
+import static com.hartwig.hmftools.orange.report.tables.TableCommon.intToFloatArray;
 
 import java.util.Comparator;
 import java.util.List;
 import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.utils.Doubles;
+import com.hartwig.hmftools.common.variant.CommonVcfTags;
 import com.hartwig.hmftools.datamodel.hla.LilacAllele;
 import com.hartwig.hmftools.orange.report.ReportResources;
 import com.hartwig.hmftools.orange.report.util.Cells;
-import com.hartwig.hmftools.orange.report.util.Tables;
-import com.itextpdf.layout.element.Cell;
-import com.itextpdf.layout.element.Table;
 
-import org.jetbrains.annotations.NotNull;
+import be.quodlibet.boxable.BaseTable;
+
+import com.hartwig.hmftools.orange.report.DocumentContext;
+
+import java.io.IOException;
+
 import org.jetbrains.annotations.Nullable;
 
 public final class HLAAlleleTable
 {
-    @NotNull
-    public static Table build(@NotNull String title, float width, @NotNull List<LilacAllele> alleles,
-            @NotNull ReportResources reportResources, boolean isTumorFail)
+    public static BaseTable build(final DocumentContext docCtx,
+            final String title, float width, final List<LilacAllele> alleles, final ReportResources reportResources, boolean hasRna)
+            throws IOException
     {
         if(alleles.isEmpty())
         {
-            return new Tables(reportResources).createEmpty(title, width);
+            return createEmptyTable(docCtx, title, width, reportResources);
         }
 
         Cells cells = new Cells(reportResources);
-        Table table = Tables.createContent(width,
-                new float[] { 1, 1, 1, 1, 1, 3 },
-                new Cell[] { cells.createHeader("Allele"), cells.createHeader("Ref Frags"), cells.createHeader("Tumor Frags"),
-                        cells.createHeader("RNA Frags"), cells.createHeader("Tumor CN"), cells.createHeader("Somatic #mutations") });
+
+        List<Integer> widths = Lists.newArrayList();
+        List<String> headers = Lists.newArrayList();
+
+        boolean hasWarnings = alleles.stream().anyMatch(x -> !x.qcStatus().equals(CommonVcfTags.PASS_FILTER));
+
+        addEntry(widths, headers, 1, "Allele");
+        addEntry(widths, headers, hasWarnings ? 3 : 1, "QC Status");
+        addEntry(widths, headers, 1, "Ref Frags");
+        addEntry(widths, headers, 1, "Tumor Frags");
+
+        if(hasRna)
+        {
+            addEntry(widths, headers, 1, "RNA Frags");
+        }
+
+        addEntry(widths, headers, 1, "Tumor CN");
+        addEntry(widths, headers, 3, "Somatic Mutations");
+
+        BaseTable table = createStandardTable(docCtx, title, width, intToFloatArray(widths), stringArray(headers), reportResources);
+        float[] pcts = toPercentages(intToFloatArray(widths));
 
         for(LilacAllele allele : sort(alleles))
         {
-            table.addCell(cells.createContent(allele.allele()));
-            table.addCell(cells.createContent(fragmentString(allele.refFragments(), false)));
-            table.addCell(cells.createContent(fragmentString(allele.tumorFragments(), isTumorFail)));
-            table.addCell(cells.createContent(fragmentString(allele.rnaFragments(), isTumorFail)));
-            table.addCell(cells.createContent(copyNumberString(allele.tumorCopyNumber(), isTumorFail)));
-            table.addCell(cells.createContent(mutationString(allele, isTumorFail)));
+            List<String> rowValues = Lists.newArrayList();
+            rowValues.add(allele.allele());
+            rowValues.add(allele.qcStatus());
+            rowValues.add(fragmentString(allele.refFragments()));
+            rowValues.add(fragmentString(allele.tumorFragments()));
+
+            if(hasRna)
+            {
+                rowValues.add(fragmentString(allele.rnaFragments()));
+            }
+
+            rowValues.add(formatSingleDigitDecimal(allele.tumorCopyNumber()));
+            rowValues.add(mutationString(allele));
+            cells.addRow(table, pcts, rowValues);
         }
 
-        return new Tables(reportResources).createWrapping(table, title);
+        return table;
     }
 
-    @NotNull
-    private static List<LilacAllele> sort(@NotNull List<LilacAllele> alleles)
+    private static List<LilacAllele> sort(final List<LilacAllele> alleles)
     {
         return alleles.stream()
                 .sorted(Comparator.comparing(LilacAllele::allele)
@@ -57,10 +91,9 @@ public final class HLAAlleleTable
                 .collect(Collectors.toList());
     }
 
-    @NotNull
-    private static String fragmentString(@Nullable Integer fragments, boolean isTumorFail)
+    private static String fragmentString(@Nullable final Integer fragments)
     {
-        if(fragments == null || isTumorFail)
+        if(fragments == null)
         {
             return ReportResources.NOT_AVAILABLE;
         }
@@ -70,20 +103,8 @@ public final class HLAAlleleTable
         }
     }
 
-    @NotNull
-    private static String copyNumberString(double tumorCopyNumber, boolean isTumorFail)
+    private static String mutationString(final LilacAllele allele)
     {
-        return !isTumorFail ? ReportResources.formatSingleDigitDecimal(tumorCopyNumber) : ReportResources.NOT_AVAILABLE;
-    }
-
-    @NotNull
-    private static String mutationString(@NotNull LilacAllele allele, boolean isTumorFail)
-    {
-        if(isTumorFail)
-        {
-            return ReportResources.NOT_AVAILABLE;
-        }
-
         StringJoiner joiner = new StringJoiner(", ");
         if(Doubles.positive(allele.somaticMissense()))
         {

@@ -47,8 +47,15 @@ public final class Nucleotides
         return swapDnaBase(base);
     }
 
-    public static boolean isValidDnaBase(final char base) { return base == 'G' || base == 'A' || base == 'T' || base == 'C'; }
-    public static boolean isValidDnaBase(final byte base) { return baseIndex(base) >= 0; }
+    public static boolean isValidDnaBase(final char base)
+    {
+        return base == DNA_BASES[0] || base == DNA_BASES[1] || base == DNA_BASES[2] || base == DNA_BASES[3];
+    }
+
+    public static boolean isValidDnaBase(final byte base)
+    {
+        return base == DNA_BASE_BYTES[0] || base == DNA_BASE_BYTES[1] || base == DNA_BASE_BYTES[2] || base == DNA_BASE_BYTES[3];
+    }
 
     public static String reverseComplementBases(final String bases)
     {
@@ -73,5 +80,20 @@ public final class Nucleotides
         }
 
         return newBases;
+    }
+
+    public static void reverseComplementBasesInPlace(byte[] bases, int start, int length)
+    {
+        for(int i = start, j = start + length - 1; i < j; ++i, --j)
+        {
+            byte temp = bases[i];
+            bases[i] = swapDnaBase(bases[j]);
+            bases[j] = swapDnaBase(temp);
+        }
+        if(length % 2 == 1)
+        {
+            int middle = start + length / 2;
+            bases[middle] = swapDnaBase(bases[middle]);
+        }
     }
 }

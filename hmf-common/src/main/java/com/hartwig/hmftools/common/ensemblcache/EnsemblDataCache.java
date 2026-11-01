@@ -8,6 +8,7 @@ import static com.hartwig.hmftools.common.ensemblcache.EnsemblDataLoader.loadTra
 import static com.hartwig.hmftools.common.ensemblcache.EnsemblDataLoader.loadTranscriptSpliceAcceptorData;
 import static com.hartwig.hmftools.common.fusion.FusionCommon.NEG_STRAND;
 import static com.hartwig.hmftools.common.fusion.FusionCommon.POS_STRAND;
+import static com.hartwig.hmftools.common.region.BaseRegion.positionsOverlap;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.checkAddDirSeparator;
 import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_END;
 import static com.hartwig.hmftools.common.sv.StartEndIterator.SE_START;
@@ -16,6 +17,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -83,6 +85,7 @@ public class EnsemblDataCache
     }
 
     public RefGenomeVersion refGenomeVersion() { return mRefGenomeVersion; }
+    public String dataPath() { return mDataPath; }
 
     public static void addEnsemblDir(final ConfigBuilder configBuilder)
     {
@@ -258,6 +261,15 @@ public class EnsemblDataCache
 
         return genesList;
     }
+    public List<GeneData> findGeneByRange(final String chromosome, int regionStart, int regionEnd)
+    {
+        List<GeneData> geneDataList = mChrGeneDataMap.get(chromosome);
+
+        if(geneDataList == null)
+            return Collections.emptyList();
+
+        return geneDataList.stream().filter(x -> positionsOverlap(x.GeneStart, x.GeneEnd, regionStart, regionEnd)).collect(Collectors.toList());
+    }
 
     public List<GeneData> findGeneRegions(final String chromosome, int position, int upstreamDistance)
     {
@@ -304,7 +316,6 @@ public class EnsemblDataCache
         Integer spliceAcceptorPos = mTransSpliceAcceptorPosDataMap.get(transId);
         return spliceAcceptorPos != null ? spliceAcceptorPos : -1;
     }
-
 
     public static final int EXON_RANK_MIN = 0;
     public static final int EXON_RANK_MAX = 1;
@@ -394,17 +405,23 @@ public class EnsemblDataCache
         if(!delayTranscriptLoading)
         {
             if(!EnsemblDataLoader.loadTranscriptData(
-                    mDataPath, mTranscriptByGeneIdMap, mRestrictedGeneIdList, mRequireExons, mCanonicalTranscriptsOnly,
+                    mDataPath, mRefGenomeVersion, mTranscriptByGeneIdMap, mRestrictedGeneIdList, mRequireExons, mCanonicalTranscriptsOnly,
                     mRequireNonEnsemblTranscripts, Collections.emptyList()))
             {
                 return false;
             }
 
-            if(mRequireProteinDomains && !loadTranscriptProteinData(mDataPath, mEnsemblProteinDataMap, Sets.newHashSet()))
-                return false;
+            if(mRequireProteinDomains)
+            {
+                if(!loadTranscriptProteinData(mDataPath, mRefGenomeVersion, mEnsemblProteinDataMap, Sets.newHashSet()))
+                    return false;
+            }
 
-            if(mRequireSplicePositions && !loadTranscriptSpliceAcceptorData(mDataPath, mTransSpliceAcceptorPosDataMap, Sets.newHashSet()))
-                return false;
+            if(mRequireSplicePositions)
+            {
+                if(!loadTranscriptSpliceAcceptorData(mDataPath, mRefGenomeVersion, mTransSpliceAcceptorPosDataMap, Sets.newHashSet()))
+                    return false;
+            }
         }
 
         return true;
@@ -418,7 +435,7 @@ public class EnsemblDataCache
     public boolean loadTranscriptData(final List<String> restrictedGeneIds, final List<String> nonCanonicalTrans)
     {
         if(!EnsemblDataLoader.loadTranscriptData(
-                mDataPath, mTranscriptByGeneIdMap, restrictedGeneIds, mRequireExons, mCanonicalTranscriptsOnly,
+                mDataPath, mRefGenomeVersion, mTranscriptByGeneIdMap, restrictedGeneIds, mRequireExons, mCanonicalTranscriptsOnly,
                 mRequireNonEnsemblTranscripts, nonCanonicalTrans))
         {
             return false;
@@ -431,10 +448,10 @@ public class EnsemblDataCache
             transDataList.forEach(x -> uniqueTransIds.add(x.TransId));
         }
 
-        if(mRequireProteinDomains && !loadTranscriptProteinData(mDataPath, mEnsemblProteinDataMap, uniqueTransIds))
+        if(mRequireProteinDomains && !loadTranscriptProteinData(mDataPath, mRefGenomeVersion, mEnsemblProteinDataMap, uniqueTransIds))
             return false;
 
-        if(mRequireSplicePositions && !loadTranscriptSpliceAcceptorData(mDataPath, mTransSpliceAcceptorPosDataMap, uniqueTransIds))
+        if(mRequireSplicePositions && !loadTranscriptSpliceAcceptorData(mDataPath, mRefGenomeVersion, mTransSpliceAcceptorPosDataMap, uniqueTransIds))
             return false;
 
         return true;

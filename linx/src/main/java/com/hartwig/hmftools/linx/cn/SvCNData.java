@@ -122,11 +122,12 @@ public class SvCNData {
 
         List<SvCNData> cnDataList = null;
         String currentChromosome = "";
-        for(final SvVarData var : svList)
+
+        for(SvVarData var : svList)
         {
             if(svJcnCalcDataMap != null)
             {
-                final JcnCalcData jcnData = svJcnCalcDataMap.get(var.id());
+                JcnCalcData jcnData = svJcnCalcDataMap.get(var.id());
                 if(jcnData != null)
                 {
                     double estJcn = jcnData.JcnEstimate;

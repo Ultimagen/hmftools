@@ -7,13 +7,16 @@ import htsjdk.variant.variantcontext.Genotype;
 public final class CommonVcfTags
 {
     // common
-    public static final String PASS = "PASS";
+    public static final String PASS_FILTER = "PASS";
 
     public static final String QUAL = "QUAL";
     public static final String QUAL_DESC = "Variant quality";
 
     public static final String REPORTED_FLAG = "REPORTED";
     public static final String REPORTED_DESC = "Variant is reported in the driver catalog";
+
+    public static final String TINC_RECOVERED_FLAG = "TINC_RECOVERED";
+    public static final String TINC_RECOVERED_DESC = "Variant recovered from germline filters by TINC detection";
 
     public static int getGenotypeAttributeAsInt(final Genotype genotype, final String attribute, int defaultValue)
     {

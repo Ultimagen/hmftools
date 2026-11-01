@@ -13,6 +13,7 @@ import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
+import com.hartwig.hmftools.common.genome.refgenome.CachedRefGenome;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeInterface;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeSource;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
@@ -40,7 +41,7 @@ public class PartitionThread extends Thread
 
         mBamReader = new BamReader(inputBams, config.RefGenomeFile);
 
-        mPartitionReader = new PartitionReader(config, mBamReader);
+        mPartitionReader = new PartitionReader(config, mBamReader, fileWriterCache.getFullUnmappedBamWriter());
     }
 
     public PartitionReader partitionReader() { return mPartitionReader; }
@@ -107,7 +108,17 @@ public class PartitionThread extends Thread
             return partitionRegions;
         }
 
-        List<ChrBaseRegion> genomeRegions = getRefGenomeRegions(specificRegions, refGenomeVersion, refGenome);
+        List<ChrBaseRegion> genomeRegions;
+        if(refGenome == null)
+        {
+            genomeRegions = formHumanChromosomeRegions(specificRegions, refGenomeVersion); // limit to human chromosomes
+        }
+        else
+        {
+            CachedRefGenome cachedRefGenome = (CachedRefGenome)refGenome;
+            RefGenomeSource refGenomeSource = (RefGenomeSource)cachedRefGenome.refGenome();
+            genomeRegions = refGenomeSource.formRefGenomeRegions(specificRegions);
+        }
 
         // divvy up standard chromosomes amongst the reads evenly by base length, but for other contigs just add them to the final thread
 
@@ -167,14 +178,5 @@ public class PartitionThread extends Thread
         }
 
         return partitionRegions.stream().filter(x -> !x.isEmpty()).collect(Collectors.toList());
-    }
-
-    private static List<ChrBaseRegion> getRefGenomeRegions(
-            final SpecificRegions specificRegions, final RefGenomeVersion refGenomeVersion, @Nullable final RefGenomeInterface refGenome)
-    {
-        if(refGenome == null)
-            return formHumanChromosomeRegions(specificRegions, refGenomeVersion);
-
-        return RefGenomeSource.formRefGenomeRegions(specificRegions, refGenome);
     }
 }

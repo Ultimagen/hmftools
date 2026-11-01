@@ -12,13 +12,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
 
+import com.hartwig.hmftools.cobalt.targeted.TargetRegionEnrichment;
 import com.hartwig.hmftools.common.genome.chromosome.HumanChromosome;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 
 public class FileWriter
 {
     public static void writeNormalisationFile(
-            final Map<String,List<RegionData>> chrRegionData, final RefGenomeVersion refGenomeVersion, final String outputFile)
+            final Map<String, List<RegionData>> chrRegionData, final RefGenomeVersion refGenomeVersion, final String outputFile)
     {
         CB_LOGGER.info("writing normalisation file: {}", outputFile);
 
@@ -26,7 +27,7 @@ public class FileWriter
         {
             BufferedWriter writer = createBufferedWriter(outputFile, false);
 
-            writer.write("chromosome\tposition\trelativeEnrichment");
+            writer.write(TargetRegionEnrichment.header());
             writer.newLine();
 
             for(HumanChromosome chromosome : HumanChromosome.values())
@@ -34,11 +35,13 @@ public class FileWriter
                 String chrStr = refGenomeVersion.versionedChromosome(chromosome.toString());
 
                 if(!chrRegionData.containsKey(chrStr))
+                {
                     continue;
+                }
 
                 for(RegionData regionData : chrRegionData.get(chrStr))
                 {
-                    writer.write(format("%s\t%d\t%.4f",
+                    writer.write(TargetRegionEnrichment.toTsv(
                             chrStr, regionData.Position,
                             regionData.relativeEnrichment() > 0 ? regionData.relativeEnrichment() : Double.NaN));
 
@@ -56,7 +59,7 @@ public class FileWriter
     }
 
     public static void writeDetailedFile(
-            final Map<String,List<RegionData>> chrRegionData, final List<String> sampleIds, final String outputFile)
+            final Map<String, List<RegionData>> chrRegionData, final List<String> sampleIds, final String outputFile)
     {
         try
         {

@@ -8,6 +8,7 @@ import static com.hartwig.hmftools.esvee.TestUtils.REF_BASES_200;
 import static com.hartwig.hmftools.esvee.TestUtils.REF_BASES_400;
 import static com.hartwig.hmftools.esvee.TestUtils.REF_BASES_RANDOM_100;
 import static com.hartwig.hmftools.esvee.TestUtils.TEST_READ_ID;
+import static com.hartwig.hmftools.esvee.TestUtils.cloneRead;
 import static com.hartwig.hmftools.esvee.TestUtils.createRead;
 import static com.hartwig.hmftools.esvee.TestUtils.makeCigarString;
 import static com.hartwig.hmftools.esvee.assembly.AssemblyConstants.ASSEMBLY_DEDUP_HIGH_SUPPORT_RATIO;
@@ -15,8 +16,8 @@ import static com.hartwig.hmftools.esvee.assembly.AssemblyDeduper.dedupProximate
 import static com.hartwig.hmftools.esvee.assembly.IndelBuilder.calcIndelInferredUnclippedPositions;
 import static com.hartwig.hmftools.esvee.assembly.IndelBuilder.isWeakIndelBasedUnlinkedAssembly;
 import static com.hartwig.hmftools.esvee.assembly.types.SupportType.INDEL;
-import static com.hartwig.hmftools.esvee.assembly.types.SupportType.JUNCTION;
 import static com.hartwig.hmftools.esvee.common.IndelCoords.findIndelCoords;
+import static com.hartwig.hmftools.esvee.common.SvConstants.MIN_VARIANT_LENGTH;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -28,6 +29,7 @@ import java.util.List;
 
 import com.google.common.collect.Lists;
 import com.hartwig.hmftools.common.bam.CigarUtils;
+import com.hartwig.hmftools.common.genome.region.Orientation;
 import com.hartwig.hmftools.esvee.assembly.types.Junction;
 import com.hartwig.hmftools.esvee.assembly.types.JunctionAssembly;
 import com.hartwig.hmftools.esvee.assembly.read.Read;
@@ -158,10 +160,16 @@ public class IndelsTest
         // note the indel with 10D does not support the ref but this not currently checked
     }
 
+    protected static Junction createIndelJunction(final String chromosome, final int position, final Orientation orientation)
+    {
+        return new Junction(
+                chromosome, position, orientation, false, true, false, MIN_VARIANT_LENGTH, null);
+    }
+
     @Test
     public void testLongDeleteAssemblies()
     {
-        Junction posJunction = new Junction(CHR_1, 50, FORWARD, false, true, false);
+        Junction posJunction = createIndelJunction(CHR_1, 50, FORWARD);
 
         // first a basic assembly with all reads agreeing
         String readBases = REF_BASES_200.substring(11, 51) + REF_BASES_200.substring(100, 140);
@@ -187,7 +195,7 @@ public class IndelsTest
         assertEquals(0, assembly.mismatchReadCount());
 
         // test the other side
-        Junction negJunction = new Junction(CHR_1, 100, REVERSE, false, true, false);
+        Junction negJunction = createIndelJunction(CHR_1, 100, REVERSE);
 
         readBases = REF_BASES_200.substring(31, 51) + REF_BASES_200.substring(100, 160);
         read3 = createRead(READ_ID_GENERATOR.nextId(), 100, readBases, "20S60M");
@@ -200,6 +208,61 @@ public class IndelsTest
         assertEquals(1, assemblies.size());
         assembly = assemblies.get(0);
         assertEquals(4, assembly.supportCount());
+    }
+
+    @Test
+    public void testJunctionIndelTypeDetermination()
+    {
+        // a junction is marked as indel in prep but changed to soft-clip based on extension candidate reads
+        Junction posJunction = createIndelJunction(CHR_1, 50, FORWARD);
+
+        String readBases = REF_BASES_200.substring(11, 51) + REF_BASES_200.substring(100, 140);
+        Read read1 = createRead(READ_ID_GENERATOR.nextId(), 11, readBases, "40M49D40M");
+        calcIndelInferredUnclippedPositions(read1);
+
+        // other reads will soft-clip at the junctions
+        readBases = REF_BASES_200.substring(31, 51) + REF_BASES_200.substring(100, 140);
+        Read read2 = createRead(READ_ID_GENERATOR.nextId(), 31, readBases, "20M40S");
+        Read read3 = cloneRead(read2, READ_ID_GENERATOR.nextId());
+        readBases = REF_BASES_200.substring(30, 51) + REF_BASES_200.substring(100, 140); // diff frag coords
+        Read read4 = createRead(READ_ID_GENERATOR.nextId(), 30, readBases, "21M40S");
+
+        List<Read> reads = List.of(read1, read2, read3, read4);
+
+        JunctionAssembler junctionAssembler = new JunctionAssembler(posJunction);
+        List<JunctionAssembly> assemblies = junctionAssembler.processJunction(reads);
+        assertEquals(1, assemblies.size());
+        JunctionAssembly assembly = assemblies.get(0);
+        assertFalse(posJunction.indelBased());
+        assertEquals(4, assembly.supportCount());
+        assertEquals(0, assembly.mismatchReadCount());
+
+        // test indels being more dominant than soft-clips
+        posJunction = createIndelJunction(CHR_1, 50, FORWARD);
+
+        readBases = REF_BASES_200.substring(11, 51) + REF_BASES_200.substring(100, 140);
+        read1 = createRead(READ_ID_GENERATOR.nextId(), 11, readBases, "40M49D40M");
+        read2 = cloneRead(read1, READ_ID_GENERATOR.nextId());
+        readBases = REF_BASES_200.substring(10, 51) + REF_BASES_200.substring(100, 140);
+        read3 = createRead(READ_ID_GENERATOR.nextId(), 10, readBases, "41M49D40M");
+
+        calcIndelInferredUnclippedPositions(read1);
+        calcIndelInferredUnclippedPositions(read2);
+        calcIndelInferredUnclippedPositions(read3);
+
+        // other reads will soft-clip at the junctions
+        readBases = REF_BASES_200.substring(31, 51) + REF_BASES_200.substring(100, 140);
+        read4 = createRead(READ_ID_GENERATOR.nextId(), 31, readBases, "20M40S");
+
+        reads = List.of(read1, read2, read3, read4);
+
+        junctionAssembler = new JunctionAssembler(posJunction);
+        assemblies = junctionAssembler.processJunction(reads);
+        assertEquals(1, assemblies.size());
+        assemblies.get(0);
+        assertTrue(posJunction.indelBased());
+        assertEquals(4, assembly.supportCount());
+        assertEquals(0, assembly.mismatchReadCount());
     }
 
     @Test
@@ -229,7 +292,7 @@ public class IndelsTest
 
         SupportRead support = new SupportRead(indelRead1, INDEL, 50, indelRead1.basesLength(), 0);
         support.setReferenceMismatches(0);
-        assembly.addSupport(indelRead1, INDEL, 50, 50, 0);
+        assembly.addJunctionRead(indelRead1, INDEL, 50);
 
         // since 50% if the reads now
         assertTrue(isWeakIndelBasedUnlinkedAssembly(assembly));
@@ -243,7 +306,7 @@ public class IndelsTest
         assertFalse(isWeakIndelBasedUnlinkedAssembly(assembly));
 
         // 2 longest reads are indels
-        assembly.addSupport(indelRead1, INDEL, 50, 50, 0);
+        assembly.addJunctionRead(indelRead1, INDEL, 50);
 
         assertTrue(isWeakIndelBasedUnlinkedAssembly(assembly));
     }
@@ -251,8 +314,8 @@ public class IndelsTest
     @Test
     public void testIndelAssemblyDedup()
     {
-        Junction indelJunctionPos1 = new Junction(CHR_1, 130, FORWARD, false, true, false);
-        Junction indelJunctionNeg1 = new Junction(CHR_1, 131, REVERSE, false, true, false);
+        Junction indelJunctionPos1 = createIndelJunction(CHR_1, 130, FORWARD);
+        Junction indelJunctionNeg1 = createIndelJunction(CHR_1, 131, REVERSE);
 
         String leftRefBases = REF_BASES_400.substring(100, 130);
         String rightRefBases = REF_BASES_400.substring(131, 171);
@@ -280,8 +343,8 @@ public class IndelsTest
         indelAssemblyNeg1.setIndelCoords(indelRead.indelCoords());
 
         // create a pair where the pos assemblies don't match and the negatives do
-        Junction indelJunctionPos2 = new Junction(CHR_1, 140, FORWARD, false, true, false);
-        Junction indelJunctionNeg2 = new Junction(CHR_1, 141, REVERSE, false, true, false);
+        Junction indelJunctionPos2 = createIndelJunction(CHR_1, 140, FORWARD);
+        Junction indelJunctionNeg2 = createIndelJunction(CHR_1, 141, REVERSE);
 
         String insertBases2 = REF_BASES_400.substring(210, 255);
 

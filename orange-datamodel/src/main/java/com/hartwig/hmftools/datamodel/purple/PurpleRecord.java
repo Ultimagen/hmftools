@@ -16,13 +16,7 @@ public interface PurpleRecord
     PurpleFit fit();
 
     @NotNull
-    TumorStats tumorStats();
-
-    @NotNull
     PurpleCharacteristics characteristics();
-
-    @NotNull
-    ChromosomalRearrangements chromosomalRearrangements();
 
     @NotNull
     List<PurpleDriver> somaticDrivers();
@@ -31,56 +25,17 @@ public interface PurpleRecord
     List<PurpleDriver> germlineDrivers();
 
     @NotNull
-    List<PurpleVariant> allSomaticVariants();
-
-    @NotNull
-    List<PurpleVariant> reportableSomaticVariants();
-
-    @NotNull
-    List<PurpleVariant> additionalSuspectSomaticVariants();
+    List<PurpleVariant> somaticVariants();
 
     @Nullable
-    List<PurpleVariant> allGermlineVariants();
-
-    @Nullable
-    List<PurpleVariant> reportableGermlineVariants();
-
-    @Nullable
-    List<PurpleVariant> additionalSuspectGermlineVariants();
+    List<PurpleVariant> germlineVariants();
 
     @NotNull
-    List<PurpleCopyNumber> allSomaticCopyNumbers();
-
-    @NotNull
-    List<PurpleGeneCopyNumber> allSomaticGeneCopyNumbers();
-
-    @NotNull
-    List<PurpleGeneCopyNumber> suspectGeneCopyNumbersWithLOH();
-
-    @NotNull
-    List<PurpleGainDeletion> allSomaticGainsDels();
-
-    @NotNull
-    List<PurpleGainDeletion> reportableSomaticGainsDels();
-
-    @NotNull
-    List<PurpleGainDeletion> nearReportableSomaticGains();
-
-    @NotNull
-    List<PurpleGainDeletion> additionalSuspectSomaticGainsDels();
+    List<PurpleGainDeletion> somaticGainsDels();
 
     @Nullable
-    List<PurpleGermlineDeletion> allGermlineDeletions();
+    List<PurpleGainDeletion> germlineGainsDels();
 
-    @Nullable
-    List<PurpleGainDeletion> allGermlineFullDels();
-
-    @Nullable
-    List<PurpleGainDeletion> reportableGermlineFullDels();
-
-    @Nullable
-    List<PurpleLossOfHeterozygosity> allGermlineLossOfHeterozygosities();
-
-    @Nullable
-    List<PurpleLossOfHeterozygosity> reportableGermlineLossOfHeterozygosities();
+    @NotNull
+    List<PurpleChrArmCopyNumber> armCopyNumberAbberations();
 }

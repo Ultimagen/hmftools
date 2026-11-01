@@ -1,8 +1,8 @@
 package com.hartwig.hmftools.common.genome.refgenome;
 
+import com.hartwig.hmftools.common.genome.chromosome.Chromosome;
 import com.hartwig.hmftools.common.utils.config.ConfigBuilder;
 
-import org.apache.commons.cli.CommandLine;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -12,7 +12,6 @@ public enum RefGenomeVersion
     V37("37", true),
     V38("38", false);
 
-    @NotNull
     private final String mIdentifier;
     private final boolean mIs37;
 
@@ -23,8 +22,7 @@ public enum RefGenomeVersion
     private static final Logger LOGGER = LogManager.getLogger(RefGenomeVersion.class);
     private static final String GZIP_EXTENSION = ".gz";
 
-    @NotNull
-    public static RefGenomeVersion from(@NotNull final String version)
+    public static RefGenomeVersion from(final String version)
     {
         if(version.equals(V37.toString()) || version.equals("37") || version.equals("HG37"))
         {
@@ -43,7 +41,7 @@ public enum RefGenomeVersion
         return configBuilder.hasValue(REF_GENOME_VERSION) ? RefGenomeVersion.from(configBuilder.getValue(REF_GENOME_VERSION)) : V37;
     }
 
-    RefGenomeVersion(@NotNull final String identifier, final boolean is37)
+    RefGenomeVersion(final String identifier, final boolean is37)
     {
         mIdentifier = identifier;
         mIs37 = is37;
@@ -54,8 +52,12 @@ public enum RefGenomeVersion
 
     public String identifier() { return mIdentifier; }
 
-    @NotNull
-    public String versionedChromosome(@NotNull String chromosome)
+    public String versionedChromosome(final Chromosome chromosome)
+    {
+        return versionedChromosome(chromosome.toString());
+    }
+
+    public String versionedChromosome(final String chromosome)
     {
         if(this == V38)
         {

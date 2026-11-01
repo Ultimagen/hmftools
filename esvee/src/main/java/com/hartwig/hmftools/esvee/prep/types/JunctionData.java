@@ -2,6 +2,8 @@ package com.hartwig.hmftools.esvee.prep.types;
 
 import static java.lang.String.format;
 
+import static com.hartwig.hmftools.common.redux.BaseQualAdjustment.aboveLowBaseQual;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -9,6 +11,9 @@ import java.util.Map;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.hartwig.hmftools.common.genome.region.Orientation;
+import com.hartwig.hmftools.esvee.common.saga.SagaLocationMatch;
+
+import org.jetbrains.annotations.Nullable;
 
 public class JunctionData
 {
@@ -18,7 +23,7 @@ public class JunctionData
     private List<ReadGroup> mJunctionGroups; // with a read matching the junction
     private List<ReadGroup> mSupportingGroups;
     private List<ReadGroup> mExactSupportGroups;
-    private List<RemoteJunction> mRemoteJunctions;
+    private List<RemoteJunction> mRemoteJunctions; // currently only used for discordant groups
 
     private final Map<ReadType,List<PrepRead>> mReadTypeReads;
 
@@ -26,6 +31,13 @@ public class JunctionData
     private boolean mInternalIndel;
     private boolean mDiscordantGroup;
     private boolean mHotspot;
+    private int mDepth;
+
+    private JunctionData mLinkedIndel;
+    private int mMaxValidSoftClipLength;
+
+    @Nullable
+    private SagaLocationMatch mSagaMatch;
 
     public JunctionData(final int position, final Orientation orientation, final PrepRead read)
     {
@@ -47,6 +59,10 @@ public class JunctionData
         mHotspot = false;
         mInternalIndel = false;
         mDiscordantGroup = false;
+        mDepth = 0;
+        mLinkedIndel = null;
+        mMaxValidSoftClipLength = 0;
+        mSagaMatch = null;
     }
 
     public boolean isForward() { return Orient.isForward(); }
@@ -82,7 +98,7 @@ public class JunctionData
     public List<ReadGroup> supportingGroups() { return mSupportingGroups != null ? mSupportingGroups : Collections.emptyList(); }
     public List<ReadGroup> exactSupportGroups() { return mExactSupportGroups != null ? mExactSupportGroups : Collections.emptyList(); }
 
-    public Map<ReadType,List<PrepRead>> readTypeReads() { return mReadTypeReads; }
+    public Map<ReadType, List<PrepRead>> readTypeReads() { return mReadTypeReads; }
 
     public int junctionFragmentCount() { return mJunctionGroups != null ? mJunctionGroups.size() : 0; }
     public int supportingFragmentCount() { return mSupportingGroups != null ? mSupportingGroups.size() : 0; }
@@ -96,8 +112,15 @@ public class JunctionData
     public boolean internalIndel() { return mInternalIndel; }
     public void markInternalIndel() { mInternalIndel = true; }
 
+    public int maxValidSoftClipLength() { return mMaxValidSoftClipLength; }
+    public void setMaxValidSoftClipLength(int length) { mMaxValidSoftClipLength = length; }
+
     public boolean discordantGroup() { return mDiscordantGroup; }
     public void markDiscordantGroup() { mDiscordantGroup = true; }
+
+    public int depth() { return mDepth; }
+
+    public void setDepth(double depth) { mDepth = (int) depth; }
 
     public void addReadType(final PrepRead read, final ReadType type)
     {
@@ -107,7 +130,7 @@ public class JunctionData
         }
     }
 
-    public void setInitialRead(int minSoftClipHighQual)
+    public void setInitialRead()
     {
         if(mInternalIndel)
             return;
@@ -137,10 +160,13 @@ public class JunctionData
             int scRangeStart = useLeftSoftClip ? 0 : baseQualities.length - scLength;
             int scRangeEnd = useLeftSoftClip ? scLength : baseQualities.length;
 
+            if(scRangeEnd - scRangeStart + 1 < maxHighQualBases)
+                continue;
+
             int aboveQual = 0;
             for(int i = scRangeStart; i < scRangeEnd; ++i)
             {
-                if(baseQualities[i] >= minSoftClipHighQual)
+                if(aboveLowBaseQual(baseQualities[i]))
                     ++aboveQual;
             }
 
@@ -169,6 +195,16 @@ public class JunctionData
 
         mRemoteJunctions.add(remoteJunction);
     }
+
+    public JunctionData linkedIndel() { return mLinkedIndel; }
+
+    public void setLinkedIndel(final JunctionData junctionData) { mLinkedIndel = junctionData; }
+
+    public boolean hasLinkedIndel() { return mLinkedIndel != null; }
+
+    public SagaLocationMatch sagaMatch() { return mSagaMatch; }
+
+    public void setSagaMatch(final SagaLocationMatch match) { mSagaMatch = match; }
 
     public String toString()
     {

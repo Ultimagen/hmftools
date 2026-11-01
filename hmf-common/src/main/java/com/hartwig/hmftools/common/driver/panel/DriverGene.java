@@ -24,10 +24,14 @@ public interface DriverGene extends Comparable<DriverGene>
     boolean reportSplice();
 
     boolean reportDeletion();
+    boolean reportHetDeletion();
+    boolean reportLoh();
+    double hetDeletionThreshold();
 
     boolean reportDisruption();
 
     boolean reportAmplification();
+    double amplificationRatio();
 
     boolean reportSomaticHotspot();
 
@@ -46,9 +50,17 @@ public interface DriverGene extends Comparable<DriverGene>
     @NotNull
     DriverGeneGermlineReporting reportGermlineDisruption();
 
+    boolean reportGermlineAmplification();
+
     List<String> additionalReportedTranscripts();
 
     boolean reportPGX();
+
+    boolean reportHighExpression();
+
+    boolean reportLowExpression();
+
+    boolean reportNovelSpliceJunction();
 
     @Override
     default int compareTo(@NotNull final DriverGene o)

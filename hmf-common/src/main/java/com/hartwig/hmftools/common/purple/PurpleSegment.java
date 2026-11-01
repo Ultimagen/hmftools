@@ -14,10 +14,12 @@ import java.util.Map;
 import java.util.StringJoiner;
 
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.hartwig.hmftools.common.region.ChrBaseRegion;
 
 import org.jetbrains.annotations.Nullable;
 
-public final class PurpleSegment
+public final class PurpleSegment extends ChrBaseRegion
 {
     public final String Chromosome;
     public final int PosStart;
@@ -62,6 +64,7 @@ public final class PurpleSegment
             double minorAlleleCopyNumberDeviation, double majorAlleleCopyNumberDeviation, double deviationPenalty, double eventPenalty,
             double refNormalisedCopyNumber, double tumorCopyNumber, double tumorBAF, double fittedTumorCopyNumber, double fittedBAF)
     {
+        super(chromosome, posStart, posEnd);
         Chromosome = chromosome;
         PosStart = posStart;
         PosEnd = posEnd;
@@ -183,7 +186,7 @@ public final class PurpleSegment
         Files.write(new File(filename).toPath(), lines);
     }
 
-    private static String header()
+    public static String header()
     {
         return new StringJoiner(TSV_DELIM, "", "")
                 .add("chromosome")
@@ -216,7 +219,7 @@ public final class PurpleSegment
 
     private static final DecimalFormat FORMAT = new DecimalFormat("0.0000");
 
-    private String toTsv()
+    public String toTsv()
     {
         return new StringJoiner(TSV_DELIM)
                 .add(Chromosome)
@@ -257,4 +260,29 @@ public final class PurpleSegment
                 MinorAlleleCopyNumberDeviation, MajorAlleleCopyNumberDeviation, DeviationPenalty, EventPenalty,
                 RefNormalisedCopyNumber, TumorCopyNumber, TumorBAF, FittedTumorCopyNumber, FittedBAF);
     }
+
+    public static Map<String,List<PurpleSegment>> buildChromosomeMap(final List<PurpleSegment> segments)
+    {
+        Map<String,List<PurpleSegment>> chrCopyNumberMap = Maps.newHashMap();
+
+        String currentChr = "";
+        List<PurpleSegment> chrSegments = null;
+
+        for(PurpleSegment segment : segments)
+        {
+            String chromosome = segment.chromosome();
+
+            if(!currentChr.equals(chromosome))
+            {
+                currentChr = chromosome;
+                chrSegments = Lists.newArrayList();
+                chrCopyNumberMap.put(chromosome, chrSegments);
+            }
+
+            chrSegments.add(segment);
+        }
+
+        return chrCopyNumberMap;
+    }
+
 }

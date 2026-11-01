@@ -14,6 +14,8 @@ import com.hartwig.hmftools.common.genome.refgenome.RefGenomeFunctions;
 import com.hartwig.hmftools.common.genome.refgenome.RefGenomeVersion;
 import com.hartwig.hmftools.common.region.BasePosition;
 
+import org.jetbrains.annotations.Nullable;
+
 public final class HlaCommon
 {
     public static final String HLA_CHROMOSOME_V37 = "6";
@@ -21,12 +23,17 @@ public final class HlaCommon
 
     public static final List<String> HLA_GENES = Lists.newArrayList("HLA-A","HLA-B","HLA-C","HLA-DQA1","HLA-DQB1","HLA-DRB1");
 
+    public static final String MHC_CLASS_I = "MHC_CLASS_1";
+
     public static final List<GeneData> HLA_GENE_DATA = Lists.newArrayList();
 
     public static String hlaChromosome(final RefGenomeVersion version) { return version == V37 ? HLA_CHROMOSOME_V37 : HLA_CHROMOSOME_V38; }
 
-    public static void populateGeneData(final List<GeneData> geneDataList)
+    public static void populateGeneData(@Nullable final List<GeneData> geneDataList)
     {
+        if(geneDataList == null)
+            return;
+
         HLA_GENE_DATA.addAll(geneDataList.stream()
                 .filter(x -> HLA_GENES.contains(x.GeneName)).collect(Collectors.toList()));
     }

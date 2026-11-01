@@ -11,7 +11,7 @@ import static com.hartwig.hmftools.common.region.BaseRegion.positionWithin;
 import static com.hartwig.hmftools.isofox.IsofoxConfig.ISF_LOGGER;
 import static com.hartwig.hmftools.isofox.cohort.AnalysisType.SPLICE_SITE_PERCENTILES;
 import static com.hartwig.hmftools.isofox.cohort.CohortConfig.formSampleFilenames;
-import static com.hartwig.hmftools.isofox.results.ResultsWriter.DELIMITER;
+import static com.hartwig.hmftools.isofox.results.ResultsWriter.OLD_FILE_DELIM;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -139,7 +139,7 @@ public class SpliceSiteCache
             final List<String> lines = Files.readAllLines(filename);
 
             if(fieldsIndexMap.isEmpty())
-                fieldsIndexMap.putAll(createFieldsIndexMap(lines.get(0), DELIMITER));
+                fieldsIndexMap.putAll(createFieldsIndexMap(lines.get(0), OLD_FILE_DELIM));
 
             int chromosomeIndex = fieldsIndexMap.get("Chromosome");
             int splicePosIndex = fieldsIndexMap.get("SpliceSitePosition");
@@ -148,10 +148,10 @@ public class SpliceSiteCache
 
             lines.remove(0);
 
-            for(final String line : lines)
+            for(String line : lines)
             {
                 // GeneSetId,Chromosome,SpliceSitePosition,TraverseFrags,SupportFrags,SkipFrags
-                final String[] items = line.split(DELIMITER);
+                final String[] items = line.split(OLD_FILE_DELIM);
                 String chromosome = items[chromosomeIndex];
                 int splicePosition = Integer.parseInt(items[splicePosIndex]);
 
@@ -189,7 +189,7 @@ public class SpliceSiteCache
         if(geneDataList == null)
             return false;
 
-        for(final GeneData geneData : geneDataList)
+        for(GeneData geneData : geneDataList)
         {
             if(positionWithin(position, geneData.GeneStart, geneData.GeneEnd))
                 return true;
@@ -332,13 +332,13 @@ public class SpliceSiteCache
             // skip field names
             String line = fileReader.readLine();
 
-            if (line == null)
+            if(line == null)
             {
                 ISF_LOGGER.error("empty cohort splice site percentiles file({})", filename);
                 return;
             }
 
-            final Map<String,Integer> fieldsMap = createFieldsIndexMap(line, DELIMITER);
+            final Map<String,Integer> fieldsMap = createFieldsIndexMap(line, OLD_FILE_DELIM);
 
             int chromosomeIndex = fieldsMap.get("Chromosome");
             int positionIndex = fieldsMap.get("SplicePosition");
@@ -353,9 +353,9 @@ public class SpliceSiteCache
 
             while ((line = fileReader.readLine()) != null)
             {
-                String[] items = line.split(DELIMITER, -1);
+                String[] items = line.split(OLD_FILE_DELIM, -1);
 
-                if (items.length != expectedColCount)
+                if(items.length != expectedColCount)
                 {
                     ISF_LOGGER.error("invalid splice site percentile data length({}) vs expected({}): {}",
                             items.length, expectedColCount, line);

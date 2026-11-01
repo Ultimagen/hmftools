@@ -1,6 +1,5 @@
-package com.hartwig.hmftools.cider
+package com.hartwig.hmftools.cider.genes
 
-import com.hartwig.hmftools.cider.genes.GenomicLocation
 import com.hartwig.hmftools.common.codon.Codons
 import com.hartwig.hmftools.common.genome.region.Strand
 
@@ -23,8 +22,6 @@ data class VJAnchorTemplate
     val vj: VJ get() { return type.vj }
     val anchorAminoAcidSequence: String = Codons.aminoAcidFromBases(anchorSequence)
     val chromosome: String? get() { return geneLocation?.chromosome }
-    //val startPosition: Int get() { return geneLocation?.start() ?: -1 }
-    //val endPosition: Int get() { return geneLocation?.end() ?: -1 }
     val strand: Strand? get() { return geneLocation?.strand }
 }
 
@@ -42,18 +39,17 @@ data class VJAnchorGenomeLocation(val vjGeneType: VJGeneType, val genomeLocation
         return genomeLocation.baseLength()
     }
 
-    // get the reference position of the end of the anchor
+    // get the side of the anchor towards the CDR3 sequence
     // this is the end of the C codon for V and the start of the W / F codon for J
+    fun anchorBoundarySide() : Int
+    {
+        val rightSide = vjGeneType.vj == VJ.V && genomeLocation.strand == Strand.FORWARD ||
+                vjGeneType.vj == VJ.J && genomeLocation.strand == Strand.REVERSE
+        return if (rightSide) 1 else -1
+    }
+
     fun anchorBoundaryReferencePosition() : Int
     {
-        return if (vjGeneType.vj == VJ.V && genomeLocation.strand == Strand.FORWARD ||
-            vjGeneType.vj == VJ.J && genomeLocation.strand == Strand.REVERSE)
-            {
-                genomeLocation.posEnd
-            }
-            else
-            {
-                genomeLocation.posStart
-            }
+        return if (anchorBoundarySide() == 1) end else start
     }
 }

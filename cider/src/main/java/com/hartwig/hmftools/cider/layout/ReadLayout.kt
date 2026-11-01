@@ -9,10 +9,7 @@ import htsjdk.samtools.util.SequenceUtil.C
 import htsjdk.samtools.util.SequenceUtil.G
 import java.util.*
 import kotlin.collections.ArrayList
-import kotlin.collections.HashMap
 import kotlin.collections.HashSet
-
-//data class
 
 open class ReadLayout(var id: String = String())
 {
@@ -98,37 +95,9 @@ open class ReadLayout(var id: String = String())
         return highQualSequenceSupport.counts()
     }
 
-    fun getAllSequenceSupportAt(index: Int) : Map.Entry<Byte, Int>
-    {
-        return allSequenceSupport.support[index].likelyBaseSupport()
-    }
-
     fun getHighQualSequenceSupportAt(index: Int) : Map.Entry<Byte, Int>
     {
         return highQualSequenceSupport.support[index].likelyBaseSupport()
-    }
-
-    // get the reads covering the segment
-    fun getSegmentReads(start: Int, end: Int) : List<Read>
-    {
-        val segmentReads = ArrayList<Read>()
-
-        for (r in reads)
-        {
-            val readStart = getReadOffset(r)
-            val readEnd = readStart + r.readLength
-
-            if (readStart < end && start < readEnd)
-            {
-                segmentReads.add(r)
-            }
-        }
-        return segmentReads
-    }
-
-    fun getReadsAt(index: Int) : List<Read>
-    {
-        return getSegmentReads(index, index + 1)
     }
 
     class BaseSupport
@@ -138,21 +107,6 @@ open class ReadLayout(var id: String = String())
         private var cCount: Int = 0
         private var gCount: Int = 0
         private var tCount: Int = 0
-
-        fun generateCountMap() : Map<Byte, Int>
-        {
-            val countMap: MutableMap<Byte, Int> = HashMap()
-
-            for (base in arrayOf(A, C, G, T))
-            {
-                val baseCount = count(base)
-
-                if (baseCount > 0)
-                    countMap[base] = baseCount
-            }
-
-            return countMap
-        }
 
         fun count(base: Byte): Int
         {

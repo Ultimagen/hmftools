@@ -15,7 +15,7 @@ import static com.hartwig.hmftools.common.utils.file.FileDelimiters.ITEM_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileDelimiters.TSV_DELIM;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.closeBufferedWriter;
 import static com.hartwig.hmftools.common.utils.file.FileWriterUtils.createBufferedWriter;
-import static com.hartwig.hmftools.linx.CohortDataWriter.cohortDataFilename;
+import static com.hartwig.hmftools.linx.cohort.CohortDataWriter.cohortDataFilename;
 import static com.hartwig.hmftools.linx.LinxConfig.LNX_LOGGER;
 import static com.hartwig.hmftools.linx.fusion.FusionConstants.FUSION_MAX_CHAIN_LENGTH;
 import static com.hartwig.hmftools.linx.fusion.FusionConstants.FUSION_MAX_CHAIN_LINKS;
@@ -96,9 +96,9 @@ public class NeoEpitopeWriter
 
         boolean fusionAdded = false;
 
-        for(final BreakendGeneData gene1 : breakendGenes1)
+        for(BreakendGeneData gene1 : breakendGenes1)
         {
-            for(final BreakendGeneData gene2 : breakendGenes2)
+            for(BreakendGeneData gene2 : breakendGenes2)
             {
                 if(gene1.isUpstream() == gene2.isUpstream())
                     continue;
@@ -138,8 +138,8 @@ public class NeoEpitopeWriter
                 validDownTrans.stream().map(x -> x.TransData.TransName).forEach(x -> sjDown.add(x));
 
                 NeoEpitopeFusion fusion = new NeoEpitopeFusion(
-                        upGene.geneId(), upGene.geneName(), upGene.chromosome(), upGene.position(), upGene.orientation(), upGene.id(),
-                        downGene.geneId(), downGene.geneName(), downGene.chromosome(), downGene.position(), downGene.orientation(), downGene.id(),
+                        upGene.geneId(), upGene.geneName(), upGene.chromosome(), upGene.position(), upGene.orientation(), upGene.varId(),
+                        downGene.geneId(), downGene.geneName(), downGene.chromosome(), downGene.position(), downGene.orientation(), downGene.varId(),
                         avgJcn, svCopyNumber, upGene.insertSequence(), chainLength, new String[] { sjUp.toString(), sjDown.toString()});
 
                 writeData(fusion);
@@ -157,7 +157,7 @@ public class NeoEpitopeWriter
     {
         final List<BreakendTransData> validTrans = Lists.newArrayList();
 
-        for(final BreakendTransData transcript : gene.transcripts())
+        for(BreakendTransData transcript : gene.transcripts())
         {
             if(gene.isUpstream())
             {
@@ -274,11 +274,11 @@ public class NeoEpitopeWriter
 
     private boolean isDuplicate(final BreakendGeneData gene1, final BreakendGeneData gene2)
     {
-        for(final NeoEpitopeFusion fusion : mFusions)
+        for(NeoEpitopeFusion fusion : mFusions)
         {
             for(int fs = FS_UP; fs <= FS_DOWN; ++fs)
             {
-                if(fusion.SvIds[fs] == gene1.id() && fusion.SvIds[switchStream(fs)] == gene2.id()
+                if(fusion.SvIds[fs] == gene1.varId() && fusion.SvIds[switchStream(fs)] == gene2.varId()
                 && fusion.Chromosomes[fs].equals(gene1.chromosome()) && fusion.Chromosomes[switchStream(fs)].equals(gene2.chromosome())
                 && fusion.Positions[fs] == gene1.position() && fusion.Positions[switchStream(fs)] == gene2.position())
                 {
