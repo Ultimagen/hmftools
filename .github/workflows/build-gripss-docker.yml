@@ -1,12 +1,20 @@
-name: Build gridss Docker image
+name: Build gripss Docker image
+
+# Placeholder: GitHub lists a workflow only if its file is on the default branch.
+# The real workflow is on gripss-v2.4.0_ultima (upstream master has no gripss): pick that
+# branch (or a branch from it) when you run this workflow.
 
 on:
   workflow_dispatch:
 
+# The placeholder needs no access to the repository
+permissions: {}
+
 jobs:
-  dummy:
-    runs-on: ubuntu-20.04
+  placeholder:
+    runs-on: ubuntu-latest
 
     steps:
       - run: |
-          echo "I am just a dummy action"
+          echo "::error::Run this workflow on gripss-v2.4.0_ultima (or a branch from it), not on master."
+          exit 1
